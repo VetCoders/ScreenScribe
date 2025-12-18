@@ -10,11 +10,7 @@ from .detect import Detection, format_timestamp
 console = Console()
 
 
-def extract_screenshot(
-    video_path: Path,
-    timestamp: float,
-    output_path: Path
-) -> Path:
+def extract_screenshot(video_path: Path, timestamp: float, output_path: Path) -> Path:
     """
     Extract a single screenshot from video at timestamp.
 
@@ -28,12 +24,16 @@ def extract_screenshot(
     """
     cmd = [
         "ffmpeg",
-        "-ss", str(timestamp),
-        "-i", str(video_path),
-        "-vframes", "1",
-        "-q:v", "2",  # High quality JPEG
+        "-ss",
+        str(timestamp),
+        "-i",
+        str(video_path),
+        "-vframes",
+        "1",
+        "-q:v",
+        "2",  # High quality JPEG
         "-y",
-        str(output_path)
+        str(output_path),
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -45,10 +45,7 @@ def extract_screenshot(
 
 
 def extract_screenshots_for_detections(
-    video_path: Path,
-    detections: list[Detection],
-    output_dir: Path,
-    offset: float = 0.5
+    video_path: Path, detections: list[Detection], output_dir: Path, offset: float = 0.5
 ) -> list[tuple[Detection, Path]]:
     """
     Extract screenshots for all detections.
@@ -69,10 +66,7 @@ def extract_screenshots_for_detections(
 
     for i, detection in enumerate(detections, 1):
         # Calculate timestamp (start + offset, but not past end)
-        timestamp = min(
-            detection.segment.start + offset,
-            detection.segment.end
-        )
+        timestamp = min(detection.segment.start + offset, detection.segment.end)
 
         # Generate filename
         ts_str = format_timestamp(timestamp).replace(":", "-")
@@ -82,10 +76,7 @@ def extract_screenshots_for_detections(
         try:
             extract_screenshot(video_path, timestamp, output_path)
             results.append((detection, output_path))
-            console.print(
-                f"  [green]✓[/] {filename} "
-                f"[dim]({format_timestamp(timestamp)})[/]"
-            )
+            console.print(f"  [green]✓[/] {filename} " f"[dim]({format_timestamp(timestamp)})[/]")
         except RuntimeError as e:
             console.print(f"  [red]✗[/] Failed: {e}")
 
@@ -98,7 +89,7 @@ def extract_keyframes_around_detection(
     detection: Detection,
     output_dir: Path,
     num_frames: int = 3,
-    interval: float = 2.0
+    interval: float = 2.0,
 ) -> list[Path]:
     """
     Extract multiple keyframes around a detection for context.

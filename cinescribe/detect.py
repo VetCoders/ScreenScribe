@@ -110,16 +110,14 @@ UI_KEYWORDS = [
 @dataclass
 class Detection:
     """A detected issue or change request."""
+
     segment: Segment
     category: str  # "bug", "change", "ui"
     keywords_found: list[str]
     context: str  # Extended context from surrounding segments
 
 
-def detect_issues(
-    transcription: TranscriptionResult,
-    context_window: int = 2
-) -> list[Detection]:
+def detect_issues(transcription: TranscriptionResult, context_window: int = 2) -> list[Detection]:
     """
     Detect bugs and change requests in transcription.
 
@@ -167,12 +165,14 @@ def detect_issues(
             context_segments = segments[start_idx:end_idx]
             context = " ".join(s.text for s in context_segments)
 
-            detections.append(Detection(
-                segment=segment,
-                category=category,
-                keywords_found=list(set(found_keywords)),
-                context=context
-            ))
+            detections.append(
+                Detection(
+                    segment=segment,
+                    category=category,
+                    keywords_found=list(set(found_keywords)),
+                    context=context,
+                )
+            )
 
     # Merge consecutive detections
     merged = merge_consecutive_detections(detections)
@@ -188,8 +188,7 @@ def detect_issues(
 
 
 def merge_consecutive_detections(
-    detections: list[Detection],
-    max_gap: float = 5.0
+    detections: list[Detection], max_gap: float = 5.0
 ) -> list[Detection]:
     """
     Merge consecutive detections that are close in time.
@@ -217,13 +216,11 @@ def merge_consecutive_detections(
                     id=current.segment.id,
                     start=current.segment.start,
                     end=detection.segment.end,
-                    text=f"{current.segment.text} {detection.segment.text}"
+                    text=f"{current.segment.text} {detection.segment.text}",
                 ),
                 category=current.category,
-                keywords_found=list(set(
-                    current.keywords_found + detection.keywords_found
-                )),
-                context=f"{current.context} ... {detection.context}"
+                keywords_found=list(set(current.keywords_found + detection.keywords_found)),
+                context=f"{current.context} ... {detection.context}",
             )
         else:
             merged.append(current)

@@ -18,6 +18,7 @@ LOCAL_STT_URL = "http://localhost:8237/transcribe"
 @dataclass
 class Segment:
     """A transcription segment with timing info."""
+
     id: int
     start: float
     end: float
@@ -27,16 +28,14 @@ class Segment:
 @dataclass
 class TranscriptionResult:
     """Full transcription result with segments."""
+
     text: str
     segments: list[Segment]
     language: str
 
 
 def transcribe_audio(
-    audio_path: Path,
-    language: str = "pl",
-    use_local: bool = False,
-    api_key: str | None = None
+    audio_path: Path, language: str = "pl", use_local: bool = False, api_key: str | None = None
 ) -> TranscriptionResult:
     """
     Transcribe audio using LibraxisAI STT.
@@ -87,34 +86,27 @@ def transcribe_audio(
 
             # Long timeout for large files
             with httpx.Client(timeout=600.0) as client:
-                response = client.post(
-                    url,
-                    files=files,
-                    data=data,
-                    headers=headers
-                )
+                response = client.post(url, files=files, data=data, headers=headers)
 
     if response.status_code != 200:
-        raise RuntimeError(
-            f"STT API error ({response.status_code}): {response.text}"
-        )
+        raise RuntimeError(f"STT API error ({response.status_code}): {response.text}")
 
     result = response.json()
 
     # Parse segments
     segments = []
     for seg in result.get("segments", []):
-        segments.append(Segment(
-            id=seg.get("id", 0),
-            start=seg.get("start", 0.0),
-            end=seg.get("end", 0.0),
-            text=seg.get("text", "").strip()
-        ))
+        segments.append(
+            Segment(
+                id=seg.get("id", 0),
+                start=seg.get("start", 0.0),
+                end=seg.get("end", 0.0),
+                text=seg.get("text", "").strip(),
+            )
+        )
 
     console.print(f"[green]Transcription complete:[/] {len(segments)} segments")
 
     return TranscriptionResult(
-        text=result.get("text", ""),
-        segments=segments,
-        language=result.get("language", language)
+        text=result.get("text", ""), segments=segments, language=result.get("language", language)
     )

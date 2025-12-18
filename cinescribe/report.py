@@ -14,16 +14,16 @@ console = Console()
 
 
 def print_report(
-    detections: list[Detection],
-    screenshots: list[tuple[Detection, Path]],
-    video_path: Path
+    detections: list[Detection], screenshots: list[tuple[Detection, Path]], video_path: Path
 ) -> None:
     """Print a rich console report of findings."""
     console.print()
-    console.print(Panel(
-        f"[bold]Video Review Report[/]\n{video_path.name}",
-        subtitle=f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Video Review Report[/]\n{video_path.name}",
+            subtitle=f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        )
+    )
     console.print()
 
     # Summary table
@@ -45,20 +45,20 @@ def print_report(
 
     # Detailed findings
     for i, (detection, screenshot_path) in enumerate(screenshots, 1):
-        category_color = {
-            "bug": "red",
-            "change": "yellow",
-            "ui": "blue"
-        }.get(detection.category, "white")
+        category_color = {"bug": "red", "change": "yellow", "ui": "blue"}.get(
+            detection.category, "white"
+        )
 
-        console.print(Panel(
-            f"[bold]{detection.segment.text}[/]\n\n"
-            f"[dim]Context: {detection.context[:200]}...[/]\n\n"
-            f"[dim]Screenshot: {screenshot_path}[/]",
-            title=f"[{category_color}]#{i} {detection.category.upper()}[/] "
-                  f"@ {format_timestamp(detection.segment.start)}",
-            border_style=category_color
-        ))
+        console.print(
+            Panel(
+                f"[bold]{detection.segment.text}[/]\n\n"
+                f"[dim]Context: {detection.context[:200]}...[/]\n\n"
+                f"[dim]Screenshot: {screenshot_path}[/]",
+                title=f"[{category_color}]#{i} {detection.category.upper()}[/] "
+                f"@ {format_timestamp(detection.segment.start)}",
+                border_style=category_color,
+            )
+        )
         console.print()
 
 
@@ -66,7 +66,7 @@ def save_json_report(
     detections: list[Detection],
     screenshots: list[tuple[Detection, Path]],
     video_path: Path,
-    output_path: Path
+    output_path: Path,
 ) -> Path:
     """Save report as JSON for further processing."""
     report = {
@@ -78,21 +78,23 @@ def save_json_report(
             "changes": sum(1 for d in detections if d.category == "change"),
             "ui": sum(1 for d in detections if d.category == "ui"),
         },
-        "findings": []
+        "findings": [],
     }
 
     for detection, screenshot_path in screenshots:
-        report["findings"].append({
-            "id": detection.segment.id,
-            "category": detection.category,
-            "timestamp_start": detection.segment.start,
-            "timestamp_end": detection.segment.end,
-            "timestamp_formatted": format_timestamp(detection.segment.start),
-            "text": detection.segment.text,
-            "context": detection.context,
-            "keywords": detection.keywords_found,
-            "screenshot": str(screenshot_path)
-        })
+        report["findings"].append(
+            {
+                "id": detection.segment.id,
+                "category": detection.category,
+                "timestamp_start": detection.segment.start,
+                "timestamp_end": detection.segment.end,
+                "timestamp_formatted": format_timestamp(detection.segment.start),
+                "text": detection.segment.text,
+                "context": detection.context,
+                "keywords": detection.keywords_found,
+                "screenshot": str(screenshot_path),
+            }
+        )
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
@@ -105,7 +107,7 @@ def save_markdown_report(
     detections: list[Detection],
     screenshots: list[tuple[Detection, Path]],
     video_path: Path,
-    output_path: Path
+    output_path: Path,
 ) -> Path:
     """Save report as Markdown for documentation."""
     lines = [
@@ -128,29 +130,31 @@ def save_markdown_report(
     ]
 
     for i, (detection, screenshot_path) in enumerate(screenshots, 1):
-        emoji = {"bug": "🐛", "change": "🔄", "ui": "🎨"}.get(
-            detection.category, "📝"
+        emoji = {"bug": "🐛", "change": "🔄", "ui": "🎨"}.get(detection.category, "📝")
+        lines.extend(
+            [
+                f"### {emoji} #{i} {detection.category.upper()} @ {format_timestamp(detection.segment.start)}",
+                "",
+                f"> {detection.segment.text}",
+                "",
+                f"**Keywords:** {', '.join(detection.keywords_found)}",
+                "",
+                f"**Context:** {detection.context[:300]}...",
+                "",
+                f"![Screenshot]({screenshot_path.name})",
+                "",
+                "---",
+                "",
+            ]
         )
-        lines.extend([
-            f"### {emoji} #{i} {detection.category.upper()} @ {format_timestamp(detection.segment.start)}",
-            "",
-            f"> {detection.segment.text}",
-            "",
-            f"**Keywords:** {', '.join(detection.keywords_found)}",
-            "",
-            f"**Context:** {detection.context[:300]}...",
-            "",
-            f"![Screenshot]({screenshot_path.name})",
+
+    lines.extend(
+        [
             "",
             "---",
-            "",
-        ])
-
-    lines.extend([
-        "",
-        "---",
-        "*Created by M&K (c)2025 The LibraxisAI Team*",
-    ])
+            "*Created by M&K (c)2025 The LibraxisAI Team*",
+        ]
+    )
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -166,7 +170,7 @@ def save_enhanced_json_report(
     output_path: Path,
     semantic_analyses: list = None,
     vision_analyses: list = None,
-    executive_summary: str = ""
+    executive_summary: str = "",
 ) -> Path:
     """Save enhanced report with AI analyses as JSON."""
     report = {
@@ -180,7 +184,7 @@ def save_enhanced_json_report(
             "ui": sum(1 for d in detections if d.category == "ui"),
         },
         "severity_breakdown": {},
-        "findings": []
+        "findings": [],
     }
 
     # Build severity breakdown from semantic analyses
@@ -203,7 +207,7 @@ def save_enhanced_json_report(
             "text": detection.segment.text,
             "context": detection.context,
             "keywords": detection.keywords_found,
-            "screenshot": str(screenshot_path)
+            "screenshot": str(screenshot_path),
         }
 
         # Add semantic analysis if available
@@ -214,7 +218,7 @@ def save_enhanced_json_report(
                 "summary": sem.summary,
                 "action_items": sem.action_items,
                 "affected_components": sem.affected_components,
-                "suggested_fix": sem.suggested_fix
+                "suggested_fix": sem.suggested_fix,
             }
 
         # Add vision analysis if available
@@ -225,7 +229,7 @@ def save_enhanced_json_report(
                 "issues_detected": vis.issues_detected,
                 "accessibility_notes": vis.accessibility_notes,
                 "design_feedback": vis.design_feedback,
-                "technical_observations": vis.technical_observations
+                "technical_observations": vis.technical_observations,
             }
 
         report["findings"].append(finding)
@@ -245,7 +249,7 @@ def save_enhanced_markdown_report(
     semantic_analyses: list = None,
     vision_analyses: list = None,
     executive_summary: str = "",
-    visual_summary: str = ""
+    visual_summary: str = "",
 ) -> Path:
     """Save enhanced report with AI analyses as Markdown."""
     lines = [
@@ -259,37 +263,45 @@ def save_enhanced_markdown_report(
 
     # Executive Summary
     if executive_summary:
-        lines.extend([
-            "## Executive Summary",
-            "",
-            executive_summary,
-            "",
-        ])
+        lines.extend(
+            [
+                "## Executive Summary",
+                "",
+                executive_summary,
+                "",
+            ]
+        )
 
     # Summary table
-    lines.extend([
-        "## Summary",
-        "",
-        "| Category | Count |",
-        "|----------|-------|",
-        f"| Bugs | {sum(1 for d in detections if d.category == 'bug')} |",
-        f"| Change Requests | {sum(1 for d in detections if d.category == 'change')} |",
-        f"| UI Issues | {sum(1 for d in detections if d.category == 'ui')} |",
-        f"| **Total** | **{len(detections)}** |",
-        "",
-    ])
+    lines.extend(
+        [
+            "## Summary",
+            "",
+            "| Category | Count |",
+            "|----------|-------|",
+            f"| Bugs | {sum(1 for d in detections if d.category == 'bug')} |",
+            f"| Change Requests | {sum(1 for d in detections if d.category == 'change')} |",
+            f"| UI Issues | {sum(1 for d in detections if d.category == 'ui')} |",
+            f"| **Total** | **{len(detections)}** |",
+            "",
+        ]
+    )
 
     # Severity breakdown
     if semantic_analyses:
-        lines.extend([
-            "### By Severity",
-            "",
-            "| Severity | Count |",
-            "|----------|-------|",
-        ])
+        lines.extend(
+            [
+                "### By Severity",
+                "",
+                "| Severity | Count |",
+                "|----------|-------|",
+            ]
+        )
         for severity in ["critical", "high", "medium", "low"]:
             count = sum(1 for a in semantic_analyses if a.severity == severity)
-            emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(severity, "⚪")
+            emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(
+                severity, "⚪"
+            )
             lines.append(f"| {emoji} {severity.capitalize()} | {count} |")
         lines.append("")
 
@@ -310,26 +322,32 @@ def save_enhanced_markdown_report(
         severity_badge = ""
         if detection.segment.id in semantic_by_id:
             sem = semantic_by_id[detection.segment.id]
-            sev_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(sem.severity, "")
+            sev_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(
+                sem.severity, ""
+            )
             severity_badge = f" {sev_emoji} [{sem.severity.upper()}]"
 
-        lines.extend([
-            f"### {emoji} #{i} {detection.category.upper()}{severity_badge} @ {format_timestamp(detection.segment.start)}",
-            "",
-            f"> {detection.segment.text}",
-            "",
-        ])
+        lines.extend(
+            [
+                f"### {emoji} #{i} {detection.category.upper()}{severity_badge} @ {format_timestamp(detection.segment.start)}",
+                "",
+                f"> {detection.segment.text}",
+                "",
+            ]
+        )
 
         # Semantic analysis
         if detection.segment.id in semantic_by_id:
             sem = semantic_by_id[detection.segment.id]
-            lines.extend([
-                "**AI Analysis:**",
-                f"- **Summary:** {sem.summary}",
-                f"- **Affected:** {', '.join(sem.affected_components) if sem.affected_components else 'N/A'}",
-                f"- **Fix:** {sem.suggested_fix}",
-                "",
-            ])
+            lines.extend(
+                [
+                    "**AI Analysis:**",
+                    f"- **Summary:** {sem.summary}",
+                    f"- **Affected:** {', '.join(sem.affected_components) if sem.affected_components else 'N/A'}",
+                    f"- **Fix:** {sem.suggested_fix}",
+                    "",
+                ]
+            )
             if sem.action_items:
                 lines.append("**Action Items:**")
                 for item in sem.action_items:
@@ -340,9 +358,11 @@ def save_enhanced_markdown_report(
         if str(screenshot_path) in vision_by_path:
             vis = vision_by_path[str(screenshot_path)]
             if vis.issues_detected:
-                lines.extend([
-                    "**Visual Issues:**",
-                ])
+                lines.extend(
+                    [
+                        "**Visual Issues:**",
+                    ]
+                )
                 for issue in vis.issues_detected:
                     lines.append(f"- {issue}")
                 lines.append("")
@@ -350,18 +370,22 @@ def save_enhanced_markdown_report(
                 lines.append(f"**Design Feedback:** {vis.design_feedback}")
                 lines.append("")
 
-        lines.extend([
-            f"![Screenshot]({screenshot_path.name})",
+        lines.extend(
+            [
+                f"![Screenshot]({screenshot_path.name})",
+                "",
+                "---",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
             "",
             "---",
-            "",
-        ])
-
-    lines.extend([
-        "",
-        "---",
-        "*Created by M&K (c)2025 The LibraxisAI Team*",
-    ])
+            "*Created by M&K (c)2025 The LibraxisAI Team*",
+        ]
+    )
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))

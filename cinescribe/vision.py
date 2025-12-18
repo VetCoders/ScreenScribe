@@ -17,6 +17,7 @@ console = Console()
 @dataclass
 class VisionAnalysis:
     """Result of vision analysis on a screenshot."""
+
     screenshot_path: Path
     timestamp: float
     ui_elements: list[str]
@@ -50,9 +51,7 @@ def encode_image_base64(image_path: Path) -> str:
 
 
 def analyze_screenshot(
-    screenshot_path: Path,
-    detection: Detection,
-    config: CinescribeConfig
+    screenshot_path: Path, detection: Detection, config: CinescribeConfig
 ) -> VisionAnalysis | None:
     """
     Analyze a screenshot using Vision model.
@@ -85,15 +84,16 @@ def analyze_screenshot(
         ".webp": "image/webp",
     }.get(suffix, "image/jpeg")
 
-    prompt = VISION_PROMPT.format(
-        transcript_context=detection.segment.text[:200]
-    )
+    prompt = VISION_PROMPT.format(transcript_context=detection.segment.text[:200])
 
     try:
         with httpx.Client(timeout=120.0) as client:
             response = client.post(
                 config.vision_endpoint,
-                headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {config.api_key}",
+                    "Content-Type": "application/json",
+                },
                 json={
                     "model": config.vision_model,
                     "input": [
@@ -104,16 +104,18 @@ def analyze_screenshot(
                                 {
                                     "type": "input_image",
                                     "image_url": f"data:{media_type};base64,{image_base64}",
-                                    "detail": "high"
-                                }
-                            ]
+                                    "detail": "high",
+                                },
+                            ],
                         }
                     ],
-                }
+                },
             )
 
         if response.status_code != 200:
-            console.print(f"[yellow]Vision API error: {response.status_code} - {response.text[:300]}[/]")
+            console.print(
+                f"[yellow]Vision API error: {response.status_code} - {response.text[:300]}[/]"
+            )
             return None
 
         result = response.json()
@@ -132,6 +134,7 @@ def analyze_screenshot(
 
         # Parse JSON from response
         import json
+
         # Handle potential markdown code blocks
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0]
@@ -147,7 +150,7 @@ def analyze_screenshot(
             issues_detected=data.get("issues_detected", []),
             accessibility_notes=data.get("accessibility_notes", []),
             design_feedback=data.get("design_feedback", ""),
-            technical_observations=data.get("technical_observations", "")
+            technical_observations=data.get("technical_observations", ""),
         )
 
     except Exception as e:
@@ -156,8 +159,7 @@ def analyze_screenshot(
 
 
 def analyze_screenshots(
-    screenshots: list[tuple[Detection, Path]],
-    config: CinescribeConfig
+    screenshots: list[tuple[Detection, Path]], config: CinescribeConfig
 ) -> list[VisionAnalysis]:
     """
     Analyze all screenshots using Vision model.
@@ -202,10 +204,7 @@ def analyze_screenshots(
     return results
 
 
-def generate_visual_summary(
-    analyses: list[VisionAnalysis],
-    config: CinescribeConfig
-) -> str:
+def generate_visual_summary(analyses: list[VisionAnalysis], config: CinescribeConfig) -> str:
     """
     Generate summary of visual issues found.
 
@@ -226,6 +225,7 @@ def generate_visual_summary(
 
     # Count unique issues
     from collections import Counter
+
     issue_counts = Counter(all_issues)
 
     # Format summary

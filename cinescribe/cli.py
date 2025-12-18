@@ -37,56 +37,59 @@ def review(
             help="Path to video file (MOV, MP4, etc.)",
             exists=True,
             dir_okay=False,
-        )
+        ),
     ],
     output: Annotated[
         Path,
         typer.Option(
-            "--output", "-o",
+            "--output",
+            "-o",
             help="Output directory for screenshots and reports",
-        )
+        ),
     ] = None,
     language: Annotated[
         str,
         typer.Option(
-            "--lang", "-l",
+            "--lang",
+            "-l",
             help="Language code for transcription",
-        )
+        ),
     ] = "pl",
     local: Annotated[
         bool,
         typer.Option(
             "--local",
             help="Use local STT server instead of LibraxisAI cloud",
-        )
+        ),
     ] = False,
     semantic: Annotated[
         bool,
         typer.Option(
             "--semantic/--no-semantic",
             help="Enable/disable semantic LLM analysis",
-        )
+        ),
     ] = True,
     vision: Annotated[
         bool,
         typer.Option(
             "--vision/--no-vision",
             help="Enable/disable vision analysis of screenshots",
-        )
+        ),
     ] = True,
     json_report: Annotated[
         bool,
         typer.Option(
             "--json/--no-json",
             help="Save JSON report",
-        )
+        ),
     ] = True,
     markdown_report: Annotated[
         bool,
         typer.Option(
-            "--markdown/--no-markdown", "--md",
+            "--markdown/--no-markdown",
+            "--md",
             help="Save Markdown report",
-        )
+        ),
     ] = True,
 ) -> None:
     """
@@ -95,11 +98,13 @@ def review(
     Extracts audio, transcribes it, detects issues mentioned in commentary,
     captures screenshots, and optionally analyzes with AI models.
     """
-    console.print(Panel(
-        f"[bold cyan]Cinescribe v{__version__}[/]\n"
-        "[dim]Video review automation powered by LibraxisAI[/]",
-        border_style="cyan"
-    ))
+    console.print(
+        Panel(
+            f"[bold cyan]Cinescribe v{__version__}[/]\n"
+            "[dim]Video review automation powered by LibraxisAI[/]",
+            border_style="cyan",
+        )
+    )
 
     # Load configuration
     config = CinescribeConfig.load()
@@ -114,7 +119,9 @@ def review(
 
     console.print(f"\n[blue]Video:[/] {video}")
     console.print(f"[blue]Output:[/] {output}")
-    console.print(f"[blue]AI Analysis:[/] Semantic={'✓' if semantic else '✗'} Vision={'✓' if vision else '✗'}")
+    console.print(
+        f"[blue]AI Analysis:[/] Semantic={'✓' if semantic else '✗'} Vision={'✓' if vision else '✗'}"
+    )
 
     # Get video duration
     try:
@@ -131,10 +138,7 @@ def review(
     # Step 2: Transcribe
     console.rule("[bold]Step 2: Transcription[/]")
     transcription = transcribe_audio(
-        audio_path,
-        language=language,
-        use_local=local,
-        api_key=config.api_key
+        audio_path, language=language, use_local=local, api_key=config.api_key
     )
 
     # Save full transcript
@@ -155,11 +159,7 @@ def review(
     # Step 4: Extract screenshots
     console.rule("[bold]Step 4: Screenshot Extraction[/]")
     screenshots_dir = output / "screenshots"
-    screenshots = extract_screenshots_for_detections(
-        video,
-        detections,
-        screenshots_dir
-    )
+    screenshots = extract_screenshots_for_detections(video, detections, screenshots_dir)
     console.print()
 
     # Step 5: Semantic Analysis (LLM)
@@ -193,7 +193,7 @@ def review(
             output / "report.json",
             semantic_analyses=semantic_analyses,
             vision_analyses=vision_analyses,
-            executive_summary=executive_summary
+            executive_summary=executive_summary,
         )
 
     if markdown_report:
@@ -205,18 +205,16 @@ def review(
             semantic_analyses=semantic_analyses,
             vision_analyses=vision_analyses,
             executive_summary=executive_summary,
-            visual_summary=visual_summary
+            visual_summary=visual_summary,
         )
 
     console.print()
 
     # Print executive summary if available
     if executive_summary:
-        console.print(Panel(
-            executive_summary,
-            title="[bold]Executive Summary[/]",
-            border_style="green"
-        ))
+        console.print(
+            Panel(executive_summary, title="[bold]Executive Summary[/]", border_style="green")
+        )
         console.print()
 
     # Print summary to console
@@ -233,28 +231,30 @@ def transcribe(
             help="Path to video file",
             exists=True,
             dir_okay=False,
-        )
+        ),
     ],
     output: Annotated[
         Path,
         typer.Option(
-            "--output", "-o",
+            "--output",
+            "-o",
             help="Output file for transcript",
-        )
+        ),
     ] = None,
     language: Annotated[
         str,
         typer.Option(
-            "--lang", "-l",
+            "--lang",
+            "-l",
             help="Language code for transcription",
-        )
+        ),
     ] = "pl",
     local: Annotated[
         bool,
         typer.Option(
             "--local",
             help="Use local STT server",
-        )
+        ),
     ] = False,
 ) -> None:
     """
@@ -269,10 +269,7 @@ def transcribe(
 
     # Transcribe
     result = transcribe_audio(
-        audio_path,
-        language=language,
-        use_local=local,
-        api_key=config.api_key
+        audio_path, language=language, use_local=local, api_key=config.api_key
     )
 
     # Output
@@ -292,21 +289,21 @@ def config(
         typer.Option(
             "--show",
             help="Show current configuration",
-        )
+        ),
     ] = False,
     init: Annotated[
         bool,
         typer.Option(
             "--init",
             help="Create default config file",
-        )
+        ),
     ] = False,
     set_key: Annotated[
         str,
         typer.Option(
             "--set-key",
             help="Set API key in config",
-        )
+        ),
     ] = None,
 ) -> None:
     """
@@ -331,7 +328,9 @@ def config(
     if show:
         console.print("[bold]Current Configuration:[/]\n")
         console.print(f"API Base: {cfg.api_base}")
-        console.print(f"API Key: {'*' * 20 + cfg.api_key[-8:] if cfg.api_key else '[red]NOT SET[/]'}")
+        console.print(
+            f"API Key: {'*' * 20 + cfg.api_key[-8:] if cfg.api_key else '[red]NOT SET[/]'}"
+        )
         console.print(f"STT Model: {cfg.stt_model}")
         console.print(f"LLM Model: {cfg.llm_model}")
         console.print(f"Vision Model: {cfg.vision_model}")

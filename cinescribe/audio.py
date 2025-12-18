@@ -32,21 +32,22 @@ def extract_audio(video_path: Path, output_path: Path | None = None) -> Path:
 
     cmd = [
         "ffmpeg",
-        "-i", str(video_path),
+        "-i",
+        str(video_path),
         "-vn",  # No video
-        "-acodec", "libmp3lame",
-        "-q:a", "2",  # High quality
-        "-ar", "16000",  # 16kHz for speech recognition
-        "-ac", "1",  # Mono
+        "-acodec",
+        "libmp3lame",
+        "-q:a",
+        "2",  # High quality
+        "-ar",
+        "16000",  # 16kHz for speech recognition
+        "-ac",
+        "1",  # Mono
         "-y",  # Overwrite
-        str(output_path)
+        str(output_path),
     ]
 
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True
-    )
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg failed: {result.stderr}")
@@ -59,10 +60,13 @@ def get_video_duration(video_path: Path) -> float:
     """Get video duration in seconds using FFprobe."""
     cmd = [
         "ffprobe",
-        "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
-        str(video_path)
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(video_path),
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)

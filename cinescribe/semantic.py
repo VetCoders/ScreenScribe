@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import httpx
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .config import CinescribeConfig
 from .detect import Detection
@@ -15,6 +14,7 @@ console = Console()
 @dataclass
 class SemanticAnalysis:
     """Result of semantic analysis."""
+
     detection_id: int
     category: str
     severity: str  # "critical", "high", "medium", "low"
@@ -49,8 +49,7 @@ Odpowiadaj tylko JSON, bez dodatkowego tekstu."""
 
 
 def analyze_detection_semantically(
-    detection: Detection,
-    config: CinescribeConfig
+    detection: Detection, config: CinescribeConfig
 ) -> SemanticAnalysis | None:
     """
     Analyze a single detection using LLM.
@@ -66,29 +65,29 @@ def analyze_detection_semantically(
         return None
 
     prompt = ANALYSIS_PROMPT.format(
-        text=detection.segment.text,
-        context=detection.context[:500],
-        category=detection.category
+        text=detection.segment.text, context=detection.context[:500], category=detection.category
     )
 
     try:
         with httpx.Client(timeout=60.0) as client:
             response = client.post(
                 config.llm_endpoint,
-                headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {config.api_key}",
+                    "Content-Type": "application/json",
+                },
                 json={
                     "model": config.llm_model,
                     "input": [
-                        {
-                            "role": "user",
-                            "content": [{"type": "input_text", "text": prompt}]
-                        }
+                        {"role": "user", "content": [{"type": "input_text", "text": prompt}]}
                     ],
-                }
+                },
             )
 
         if response.status_code != 200:
-            console.print(f"[yellow]LLM API error: {response.status_code} - {response.text[:200]}[/]")
+            console.print(
+                f"[yellow]LLM API error: {response.status_code} - {response.text[:200]}[/]"
+            )
             return None
 
         result = response.json()
@@ -117,11 +116,14 @@ def analyze_detection_semantically(
                 content += item.get("text", "")
 
         if not content:
-            console.print(f"[yellow]No content found in response. Output types: {[i.get('type') for i in result.get('output', [])]}[/]")
+            console.print(
+                f"[yellow]No content found in response. Output types: {[i.get('type') for i in result.get('output', [])]}[/]"
+            )
             return None
 
         # Parse JSON from response
         import json
+
         # Handle potential markdown code blocks
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0]
@@ -137,7 +139,7 @@ def analyze_detection_semantically(
             summary=data.get("summary", ""),
             action_items=data.get("action_items", []),
             affected_components=data.get("affected_components", []),
-            suggested_fix=data.get("suggested_fix", "")
+            suggested_fix=data.get("suggested_fix", ""),
         )
 
     except Exception as e:
@@ -146,8 +148,7 @@ def analyze_detection_semantically(
 
 
 def analyze_detections_semantically(
-    detections: list[Detection],
-    config: CinescribeConfig
+    detections: list[Detection], config: CinescribeConfig
 ) -> list[SemanticAnalysis]:
     """
     Analyze all detections using LLM.
@@ -171,13 +172,15 @@ def analyze_detections_semantically(
     console.print(f"[blue]Running semantic analysis on {len(detections)} detections...[/]")
 
     for i, detection in enumerate(detections, 1):
-        console.print(f"[dim]  [{i}/{len(detections)}] Analyzing {detection.category} @ {detection.segment.start:.1f}s...[/]")
+        console.print(
+            f"[dim]  [{i}/{len(detections)}] Analyzing {detection.category} @ {detection.segment.start:.1f}s...[/]"
+        )
         analysis = analyze_detection_semantically(detection, config)
         if analysis:
             results.append(analysis)
             console.print(f"[green]  ✓[/] [{analysis.severity}]")
         else:
-            console.print(f"[yellow]  ✗[/] failed")
+            console.print("[yellow]  ✗[/] failed")
 
     # Summary by severity
     critical = sum(1 for a in results if a.severity == "critical")
@@ -196,10 +199,7 @@ def analyze_detections_semantically(
     return results
 
 
-def generate_executive_summary(
-    analyses: list[SemanticAnalysis],
-    config: CinescribeConfig
-) -> str:
+def generate_executive_summary(analyses: list[SemanticAnalysis], config: CinescribeConfig) -> str:
     """
     Generate executive summary of all findings.
 
@@ -236,16 +236,16 @@ Odpowiadaj po polsku, zwięźle i konkretnie."""
         with httpx.Client(timeout=60.0) as client:
             response = client.post(
                 config.llm_endpoint,
-                headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {config.api_key}",
+                    "Content-Type": "application/json",
+                },
                 json={
                     "model": config.llm_model,
                     "input": [
-                        {
-                            "role": "user",
-                            "content": [{"type": "input_text", "text": prompt}]
-                        }
+                        {"role": "user", "content": [{"type": "input_text", "text": prompt}]}
                     ],
-                }
+                },
             )
 
         if response.status_code == 200:
