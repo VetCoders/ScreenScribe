@@ -50,7 +50,7 @@ def transcribe_audio(
         language: Language code (default: pl)
         use_local: Use local STT server instead of cloud
         api_key: LibraxisAI API key
-        stt_endpoint: Custom STT endpoint URL (uses default LibraxisAI if not provided)
+        stt_endpoint: Custom STT endpoint URL (overrides default)
 
     Returns:
         TranscriptionResult with full text and segments
@@ -65,11 +65,13 @@ def transcribe_audio(
             "Set it via config or use --local flag for local STT."
         )
 
-    # Determine endpoint
+    # Determine URL: local > custom endpoint > default cloud
     if use_local:
         url = LOCAL_STT_URL
+    elif stt_endpoint:
+        url = stt_endpoint
     else:
-        url = stt_endpoint if stt_endpoint else DEFAULT_STT_URL
+        url = DEFAULT_STT_URL
 
     console.print(f"[blue]Transcribing:[/] {audio_path.name}")
     console.print(f"[dim]Using {'local' if use_local else 'cloud'} STT[/]")

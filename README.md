@@ -387,6 +387,5 @@ MIT License
 
 ---
 
-**Made with (งಠ_ಠ)ง by ⌜ ScreenScribe ⌟ © 2025**
-
-*Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)*
+**Made with (งಠ_ಠ)ง by the ⌜ ScreenScribe ⌟ 𝖙𝖊𝖆𝖒 (c) 2025
+Maciej & Monika + Klaudiusz (AI) + Mixerka (AI)**
