@@ -1,4 +1,4 @@
-"""CLI interface for Cinescribe video review automation."""
+"""CLI interface for ScreenScribe video review automation."""
 
 from pathlib import Path
 from typing import Annotated
@@ -9,7 +9,7 @@ from rich.panel import Panel
 
 from . import __version__
 from .audio import extract_audio, get_video_duration
-from .config import CinescribeConfig
+from .config import ScreenScribeConfig
 from .detect import detect_issues, format_timestamp
 from .report import (
     print_report,
@@ -23,7 +23,7 @@ from .vision import analyze_screenshots, generate_visual_summary
 
 console = Console()
 app = typer.Typer(
-    name="cinescribe",
+    name="screenscribe",
     help="Video review automation - extract bugs and changes from screencast commentary.",
     add_completion=False,
 )
@@ -100,14 +100,14 @@ def review(
     """
     console.print(
         Panel(
-            f"[bold cyan]Cinescribe v{__version__}[/]\n"
+            f"[bold cyan]ScreenScribe v{__version__}[/]\n"
             "[dim]Video review automation powered by LibraxisAI[/]",
             border_style="cyan",
         )
     )
 
     # Load configuration
-    config = CinescribeConfig.load()
+    config = ScreenScribeConfig.load()
     config.language = language
     config.use_semantic_analysis = semantic
     config.use_vision_analysis = vision
@@ -262,7 +262,7 @@ def transcribe(
 
     Useful for getting just the transcript text.
     """
-    config = CinescribeConfig.load()
+    config = ScreenScribeConfig.load()
 
     # Extract audio
     audio_path = extract_audio(video)
@@ -307,11 +307,11 @@ def config(
     ] = None,
 ) -> None:
     """
-    Manage Cinescribe configuration.
+    Manage ScreenScribe configuration.
 
-    Config is stored in ~/.config/cinescribe/config.env
+    Config is stored in ~/.config/screenscribe/config.env
     """
-    cfg = CinescribeConfig.load()
+    cfg = ScreenScribeConfig.load()
 
     if set_key:
         cfg.api_key = set_key
@@ -346,7 +346,7 @@ def config(
 @app.command()
 def version() -> None:
     """Show version information."""
-    console.print(f"[bold]Cinescribe v{__version__}[/]")
+    console.print(f"[bold]ScreenScribe v{__version__}[/]")
     console.print("[dim]Video review automation powered by LibraxisAI[/]")
     console.print("[dim]Created by M&K (c)2025 The LibraxisAI Team[/]")
 

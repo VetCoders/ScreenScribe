@@ -26,7 +26,7 @@ def extract_audio(video_path: Path, output_path: Path | None = None) -> Path:
     if output_path is None:
         # Create temp file with .mp3 extension
         temp_dir = Path(tempfile.gettempdir())
-        output_path = temp_dir / f"cinescribe_{video_path.stem}.mp3"
+        output_path = temp_dir / f"screenscribe_{video_path.stem}.mp3"
 
     console.print(f"[blue]Extracting audio from:[/] {video_path.name}")
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import httpx
 from rich.console import Console
 
-from .config import CinescribeConfig
+from .config import ScreenScribeConfig
 from .detect import Detection
 
 console = Console()
@@ -49,14 +49,14 @@ Odpowiadaj tylko JSON, bez dodatkowego tekstu."""
 
 
 def analyze_detection_semantically(
-    detection: Detection, config: CinescribeConfig
+    detection: Detection, config: ScreenScribeConfig
 ) -> SemanticAnalysis | None:
     """
     Analyze a single detection using LLM.
 
     Args:
         detection: The detection to analyze
-        config: Cinescribe configuration
+        config: ScreenScribe configuration
 
     Returns:
         SemanticAnalysis result or None if failed
@@ -148,14 +148,14 @@ def analyze_detection_semantically(
 
 
 def analyze_detections_semantically(
-    detections: list[Detection], config: CinescribeConfig
+    detections: list[Detection], config: ScreenScribeConfig
 ) -> list[SemanticAnalysis]:
     """
     Analyze all detections using LLM.
 
     Args:
         detections: List of detections
-        config: Cinescribe configuration
+        config: ScreenScribe configuration
 
     Returns:
         List of semantic analyses
@@ -199,13 +199,13 @@ def analyze_detections_semantically(
     return results
 
 
-def generate_executive_summary(analyses: list[SemanticAnalysis], config: CinescribeConfig) -> str:
+def generate_executive_summary(analyses: list[SemanticAnalysis], config: ScreenScribeConfig) -> str:
     """
     Generate executive summary of all findings.
 
     Args:
         analyses: List of semantic analyses
-        config: Cinescribe configuration
+        config: ScreenScribe configuration
 
     Returns:
         Executive summary text

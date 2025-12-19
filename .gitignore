@@ -25,21 +25,25 @@ wheels/
 venv/
 ENV/
 
+# Python cache
+.mypy_cache/
+.ruff_cache/
+
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# OS
-.DS_Store
+# macOS
+**/.DS_Store
 Thumbs.db
 
 # Environment (secrets)
 .env
 !.env.example
 
-# Project specific
+# Project specific - media files
 *.log
 *.mp3
 *.wav
@@ -48,3 +52,20 @@ Thumbs.db
 
 # Test outputs
 *_review/
+
+# Tools cache
+.loctree/
+.claude/
+.gemini/
+
+# Temp/patch files
+*.new
+*.patch
+*.diff
+
+# Root Markdown policy: ignore root .md files except core docs
+/*.md
+!/README.md
+!/USAGE.md
+!/CHANGELOG.md
+!/CONTRIBUTING.md

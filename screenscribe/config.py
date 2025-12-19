@@ -18,15 +18,15 @@ DEFAULT_VISION_MODEL = "ai-suggestions"  # Same model, API router handles vision
 # Config file locations (checked in order)
 CONFIG_PATHS = [
     Path.cwd() / ".env",  # Local project .env first
-    Path.home() / ".config" / "cinescribe" / "config.env",
-    Path.home() / ".cinescribe.env",
-    Path("/etc/cinescribe/config.env"),
+    Path.home() / ".config" / "screenscribe" / "config.env",
+    Path.home() / ".screenscribe.env",
+    Path("/etc/screenscribe/config.env"),
 ]
 
 
 @dataclass
-class CinescribeConfig:
-    """Cinescribe configuration."""
+class ScreenScribeConfig:
+    """ScreenScribe configuration."""
 
     # API Configuration
     api_key: str = ""
@@ -49,7 +49,7 @@ class CinescribeConfig:
     max_tokens: int = 4096
 
     @classmethod
-    def load(cls) -> "CinescribeConfig":
+    def load(cls) -> "ScreenScribeConfig":
         """Load config from environment and config files."""
         config = cls()
 
@@ -79,14 +79,14 @@ class CinescribeConfig:
         """Load configuration from environment variables."""
         env_mapping = {
             "LIBRAXIS_API_KEY": "api_key",
-            "CINESCRIBE_API_KEY": "api_key",
+            "SCREENSCRIBE_API_KEY": "api_key",
             "LIBRAXIS_API_BASE": "api_base",
-            "CINESCRIBE_STT_MODEL": "stt_model",
-            "CINESCRIBE_LLM_MODEL": "llm_model",
-            "CINESCRIBE_VISION_MODEL": "vision_model",
-            "CINESCRIBE_LANGUAGE": "language",
-            "CINESCRIBE_SEMANTIC": "use_semantic_analysis",
-            "CINESCRIBE_VISION": "use_vision_analysis",
+            "SCREENSCRIBE_STT_MODEL": "stt_model",
+            "SCREENSCRIBE_LLM_MODEL": "llm_model",
+            "SCREENSCRIBE_VISION_MODEL": "vision_model",
+            "SCREENSCRIBE_LANGUAGE": "language",
+            "SCREENSCRIBE_SEMANTIC": "use_semantic_analysis",
+            "SCREENSCRIBE_VISION": "use_vision_analysis",
         }
 
         for env_key, _attr in env_mapping.items():
@@ -121,11 +121,11 @@ class CinescribeConfig:
 
     def save_default_config(self) -> Path:
         """Save default config to user's config directory."""
-        config_dir = Path.home() / ".config" / "cinescribe"
+        config_dir = Path.home() / ".config" / "screenscribe"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "config.env"
 
-        content = f"""# Cinescribe Configuration
+        content = f"""# ScreenScribe Configuration
 # Created by M&K (c)2025 The LibraxisAI Team
 
 # API Key (required)
@@ -135,14 +135,14 @@ LIBRAXIS_API_KEY={self.api_key}
 LIBRAXIS_API_BASE={self.api_base}
 
 # Models
-CINESCRIBE_STT_MODEL={self.stt_model}
-CINESCRIBE_LLM_MODEL={self.llm_model}
-CINESCRIBE_VISION_MODEL={self.vision_model}
+SCREENSCRIBE_STT_MODEL={self.stt_model}
+SCREENSCRIBE_LLM_MODEL={self.llm_model}
+SCREENSCRIBE_VISION_MODEL={self.vision_model}
 
 # Processing
-CINESCRIBE_LANGUAGE={self.language}
-CINESCRIBE_SEMANTIC={str(self.use_semantic_analysis).lower()}
-CINESCRIBE_VISION={str(self.use_vision_analysis).lower()}
+SCREENSCRIBE_LANGUAGE={self.language}
+SCREENSCRIBE_SEMANTIC={str(self.use_semantic_analysis).lower()}
+SCREENSCRIBE_VISION={str(self.use_vision_analysis).lower()}
 """
 
         with open(config_path, "w") as f:
