@@ -126,7 +126,7 @@ class ScreenScribeConfig:
         config_path = config_dir / "config.env"
 
         content = f"""# ScreenScribe Configuration
-# Created by M&K (c)2025 The LibraxisAI Team
+# Made with (งಠ_ಠ)ง by ⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)
 
 # API Key (required)
 LIBRAXIS_API_KEY={self.api_key}

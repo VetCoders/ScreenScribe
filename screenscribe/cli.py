@@ -348,7 +348,7 @@ def version() -> None:
     """Show version information."""
     console.print(f"[bold]ScreenScribe v{__version__}[/]")
     console.print("[dim]Video review automation powered by LibraxisAI[/]")
-    console.print("[dim]Created by M&K (c)2025 The LibraxisAI Team[/]")
+    console.print("[dim]⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Klaudiusz (AI) & Mikserka (AI)[/]")
 
 
 if __name__ == "__main__":

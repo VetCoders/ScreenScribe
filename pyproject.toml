@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 authors = [
     { name = "Maciej Gad", email = "void@div0.space" },
-    { name = "Klaudiusz", email = "the1st@whoai.am" }
+    { name = "Monika Gad", email = "monika@libraxis.cloud" },
 ]
 dependencies = [
     "black==25.12.0",

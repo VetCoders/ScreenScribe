@@ -2,7 +2,7 @@
 # Install: uv run pre-commit install
 # Run manually: uv run pre-commit run --all-files
 #
-# Created by M&K (c)2025 The LibraxisAI Team
+# Made with (งಠ_ಠ)ง by ⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)
 
 repos:
   # Ruff - fast Python linter & formatter

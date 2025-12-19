@@ -152,7 +152,7 @@ def save_markdown_report(
         [
             "",
             "---",
-            "*Created by M&K (c)2025 The LibraxisAI Team*",
+            "*Made with (งಠ_ಠ)ง by ⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)*",
         ]
     )
 
@@ -383,7 +383,7 @@ def save_enhanced_markdown_report(
         [
             "",
             "---",
-            "*Created by M&K (c)2025 The LibraxisAI Team*",
+            "*Made with (งಠ_ಠ)ง by ⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)*",
         ]
     )
 

@@ -4,7 +4,7 @@
 
 ScreenScribe extracts actionable insights from screencast recordings by transcribing audio commentary, detecting mentions of bugs, changes, and UI issues, capturing relevant screenshots, and generating comprehensive reports with AI-powered semantic analysis.
 
-> **Status:** v0.1.0 — Fully functional CLI with AI-powered analysis. Production-ready for single-video workflows.
+> **Status:** v0.1.0 — Fully functional CLI with AI-powered analysis.
 
 ## Features
 
@@ -324,4 +324,6 @@ MIT License
 
 ---
 
-**Created by M&K ⌜©2025⌟ The LibraxisAI Team**
+**Made with (งಠ_ಠ)ง by ⌜ ScreenScribe ⌟ © 2025**
+
+*Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)*

@@ -366,4 +366,6 @@ screenscribe review part2.mov -o review-part2
 
 ---
 
-**Created by M&K (c)2025 The LibraxisAI Team**
+**Made with (งಠ_ಠ)ง by ⌜ ScreenScribe ⌟ © 2025**
+
+*Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)*
