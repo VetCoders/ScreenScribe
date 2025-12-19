@@ -347,7 +347,11 @@ def review(
     if not checkpoint.is_stage_complete("transcription"):
         console.rule("[bold]Step 2: Transcription[/]")
         transcription = transcribe_audio(
-            audio_path, language=language, use_local=local, api_key=config.api_key
+            audio_path,
+            language=language,
+            use_local=local,
+            api_key=config.api_key,
+            stt_endpoint=config.stt_endpoint,
         )
         checkpoint.transcription = serialize_transcription(transcription)
         checkpoint.mark_stage_complete("transcription")
@@ -607,7 +611,11 @@ def transcribe(
 
     # Transcribe
     result = transcribe_audio(
-        audio_path, language=language, use_local=local, api_key=config.api_key
+        audio_path,
+        language=language,
+        use_local=local,
+        api_key=config.api_key,
+        stt_endpoint=config.stt_endpoint,
     )
 
     # Output

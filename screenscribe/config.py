@@ -101,11 +101,18 @@ class ScreenScribeConfig:
         if "api_key" in key_lower:
             self.api_key = value
         elif "api_base" in key_lower:
-            self.api_base = value
-            # Update endpoints
-            self.stt_endpoint = f"{value}/v1/audio/transcriptions"
-            self.llm_endpoint = f"{value}/v1/responses"
-            self.vision_endpoint = f"{value}/v1/responses"
+            # Normalize api_base - remove trailing paths like /v1/responses, /v1, etc.
+            normalized = value.rstrip("/")
+            # Strip common API path suffixes
+            for suffix in ["/v1/responses", "/v1/audio/transcriptions", "/v1/chat/completions", "/v1"]:
+                if normalized.endswith(suffix):
+                    normalized = normalized[: -len(suffix)]
+                    break
+            self.api_base = normalized
+            # Update endpoints with normalized base
+            self.stt_endpoint = f"{normalized}/v1/audio/transcriptions"
+            self.llm_endpoint = f"{normalized}/v1/responses"
+            self.vision_endpoint = f"{normalized}/v1/responses"
         elif "stt_model" in key_lower:
             self.stt_model = value
         elif "llm_model" in key_lower:
