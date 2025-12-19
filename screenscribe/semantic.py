@@ -74,7 +74,17 @@ def analyze_detection_semantically(
             operation_name="Semantic analysis",
         )
 
-        result = response.json()
+        # Debug: check raw response
+        raw_text = response.text
+        if not raw_text or raw_text.strip() == "":
+            console.print(f"[yellow]Empty response from API (status {response.status_code})[/]")
+            return None
+
+        try:
+            result = response.json()
+        except Exception as e:
+            console.print(f"[yellow]Failed to parse API response: {e}. Raw: {raw_text[:300]}...[/]")
+            return None
         # v1/responses format - handle both reasoning and message outputs
         content = ""
         for item in result.get("output", []):
@@ -109,12 +119,26 @@ def analyze_detection_semantically(
         import json
 
         # Handle potential markdown code blocks
+        json_content = content
         if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
+            json_content = content.split("```json")[1].split("```")[0]
         elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
+            parts = content.split("```")
+            if len(parts) >= 2:
+                json_content = parts[1]
 
-        data = json.loads(content.strip())
+        json_content = json_content.strip()
+
+        # Debug: if parsing fails, show what we got
+        if not json_content:
+            console.print(f"[yellow]Empty JSON after parsing. Raw content: {content[:200]}...[/]")
+            return None
+
+        try:
+            data = json.loads(json_content)
+        except json.JSONDecodeError as e:
+            console.print(f"[yellow]JSON parse error: {e}. Content: {json_content[:200]}...[/]")
+            return None
 
         return SemanticAnalysis(
             detection_id=detection.segment.id,
