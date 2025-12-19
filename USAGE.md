@@ -1,6 +1,6 @@
-# Cinescribe Usage Guide
+# ScreenScribe Usage Guide
 
-This guide covers practical examples and workflows for using Cinescribe to analyze screencast videos.
+This guide covers practical examples and workflows for using ScreenScribe to analyze screencast videos.
 
 ## Table of Contents
 
@@ -17,7 +17,7 @@ This guide covers practical examples and workflows for using Cinescribe to analy
 The most common use case is analyzing a screencast recording where someone reviews an application:
 
 ```bash
-cinescribe review ~/Videos/app-review.mov
+screenscribe review ~/Videos/app-review.mov
 ```
 
 This will:
@@ -34,10 +34,10 @@ By default, output goes to a folder named `{video}_review/` next to the video fi
 
 ```bash
 # Creates: ~/Videos/app-review_review/
-cinescribe review ~/Videos/app-review.mov
+screenscribe review ~/Videos/app-review.mov
 
 # Specify custom output directory
-cinescribe review ~/Videos/app-review.mov -o ~/Desktop/review-results
+screenscribe review ~/Videos/app-review.mov -o ~/Desktop/review-results
 ```
 
 ## Common Workflows
@@ -47,7 +47,7 @@ cinescribe review ~/Videos/app-review.mov -o ~/Desktop/review-results
 For a fast review without waiting for AI analysis:
 
 ```bash
-cinescribe review video.mov --no-semantic --no-vision
+screenscribe review video.mov --no-semantic --no-vision
 ```
 
 This gives you:
@@ -62,7 +62,7 @@ Processing time: ~1-2 minutes for a 15-minute video.
 Skip vision analysis for faster results while keeping the valuable LLM insights:
 
 ```bash
-cinescribe review video.mov --no-vision
+screenscribe review video.mov --no-vision
 ```
 
 This includes:
@@ -79,7 +79,7 @@ Processing time: ~10 minutes for a 15-minute video with 40+ issues.
 Enable all features including vision-based screenshot analysis:
 
 ```bash
-cinescribe review video.mov
+screenscribe review video.mov
 ```
 
 This adds:
@@ -95,7 +95,7 @@ Processing time: ~30+ minutes for a 15-minute video.
 Just get the transcript without any analysis:
 
 ```bash
-cinescribe transcribe video.mov -o transcript.txt
+screenscribe transcribe video.mov -o transcript.txt
 ```
 
 Useful for:
@@ -210,10 +210,10 @@ Default is Polish (`pl`), but you can specify other languages:
 
 ```bash
 # English
-cinescribe review video.mov --lang en
+screenscribe review video.mov --lang en
 
 # German
-cinescribe review video.mov --lang de
+screenscribe review video.mov --lang de
 ```
 
 Note: Keyword detection is optimized for Polish and English.
@@ -223,7 +223,7 @@ Note: Keyword detection is optimized for Polish and English.
 Use a local Whisper server instead of LibraxisAI cloud:
 
 ```bash
-cinescribe review video.mov --local
+screenscribe review video.mov --local
 ```
 
 Requires a local STT server running at `localhost:8237`.
@@ -234,13 +234,13 @@ Control which reports are generated:
 
 ```bash
 # JSON only
-cinescribe review video.mov --no-markdown
+screenscribe review video.mov --no-markdown
 
 # Markdown only
-cinescribe review video.mov --no-json
+screenscribe review video.mov --no-json
 
 # Both (default)
-cinescribe review video.mov
+screenscribe review video.mov
 ```
 
 ### Configuration
@@ -248,7 +248,7 @@ cinescribe review video.mov
 View current settings:
 
 ```bash
-cinescribe config --show
+screenscribe config --show
 ```
 
 Output:
@@ -272,10 +272,10 @@ Vision Analysis: True
 Set your API key:
 
 ```bash
-cinescribe config --set-key YOUR_API_KEY
+screenscribe config --set-key YOUR_API_KEY
 ```
 
-Or edit `~/.config/cinescribe/config.env` directly.
+Or edit `~/.config/screenscribe/config.env` directly.
 
 ### FFmpeg Not Found
 
@@ -295,10 +295,10 @@ Semantic analysis takes ~10-15 seconds per finding. For faster results:
 
 ```bash
 # Skip AI analysis entirely
-cinescribe review video.mov --no-semantic --no-vision
+screenscribe review video.mov --no-semantic --no-vision
 
 # Skip only vision (recommended)
-cinescribe review video.mov --no-vision
+screenscribe review video.mov --no-vision
 ```
 
 ### No Issues Detected
@@ -308,7 +308,7 @@ If no issues are found, check:
 1. **Language**: Ensure `--lang` matches the video's language
 2. **Keywords**: The detector looks for specific keywords. Try reviewing the transcript:
    ```bash
-   cinescribe transcribe video.mov -o transcript.txt
+   screenscribe transcribe video.mov -o transcript.txt
    cat transcript.txt | grep -i "bug\|error\|problem\|zmiana"
    ```
 
@@ -345,7 +345,7 @@ For best results when recording screencasts:
 
 ### Workflow Integration
 
-1. **Review meetings**: Record screen reviews, run Cinescribe, get instant task list
+1. **Review meetings**: Record screen reviews, run ScreenScribe, get instant task list
 2. **QA testing**: Record test sessions, generate bug reports automatically
 3. **Design feedback**: Record design reviews, extract UI issues
 4. **Code reviews**: Screen-share walkthroughs, capture refactoring needs
@@ -360,8 +360,8 @@ ffmpeg -i long-video.mov -t 900 -c copy part1.mov
 ffmpeg -i long-video.mov -ss 900 -t 900 -c copy part2.mov
 
 # Process each part
-cinescribe review part1.mov -o review-part1
-cinescribe review part2.mov -o review-part2
+screenscribe review part1.mov -o review-part1
+screenscribe review part2.mov -o review-part2
 ```
 
 ---

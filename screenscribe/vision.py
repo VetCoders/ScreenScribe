@@ -8,7 +8,7 @@ import httpx
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from .config import CinescribeConfig
+from .config import ScreenScribeConfig
 from .detect import Detection
 
 console = Console()
@@ -51,7 +51,7 @@ def encode_image_base64(image_path: Path) -> str:
 
 
 def analyze_screenshot(
-    screenshot_path: Path, detection: Detection, config: CinescribeConfig
+    screenshot_path: Path, detection: Detection, config: ScreenScribeConfig
 ) -> VisionAnalysis | None:
     """
     Analyze a screenshot using Vision model.
@@ -59,7 +59,7 @@ def analyze_screenshot(
     Args:
         screenshot_path: Path to screenshot
         detection: Associated detection for context
-        config: Cinescribe configuration
+        config: ScreenScribe configuration
 
     Returns:
         VisionAnalysis result or None if failed
@@ -159,14 +159,14 @@ def analyze_screenshot(
 
 
 def analyze_screenshots(
-    screenshots: list[tuple[Detection, Path]], config: CinescribeConfig
+    screenshots: list[tuple[Detection, Path]], config: ScreenScribeConfig
 ) -> list[VisionAnalysis]:
     """
     Analyze all screenshots using Vision model.
 
     Args:
         screenshots: List of (detection, screenshot_path) tuples
-        config: Cinescribe configuration
+        config: ScreenScribe configuration
 
     Returns:
         List of vision analyses
@@ -204,13 +204,13 @@ def analyze_screenshots(
     return results
 
 
-def generate_visual_summary(analyses: list[VisionAnalysis], config: CinescribeConfig) -> str:
+def generate_visual_summary(analyses: list[VisionAnalysis], config: ScreenScribeConfig) -> str:
     """
     Generate summary of visual issues found.
 
     Args:
         analyses: List of vision analyses
-        config: Cinescribe configuration
+        config: ScreenScribe configuration
 
     Returns:
         Visual summary text

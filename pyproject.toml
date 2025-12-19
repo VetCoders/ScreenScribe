@@ -1,5 +1,5 @@
 [project]
-name = "cinescribe"
+name = "screenscribe"
 version = "0.1.0"
 description = "Video review automation - extract bugs and changes from screencast commentary"
 readme = "README.md"
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-cinescribe = "cinescribe.cli:app"
+screenscribe = "screenscribe.cli:app"
 
 [build-system]
 requires = ["hatchling"]
