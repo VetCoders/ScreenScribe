@@ -5,8 +5,10 @@ from dataclasses import dataclass
 import httpx
 from rich.console import Console
 
+from .api_utils import retry_request
 from .config import ScreenScribeConfig
 from .detect import Detection
+from .prompts import get_executive_summary_prompt, get_semantic_analysis_prompt
 
 console = Console()
 
@@ -22,30 +24,6 @@ class SemanticAnalysis:
     action_items: list[str]
     affected_components: list[str]
     suggested_fix: str
-
-
-ANALYSIS_PROMPT = """Jesteś ekspertem UX/UI i programistą analizującym feedback z nagrania screencast.
-
-Przeanalizuj poniższy fragment transkrypcji, gdzie użytkownik opisuje problem lub zmianę w aplikacji.
-
-Fragment:
-{text}
-
-Kontekst (otaczające wypowiedzi):
-{context}
-
-Kategoria wykryta automatycznie: {category}
-
-Odpowiedz w formacie JSON:
-{{
-    "severity": "critical|high|medium|low",
-    "summary": "Krótkie podsumowanie problemu (1-2 zdania)",
-    "action_items": ["Lista konkretnych zadań do wykonania"],
-    "affected_components": ["Lista komponentów UI/funkcji których dotyczy"],
-    "suggested_fix": "Sugerowane rozwiązanie techniczne"
-}}
-
-Odpowiadaj tylko JSON, bez dodatkowego tekstu."""
 
 
 def analyze_detection_semantically(
@@ -64,31 +42,37 @@ def analyze_detection_semantically(
     if not config.api_key:
         return None
 
-    prompt = ANALYSIS_PROMPT.format(
+    # Get localized prompt template
+    prompt_template = get_semantic_analysis_prompt(config.language)
+    prompt = prompt_template.format(
         text=detection.segment.text, context=detection.context[:500], category=detection.category
     )
 
     try:
-        with httpx.Client(timeout=60.0) as client:
-            response = client.post(
-                config.llm_endpoint,
-                headers={
-                    "Authorization": f"Bearer {config.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": config.llm_model,
-                    "input": [
-                        {"role": "user", "content": [{"type": "input_text", "text": prompt}]}
-                    ],
-                },
-            )
 
-        if response.status_code != 200:
-            console.print(
-                f"[yellow]LLM API error: {response.status_code} - {response.text[:200]}[/]"
-            )
-            return None
+        def do_llm_request() -> httpx.Response:
+            with httpx.Client(timeout=60.0) as client:
+                response = client.post(
+                    config.llm_endpoint,
+                    headers={
+                        "Authorization": f"Bearer {config.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": config.llm_model,
+                        "input": [
+                            {"role": "user", "content": [{"type": "input_text", "text": prompt}]}
+                        ],
+                    },
+                )
+                response.raise_for_status()
+                return response
+
+        response = retry_request(
+            do_llm_request,
+            max_retries=3,
+            operation_name="Semantic analysis",
+        )
 
         result = response.json()
         # v1/responses format - handle both reasoning and message outputs
@@ -214,55 +198,54 @@ def generate_executive_summary(analyses: list[SemanticAnalysis], config: ScreenS
         return ""
 
     # Prepare findings summary
-    findings = []
+    findings_list = []
     for a in analyses:
-        findings.append(f"- [{a.severity.upper()}] {a.summary}")
+        findings_list.append(f"- [{a.severity.upper()}] {a.summary}")
 
-    prompt = f"""Jesteś product managerem przygotowującym raport z przeglądu UX.
-
-Na podstawie poniższych znalezisk, przygotuj krótkie podsumowanie wykonawcze (executive summary) dla zespołu developerskiego.
-
-Znaleziska:
-{chr(10).join(findings)}
-
-Napisz podsumowanie w 3-5 zdaniach, skupiając się na:
-1. Najważniejszych problemach do naprawienia
-2. Ogólnym stanie UX aplikacji
-3. Rekomendacji priorytetów
-
-Odpowiadaj po polsku, zwięźle i konkretnie."""
+    # Get localized prompt template
+    prompt_template = get_executive_summary_prompt(config.language)
+    prompt = prompt_template.format(findings=chr(10).join(findings_list))
 
     try:
-        with httpx.Client(timeout=60.0) as client:
-            response = client.post(
-                config.llm_endpoint,
-                headers={
-                    "Authorization": f"Bearer {config.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": config.llm_model,
-                    "input": [
-                        {"role": "user", "content": [{"type": "input_text", "text": prompt}]}
-                    ],
-                },
-            )
 
-        if response.status_code == 200:
-            result = response.json()
-            # Extract text from v1/responses output format (handle reasoning + message)
-            content = ""
-            for item in result.get("output", []):
-                item_type = item.get("type", "")
-                if item_type == "reasoning":
-                    pass  # Skip reasoning blocks
-                elif item_type == "message":
-                    for part in item.get("content", []):
-                        if part.get("type") in ("output_text", "text"):
-                            content += part.get("text", "")
-                elif item_type in ("output_text", "text"):
-                    content += item.get("text", "")
-            return content
+        def do_summary_request() -> httpx.Response:
+            with httpx.Client(timeout=60.0) as client:
+                response = client.post(
+                    config.llm_endpoint,
+                    headers={
+                        "Authorization": f"Bearer {config.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": config.llm_model,
+                        "input": [
+                            {"role": "user", "content": [{"type": "input_text", "text": prompt}]}
+                        ],
+                    },
+                )
+                response.raise_for_status()
+                return response
+
+        response = retry_request(
+            do_summary_request,
+            max_retries=3,
+            operation_name="Executive summary",
+        )
+
+        result = response.json()
+        # Extract text from v1/responses output format (handle reasoning + message)
+        content = ""
+        for item in result.get("output", []):
+            item_type = item.get("type", "")
+            if item_type == "reasoning":
+                pass  # Skip reasoning blocks
+            elif item_type == "message":
+                for part in item.get("content", []):
+                    if part.get("type") in ("output_text", "text"):
+                        content += part.get("text", "")
+            elif item_type in ("output_text", "text"):
+                content += item.get("text", "")
+        return content
 
     except Exception as e:
         console.print(f"[yellow]Executive summary failed: {e}[/]")

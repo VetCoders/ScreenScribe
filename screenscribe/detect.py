@@ -1,110 +1,45 @@
 """Bug and change detection from transcripts."""
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rich.console import Console
 
+from .keywords import KeywordsConfig
 from .transcribe import Segment, TranscriptionResult
+
+if TYPE_CHECKING:
+    pass
 
 console = Console()
 
+# Global keywords config (lazy loaded)
+_keywords_config: KeywordsConfig | None = None
 
-# Keywords indicating bugs, issues, or requested changes (PL + EN)
-BUG_KEYWORDS = [
-    # Polish
-    r"nie działa",
-    r"nie dziala",
-    r"bug",
-    r"błąd",
-    r"blad",
-    r"problem",
-    r"zepsute",
-    r"nie widać",
-    r"nie widac",
-    r"brakuje",
-    r"złe",
-    r"zle",
-    r"straszne",
-    r"tragedia",
-    r"koszmar",
-    r"potworek",
-    r"bez sensu",
-    r"nie podoba",
-    # English
-    r"broken",
-    r"doesn't work",
-    r"not working",
-    r"issue",
-    r"error",
-    r"wrong",
-    r"missing",
-    r"bad",
-]
 
-CHANGE_KEYWORDS = [
-    # Polish
-    r"trzeba",
-    r"powinno",
-    r"powinien",
-    r"powinniśmy",
-    r"powinnismy",
-    r"musimy",
-    r"zmienić",
-    r"zmienic",
-    r"poprawić",
-    r"poprawic",
-    r"wyrzucić",
-    r"wyrzucic",
-    r"usunąć",
-    r"usunac",
-    r"dodać",
-    r"dodac",
-    r"przenieść",
-    r"przeniesc",
-    r"przeprojektować",
-    r"przeprojektowac",
-    r"zrobić",
-    r"zrobic",
-    r"ogarnąć",
-    r"ogarnac",
-    r"spłaszczyć",
-    r"splaszczyc",
-    r"wywalamy",
-    r"wypierdala",
-    # English
-    r"should",
-    r"must",
-    r"need to",
-    r"have to",
-    r"fix",
-    r"change",
-    r"remove",
-    r"add",
-    r"move",
-    r"redesign",
-]
+def get_keywords_config(keywords_file: Path | None = None) -> KeywordsConfig:
+    """Get or load keywords configuration."""
+    global _keywords_config
+    if _keywords_config is None or keywords_file is not None:
+        _keywords_config = KeywordsConfig.load(keywords_file)
+    return _keywords_config
 
-UI_KEYWORDS = [
-    r"layout",
-    r"ui",
-    r"ux",
-    r"button",
-    r"przycisk",
-    r"okno",
-    r"modal",
-    r"ekran",
-    r"screen",
-    r"animacj",
-    r"scroll",
-    r"glass",
-    r"blur",
-    r"vibrancy",
-    r"border",
-    r"rama",
-    r"warstwa",
-    r"layer",
-]
+
+def reset_keywords_config() -> None:
+    """Reset keywords config (useful for testing)."""
+    global _keywords_config
+    _keywords_config = None
+
+
+# Load defaults for module-level access (backward compatibility)
+_default_config = KeywordsConfig.load()
+BUG_KEYWORDS: list[str] = _default_config.bug
+CHANGE_KEYWORDS: list[str] = _default_config.change
+UI_KEYWORDS: list[str] = _default_config.ui
 
 
 @dataclass
@@ -117,13 +52,18 @@ class Detection:
     context: str  # Extended context from surrounding segments
 
 
-def detect_issues(transcription: TranscriptionResult, context_window: int = 2) -> list[Detection]:
+def detect_issues(
+    transcription: TranscriptionResult,
+    context_window: int = 2,
+    keywords_file: Path | None = None,
+) -> list[Detection]:
     """
     Detect bugs and change requests in transcription.
 
     Args:
         transcription: The transcription result
         context_window: Number of segments before/after to include as context
+        keywords_file: Optional path to custom keywords YAML file
 
     Returns:
         List of detections with category and context
@@ -131,7 +71,14 @@ def detect_issues(transcription: TranscriptionResult, context_window: int = 2) -
     detections = []
     segments = transcription.segments
 
+    # Load keywords (custom or default)
+    keywords = get_keywords_config(keywords_file)
+    bug_keywords = keywords.bug
+    change_keywords = keywords.change
+    ui_keywords = keywords.ui
+
     console.print("[blue]Analyzing transcript for issues...[/]")
+    console.print(f"[dim]{keywords.summary()}[/]")
 
     for i, segment in enumerate(segments):
         text_lower = segment.text.lower()
@@ -139,20 +86,20 @@ def detect_issues(transcription: TranscriptionResult, context_window: int = 2) -
         category = None
 
         # Check for bugs
-        for pattern in BUG_KEYWORDS:
+        for pattern in bug_keywords:
             if re.search(pattern, text_lower):
                 found_keywords.append(pattern)
                 category = "bug"
 
         # Check for change requests
-        for pattern in CHANGE_KEYWORDS:
+        for pattern in change_keywords:
             if re.search(pattern, text_lower):
                 found_keywords.append(pattern)
                 if category is None:
                     category = "change"
 
         # Check for UI-related
-        for pattern in UI_KEYWORDS:
+        for pattern in ui_keywords:
             if re.search(pattern, text_lower):
                 found_keywords.append(pattern)
                 if category is None:

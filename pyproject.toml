@@ -11,6 +11,7 @@ authors = [
 dependencies = [
     "black==25.12.0",
     "httpx>=0.27.0",
+    "pyyaml>=6.0.0",
     "rich>=13.7.0",
     "typer>=0.12.0",
 ]
@@ -29,6 +30,7 @@ dev-dependencies = [
     "mypy>=1.13.0",
     "pre-commit>=4.0.0",
     "bandit[toml]>=1.7.0",
+    "types-pyyaml>=6.0.0",
 ]
 
 # Ruff - replaces black, isort, flake8, bandit

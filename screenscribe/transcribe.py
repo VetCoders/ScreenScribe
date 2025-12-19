@@ -8,6 +8,8 @@ import httpx
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from .api_utils import retry_request
+
 console = Console()
 
 # LibraxisAI STT endpoints
@@ -74,22 +76,30 @@ def transcribe_audio(
         progress.add_task("Transcribing audio...", total=None)
 
         with open(audio_path, "rb") as f:
-            files = {"file": (audio_path.name, f, "audio/mpeg")}
-            data = {
-                "model": "whisper-1",
-                "language": language,
-                "response_format": "verbose_json",
-            }
-            headers = {}
-            if api_key and not use_local:
-                headers["Authorization"] = f"Bearer {api_key}"
+            audio_content = f.read()
 
+        files = {"file": (audio_path.name, audio_content, "audio/mpeg")}
+        data = {
+            "model": "whisper-1",
+            "language": language,
+            "response_format": "verbose_json",
+        }
+        headers = {}
+        if api_key and not use_local:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        def do_transcribe() -> httpx.Response:
             # Long timeout for large files
             with httpx.Client(timeout=600.0) as client:
                 response = client.post(url, files=files, data=data, headers=headers)
+                response.raise_for_status()
+                return response
 
-    if response.status_code != 200:
-        raise RuntimeError(f"STT API error ({response.status_code}): {response.text}")
+        response = retry_request(
+            do_transcribe,
+            max_retries=3,
+            operation_name="STT transcription",
+        )
 
     result = response.json()
 

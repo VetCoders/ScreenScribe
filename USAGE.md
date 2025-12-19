@@ -8,7 +8,9 @@ This guide covers practical examples and workflows for using ScreenScribe to ana
 2. [Common Workflows](#common-workflows)
 3. [Understanding Output](#understanding-output)
 4. [Advanced Options](#advanced-options)
-5. [Troubleshooting](#troubleshooting)
+5. [Custom Keywords](#custom-keywords)
+6. [Resuming Interrupted Processing](#resuming-interrupted-processing)
+7. [Troubleshooting](#troubleshooting)
 
 ## Basic Usage
 
@@ -265,6 +267,129 @@ Semantic Analysis: True
 Vision Analysis: True
 ```
 
+## Custom Keywords
+
+ScreenScribe allows you to define custom keywords for issue detection, tailored to your project's vocabulary.
+
+### Creating a Keywords File
+
+```bash
+# Generate default keywords.yaml in current directory
+screenscribe config --init-keywords
+```
+
+This creates a `keywords.yaml` file you can customize:
+
+```yaml
+# keywords.yaml
+bug:
+  # Polish
+  - "nie działa"
+  - "błąd"
+  - "zepsute"
+  # English
+  - "broken"
+  - "crash"
+  - "error"
+  # Project-specific
+  - "regression"
+  - "flaky test"
+
+change:
+  - "trzeba zmienić"
+  - "should refactor"
+  - "TODO"
+  - "FIXME"
+
+ui:
+  - "button"
+  - "modal"
+  - "dropdown"
+  - "navbar"
+```
+
+### Using Custom Keywords
+
+```bash
+# Explicit file path
+screenscribe review video.mov --keywords-file ~/my-project/keywords.yaml
+
+# Auto-detect (looks for keywords.yaml in current directory)
+cd ~/my-project
+screenscribe review ~/Videos/review.mov
+```
+
+### Keywords Search Order
+
+1. Explicit `--keywords-file` path
+2. `keywords.yaml` in current directory
+3. `screenscribe_keywords.yaml` in current directory
+4. `.screenscribe/keywords.yaml` in current directory
+5. Built-in defaults (Polish + English)
+
+## Resuming Interrupted Processing
+
+Long videos with many issues can take 30+ minutes to process. If processing is interrupted (Ctrl+C, network error, system restart), you can resume from where it left off.
+
+### How It Works
+
+ScreenScribe automatically saves checkpoints after each pipeline stage:
+
+1. Audio extraction
+2. Transcription
+3. Issue detection
+4. Screenshot extraction
+5. Semantic analysis
+6. Vision analysis
+
+Checkpoints are stored in `.screenscribe_cache/` inside the output directory.
+
+### Resuming Processing
+
+```bash
+# Resume from last checkpoint
+screenscribe review video.mov --resume
+
+# With specific output directory
+screenscribe review video.mov -o ./my-review --resume
+```
+
+When resuming, you'll see:
+
+```
+Resuming from checkpoint: 4 stages complete
+Completed: audio, transcription, detection, screenshots
+
+Step 1: Audio Extraction - skipped (cached)
+Step 2: Transcription - skipped (cached)
+Step 3: Issue Detection - skipped (cached)
+Step 4: Screenshot Extraction - skipped (cached)
+Step 5: Semantic Analysis (LLM)
+  [1/44] Analyzing bug @ 12.3s...
+```
+
+### Checkpoint Validation
+
+Checkpoints are validated before resuming:
+
+- Video file hash must match (detects if video changed)
+- Output directory must match
+- Language setting must match
+
+If validation fails, processing starts fresh.
+
+### Clearing Checkpoints
+
+Checkpoints are automatically deleted after successful completion. To force a fresh start:
+
+```bash
+# Remove checkpoint manually
+rm -rf ./video_review/.screenscribe_cache/
+
+# Or just don't use --resume
+screenscribe review video.mov
+```
+
 ## Troubleshooting
 
 ### "No API key" Error
@@ -312,13 +437,20 @@ If no issues are found, check:
    cat transcript.txt | grep -i "bug\|error\|problem\|zmiana"
    ```
 
-### API Timeout
+### API Timeout or Network Errors
 
-For large videos with many issues, the API might timeout. Solutions:
+ScreenScribe includes automatic retry logic with exponential backoff. Most transient errors are handled automatically.
 
-1. Process in smaller batches (split video)
+If you still experience issues:
+
+1. Use `--resume` to continue from where it stopped
 2. Skip vision analysis: `--no-vision`
-3. Increase timeout in code (edit `semantic.py`, `vision.py`)
+3. Process in smaller batches (split video)
+
+```bash
+# Resume after network error
+screenscribe review video.mov --resume
+```
 
 ### Permission Denied
 

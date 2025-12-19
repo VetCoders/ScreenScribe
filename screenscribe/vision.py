@@ -8,8 +8,10 @@ import httpx
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from .api_utils import retry_request
 from .config import ScreenScribeConfig
 from .detect import Detection
+from .prompts import get_vision_analysis_prompt
 
 console = Console()
 
@@ -25,23 +27,6 @@ class VisionAnalysis:
     accessibility_notes: list[str]
     design_feedback: str
     technical_observations: str
-
-
-VISION_PROMPT = """Jesteś ekspertem UX/UI analizującym screenshot aplikacji desktopowej.
-
-Kontekst z transkrypcji (co użytkownik mówił w tym momencie):
-"{transcript_context}"
-
-Przeanalizuj ten screenshot i odpowiedz w formacie JSON:
-{{
-    "ui_elements": ["Lista widocznych elementów UI (przyciski, formularze, itp.)"],
-    "issues_detected": ["Lista problemów wizualnych/UX widocznych na screenshocie"],
-    "accessibility_notes": ["Uwagi dotyczące dostępności"],
-    "design_feedback": "Ogólna ocena designu i sugestie (1-2 zdania)",
-    "technical_observations": "Obserwacje techniczne - błędy, artefakty, problemy z layoutem"
-}}
-
-Odpowiadaj tylko JSON, po polsku."""
 
 
 def encode_image_base64(image_path: Path) -> str:
@@ -84,39 +69,45 @@ def analyze_screenshot(
         ".webp": "image/webp",
     }.get(suffix, "image/jpeg")
 
-    prompt = VISION_PROMPT.format(transcript_context=detection.segment.text[:200])
+    # Get localized prompt template
+    prompt_template = get_vision_analysis_prompt(config.language)
+    prompt = prompt_template.format(transcript_context=detection.segment.text[:200])
 
     try:
-        with httpx.Client(timeout=120.0) as client:
-            response = client.post(
-                config.vision_endpoint,
-                headers={
-                    "Authorization": f"Bearer {config.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": config.vision_model,
-                    "input": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "input_text", "text": prompt},
-                                {
-                                    "type": "input_image",
-                                    "image_url": f"data:{media_type};base64,{image_base64}",
-                                    "detail": "high",
-                                },
-                            ],
-                        }
-                    ],
-                },
-            )
 
-        if response.status_code != 200:
-            console.print(
-                f"[yellow]Vision API error: {response.status_code} - {response.text[:300]}[/]"
-            )
-            return None
+        def do_vision_request() -> httpx.Response:
+            with httpx.Client(timeout=120.0) as client:
+                response = client.post(
+                    config.vision_endpoint,
+                    headers={
+                        "Authorization": f"Bearer {config.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": config.vision_model,
+                        "input": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "input_text", "text": prompt},
+                                    {
+                                        "type": "input_image",
+                                        "image_url": f"data:{media_type};base64,{image_base64}",
+                                        "detail": "high",
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                )
+                response.raise_for_status()
+                return response
+
+        response = retry_request(
+            do_vision_request,
+            max_retries=3,
+            operation_name=f"Vision analysis ({screenshot_path.name})",
+        )
 
         result = response.json()
         # v1/responses format - handle both reasoning and message outputs

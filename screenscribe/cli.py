@@ -9,8 +9,25 @@ from rich.panel import Panel
 
 from . import __version__
 from .audio import extract_audio, get_video_duration
+from .checkpoint import (
+    PipelineCheckpoint,
+    checkpoint_valid_for_video,
+    create_checkpoint,
+    delete_checkpoint,
+    deserialize_detection,
+    deserialize_screenshot,
+    deserialize_semantic_analysis,
+    deserialize_transcription,
+    load_checkpoint,
+    save_checkpoint,
+    serialize_detection,
+    serialize_screenshot,
+    serialize_semantic_analysis,
+    serialize_transcription,
+)
 from .config import ScreenScribeConfig
 from .detect import detect_issues, format_timestamp
+from .keywords import save_default_keywords
 from .report import (
     print_report,
     save_enhanced_json_report,
@@ -91,12 +108,31 @@ def review(
             help="Save Markdown report",
         ),
     ] = True,
+    keywords_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--keywords-file",
+            "-k",
+            help="Path to custom keywords YAML file",
+            exists=True,
+            dir_okay=False,
+        ),
+    ] = None,
+    resume: Annotated[
+        bool,
+        typer.Option(
+            "--resume",
+            help="Resume from previous checkpoint if available",
+        ),
+    ] = False,
 ) -> None:
     """
     Analyze a screencast video for bugs and change requests.
 
     Extracts audio, transcribes it, detects issues mentioned in commentary,
     captures screenshots, and optionally analyzes with AI models.
+
+    Use --resume to continue from a previous interrupted run.
     """
     console.print(
         Panel(
@@ -130,57 +166,146 @@ def review(
     except RuntimeError:
         console.print("[yellow]Could not determine video duration[/]\n")
 
+    # Check for existing checkpoint
+    checkpoint: PipelineCheckpoint | None = None
+    if resume:
+        checkpoint = load_checkpoint(output)
+        if checkpoint and checkpoint_valid_for_video(checkpoint, video, output, language):
+            console.print(
+                f"[green]Resuming from checkpoint:[/] "
+                f"{len(checkpoint.completed_stages)} stages complete"
+            )
+            console.print(f"[dim]Completed: {', '.join(checkpoint.completed_stages)}[/]\n")
+        else:
+            checkpoint = None
+            console.print("[dim]No valid checkpoint found, starting fresh[/]\n")
+
+    # Create new checkpoint if not resuming
+    if checkpoint is None:
+        checkpoint = create_checkpoint(video, output, language)
+
+    # Initialize variables from checkpoint or fresh
+    transcription = None
+    detections = []
+    screenshots = []
+    semantic_analyses = []
+    vision_analyses = []
+    executive_summary = ""
+    visual_summary = ""
+
+    # Restore state from checkpoint
+    if checkpoint.transcription:
+        transcription = deserialize_transcription(checkpoint.transcription)
+    if checkpoint.detections:
+        detections = [deserialize_detection(d) for d in checkpoint.detections]
+    if checkpoint.screenshots:
+        screenshots = [deserialize_screenshot(s) for s in checkpoint.screenshots]
+    if checkpoint.semantic_analyses:
+        semantic_analyses = [
+            deserialize_semantic_analysis(s) for s in checkpoint.semantic_analyses
+        ]
+    executive_summary = checkpoint.executive_summary
+    visual_summary = checkpoint.visual_summary
+
     # Step 1: Extract audio
-    console.rule("[bold]Step 1: Audio Extraction[/]")
-    audio_path = extract_audio(video)
-    console.print()
+    if not checkpoint.is_stage_complete("audio"):
+        console.rule("[bold]Step 1: Audio Extraction[/]")
+        audio_path = extract_audio(video)
+        checkpoint.mark_stage_complete("audio")
+        save_checkpoint(checkpoint, output)
+        console.print()
+    else:
+        console.print("[dim]Step 1: Audio Extraction - skipped (cached)[/]")
+        # Audio is extracted to temp location - need to re-extract if not found
+        # This is fine since audio extraction is fast
+        audio_path = extract_audio(video)
 
     # Step 2: Transcribe
-    console.rule("[bold]Step 2: Transcription[/]")
-    transcription = transcribe_audio(
-        audio_path, language=language, use_local=local, api_key=config.api_key
-    )
+    if not checkpoint.is_stage_complete("transcription"):
+        console.rule("[bold]Step 2: Transcription[/]")
+        transcription = transcribe_audio(
+            audio_path, language=language, use_local=local, api_key=config.api_key
+        )
+        checkpoint.transcription = serialize_transcription(transcription)
+        checkpoint.mark_stage_complete("transcription")
+        save_checkpoint(checkpoint, output)
 
-    # Save full transcript
-    transcript_path = output / "transcript.txt"
-    with open(transcript_path, "w", encoding="utf-8") as f:
-        f.write(transcription.text)
-    console.print(f"[dim]Saved transcript: {transcript_path}[/]\n")
+        # Save full transcript
+        transcript_path = output / "transcript.txt"
+        with open(transcript_path, "w", encoding="utf-8") as f:
+            f.write(transcription.text)
+        console.print(f"[dim]Saved transcript: {transcript_path}[/]\n")
+    else:
+        console.print("[dim]Step 2: Transcription - skipped (cached)[/]")
+        if transcription is None and checkpoint.transcription:
+            transcription = deserialize_transcription(checkpoint.transcription)
+
+    if transcription is None:
+        console.print("[red]Error: No transcription available[/]")
+        return
 
     # Step 3: Detect issues
-    console.rule("[bold]Step 3: Issue Detection[/]")
-    detections = detect_issues(transcription)
-    console.print()
+    if not checkpoint.is_stage_complete("detection"):
+        console.rule("[bold]Step 3: Issue Detection[/]")
+        detections = detect_issues(transcription, keywords_file=keywords_file)
+        checkpoint.detections = [serialize_detection(d) for d in detections]
+        checkpoint.mark_stage_complete("detection")
+        save_checkpoint(checkpoint, output)
+        console.print()
+    else:
+        console.print("[dim]Step 3: Issue Detection - skipped (cached)[/]")
 
     if not detections:
         console.print("[yellow]No issues detected in the video.[/]")
+        delete_checkpoint(output)
         return
 
     # Step 4: Extract screenshots
-    console.rule("[bold]Step 4: Screenshot Extraction[/]")
-    screenshots_dir = output / "screenshots"
-    screenshots = extract_screenshots_for_detections(video, detections, screenshots_dir)
-    console.print()
+    if not checkpoint.is_stage_complete("screenshots"):
+        console.rule("[bold]Step 4: Screenshot Extraction[/]")
+        screenshots_dir = output / "screenshots"
+        screenshots = extract_screenshots_for_detections(video, detections, screenshots_dir)
+        checkpoint.screenshots = [serialize_screenshot(d, p) for d, p in screenshots]
+        checkpoint.mark_stage_complete("screenshots")
+        save_checkpoint(checkpoint, output)
+        console.print()
+    else:
+        console.print("[dim]Step 4: Screenshot Extraction - skipped (cached)[/]")
 
     # Step 5: Semantic Analysis (LLM)
-    semantic_analyses = []
-    executive_summary = ""
     if semantic and config.api_key:
-        console.rule("[bold]Step 5: Semantic Analysis (LLM)[/]")
-        semantic_analyses = analyze_detections_semantically(detections, config)
-        if semantic_analyses:
-            executive_summary = generate_executive_summary(semantic_analyses, config)
-        console.print()
+        if not checkpoint.is_stage_complete("semantic"):
+            console.rule("[bold]Step 5: Semantic Analysis (LLM)[/]")
+            semantic_analyses = analyze_detections_semantically(detections, config)
+            checkpoint.semantic_analyses = [
+                serialize_semantic_analysis(s) for s in semantic_analyses
+            ]
+            if semantic_analyses:
+                executive_summary = generate_executive_summary(semantic_analyses, config)
+                checkpoint.executive_summary = executive_summary
+            checkpoint.mark_stage_complete("semantic")
+            save_checkpoint(checkpoint, output)
+            console.print()
+        else:
+            console.print("[dim]Step 5: Semantic Analysis - skipped (cached)[/]")
+    else:
+        checkpoint.mark_stage_complete("semantic")
 
     # Step 6: Vision Analysis
-    vision_analyses = []
-    visual_summary = ""
     if vision and config.api_key:
-        console.rule("[bold]Step 6: Vision Analysis[/]")
-        vision_analyses = analyze_screenshots(screenshots, config)
-        if vision_analyses:
-            visual_summary = generate_visual_summary(vision_analyses, config)
-        console.print()
+        if not checkpoint.is_stage_complete("vision"):
+            console.rule("[bold]Step 6: Vision Analysis[/]")
+            vision_analyses = analyze_screenshots(screenshots, config)
+            if vision_analyses:
+                visual_summary = generate_visual_summary(vision_analyses, config)
+                checkpoint.visual_summary = visual_summary
+            checkpoint.mark_stage_complete("vision")
+            save_checkpoint(checkpoint, output)
+            console.print()
+        else:
+            console.print("[dim]Step 6: Vision Analysis - skipped (cached)[/]")
+    else:
+        checkpoint.mark_stage_complete("vision")
 
     # Step 7: Generate reports
     console.rule("[bold]Step 7: Report Generation[/]")
@@ -219,6 +344,9 @@ def review(
 
     # Print summary to console
     print_report(detections, screenshots, video)
+
+    # Clean up checkpoint on success
+    delete_checkpoint(output)
 
     console.print(f"\n[bold green]Done![/] Results saved to: {output}\n")
 
@@ -298,8 +426,15 @@ def config(
             help="Create default config file",
         ),
     ] = False,
+    init_keywords: Annotated[
+        bool,
+        typer.Option(
+            "--init-keywords",
+            help="Create keywords.yaml in current directory for customization",
+        ),
+    ] = False,
     set_key: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--set-key",
             help="Set API key in config",
@@ -325,6 +460,16 @@ def config(
         console.print("[dim]Edit this file to customize settings[/]")
         return
 
+    if init_keywords:
+        keywords_path = Path.cwd() / "keywords.yaml"
+        if keywords_path.exists():
+            console.print(f"[yellow]Keywords file already exists:[/] {keywords_path}")
+            console.print("[dim]Delete it first if you want to reset to defaults[/]")
+            return
+        save_default_keywords(keywords_path)
+        console.print("[dim]Edit this file to customize detection keywords[/]")
+        return
+
     if show:
         console.print("[bold]Current Configuration:[/]\n")
         console.print(f"API Base: {cfg.api_base}")
@@ -340,7 +485,10 @@ def config(
         return
 
     # Default: show help
-    console.print("Use --show to view config, --init to create, or --set-key to set API key")
+    console.print(
+        "Use --show to view config, --init to create, --init-keywords for custom keywords, "
+        "or --set-key to set API key"
+    )
 
 
 @app.command()
