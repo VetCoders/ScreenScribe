@@ -8,9 +8,10 @@ This guide covers practical examples and workflows for using ScreenScribe to ana
 2. [Common Workflows](#common-workflows)
 3. [Understanding Output](#understanding-output)
 4. [Advanced Options](#advanced-options)
-5. [Custom Keywords](#custom-keywords)
-6. [Resuming Interrupted Processing](#resuming-interrupted-processing)
-7. [Troubleshooting](#troubleshooting)
+5. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
+6. [Custom Keywords](#custom-keywords)
+7. [Resuming Interrupted Processing](#resuming-interrupted-processing)
+8. [Troubleshooting](#troubleshooting)
 
 ## Basic Usage
 
@@ -267,6 +268,80 @@ Semantic Analysis: True
 Vision Analysis: True
 ```
 
+## Time Estimates and Dry Run
+
+Before committing to a full analysis (which can take 30+ minutes for long videos), you can preview what will happen.
+
+### Quick Time Estimate
+
+See how long processing will take without doing any work:
+
+```bash
+screenscribe review video.mov --estimate
+```
+
+Output:
+```
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃              Estimated Processing Time                         ┃
+┣━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
+┃ Step                ┃ Estimate  ┃ Notes                        ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ Audio extraction    │ ~5s       │ FFmpeg                       │
+│ Transcription       │ ~30s      │ 15.0 min video               │
+│ Issue detection     │ <1s       │ Keyword matching             │
+│ Screenshots         │ ~10s      │ FFmpeg frame extraction      │
+│ Semantic analysis   │ ~8min     │ ~40 detections (estimated)   │
+│ Vision analysis     │ ~16min    │ ~40 screenshots (estimated)  │
+└─────────────────────┴───────────┴──────────────────────────────┘
+
+Total estimated time: ~25 minutes
+Tip: Use --no-vision for faster processing (saves ~60% time)
+```
+
+### Dry Run Mode
+
+Run transcription and detection to see exactly what issues will be found, then stop:
+
+```bash
+screenscribe review video.mov --dry-run
+```
+
+This actually processes the video (transcription takes ~30s), but stops before:
+- Taking screenshots
+- Running AI analysis
+- Generating full reports
+
+Output:
+```
+─────────────────── Dry Run Results ───────────────────
+
+Found 44 issues:
+  • 18 bugs
+  • 14 changes
+  • 12 UI issues
+
+Sample detections:
+  1. [bug] @ 01:23: Ten przycisk nie działa, trzeba to naprawić...
+  2. [change] @ 02:45: Powinniśmy zmienić ten layout na bardziej...
+  3. [ui] @ 03:12: Modal jest za mały, nie widać całego tekstu...
+  ... and 41 more
+
+Estimated time for full processing:
+  Semantic analysis: ~8min (44 detections x ~12s)
+  Vision analysis: ~18min (44 screenshots x ~25s)
+
+Run without --dry-run to process fully.
+```
+
+### When to Use Which
+
+| Mode | Use When |
+|------|----------|
+| `--estimate` | Quick check before starting, no API calls |
+| `--dry-run` | Want to see actual detections before full processing |
+| (no flag) | Ready to run full analysis |
+
 ## Custom Keywords
 
 ScreenScribe allows you to define custom keywords for issue detection, tailored to your project's vocabulary.
@@ -389,6 +464,53 @@ rm -rf ./video_review/.screenscribe_cache/
 # Or just don't use --resume
 screenscribe review video.mov
 ```
+
+## Error Handling
+
+ScreenScribe uses a "best effort" approach - if something fails, it continues and gives you partial results.
+
+### What Happens When Things Fail
+
+| If this fails... | ScreenScribe will... |
+|------------------|----------------------|
+| Semantic analysis | Continue without AI insights, report basic detections |
+| Vision analysis | Continue without screenshot analysis |
+| Executive summary | Continue with individual analyses |
+| Single API request | Retry 3 times with backoff, then skip that item |
+
+### Errors in Reports
+
+When errors occur, they appear in your report:
+
+**In Markdown:**
+```markdown
+## ⚠️ Processing Errors
+
+Some analysis steps encountered errors but processing continued:
+
+- **semantic_analysis:** Connection timeout after 3 retries
+- **vision_analysis:** API rate limit exceeded
+```
+
+**In JSON:**
+```json
+{
+  "errors": [
+    {"stage": "semantic_analysis", "message": "Connection timeout"},
+    {"stage": "vision_analysis", "message": "Rate limit exceeded"}
+  ]
+}
+```
+
+### Partial Results Are Still Useful
+
+Even with errors, you get:
+- Full transcript
+- All detected issues
+- Screenshots
+- Whatever AI analysis succeeded
+
+This means you never lose work due to a temporary API issue.
 
 ## Troubleshooting
 

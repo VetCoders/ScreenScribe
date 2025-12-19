@@ -17,8 +17,11 @@ ScreenScribe extracts actionable insights from screencast recordings by transcri
 - **Vision Analysis**: Optional screenshot analysis using vision-capable models
 - **Report Generation**: Creates JSON and Markdown reports with executive summaries
 - **Resumable Pipeline**: Checkpoint system allows resuming interrupted processing
+- **Graceful Degradation**: Best-effort processing - errors don't stop the pipeline
 - **Retry Logic**: Automatic retry with exponential backoff for API resilience
 - **i18n Support**: Prompts adapt to selected language (Polish, English)
+- **Dry Run Mode**: Preview what would be processed before committing
+- **Time Estimates**: Get processing time estimates before starting
 
 ## Tech Stack
 
@@ -82,6 +85,12 @@ screenscribe config --set-key YOUR_LIBRAXIS_API_KEY
 ```bash
 # Full analysis of a screencast video
 screenscribe review path/to/video.mov
+
+# See time estimate before processing
+screenscribe review video.mov --estimate
+
+# Dry run: transcribe + detect only (no AI, no screenshots)
+screenscribe review video.mov --dry-run
 
 # Output to specific directory
 screenscribe review video.mov -o ./my-review
@@ -193,6 +202,8 @@ Options:
   --json/--no-json          Save JSON report (default: enabled)
   --markdown/--no-markdown  Save Markdown report (default: enabled)
   --resume                  Resume from previous checkpoint if available
+  --estimate                Show time estimate without processing
+  --dry-run                 Run transcription and detection only, then stop
 ```
 
 ### `screenscribe transcribe`

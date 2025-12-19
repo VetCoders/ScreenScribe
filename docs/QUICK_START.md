@@ -61,7 +61,15 @@ Nagraj swój ekran (np. QuickTime, OBS, Loom) i **mów na głos** co widzisz:
 
 Zapisz nagranie jako plik `.mov` lub `.mp4`.
 
-### Krok 2: Uruchom analizę
+### Krok 2: Sprawdź ile to potrwa (opcjonalne)
+
+```bash
+screenscribe review ~/Desktop/moje-nagranie.mov --estimate
+```
+
+Zobaczysz tabelkę z szacowanym czasem dla każdego kroku.
+
+### Krok 3: Uruchom analizę
 
 ```bash
 screenscribe review ~/Desktop/moje-nagranie.mov
@@ -74,7 +82,7 @@ To wszystko! ScreenScribe:
 - Zrobi screenshoty
 - Wygeneruje raport
 
-### Krok 3: Sprawdź wyniki
+### Krok 4: Sprawdź wyniki
 
 W folderze `moje-nagranie_review/` znajdziesz:
 
@@ -91,6 +99,17 @@ Otwórz `report.md` w dowolnym edytorze Markdown (np. VS Code, Typora) lub na Gi
 ---
 
 ## Opcje dla zaawansowanych
+
+### Podgląd przed pełną analizą
+
+Chcesz zobaczyć co ScreenScribe znajdzie, zanim uruchomisz pełną analizę?
+
+```bash
+# Tylko transkrypcja + wykrywanie (bez AI, bez screenshotów)
+screenscribe review nagranie.mov --dry-run
+```
+
+Zobaczysz listę wykrytych problemów i szacowany czas dla pełnej analizy.
 
 ### Szybsza analiza (bez AI)
 
