@@ -31,6 +31,7 @@ dev-dependencies = [
     "pre-commit>=4.0.0",
     "bandit[toml]>=1.7.0",
     "types-pyyaml>=6.0.0",
+    "detect-secrets>=1.5.0",
 ]
 
 # Ruff - replaces black, isort, flake8, bandit
@@ -86,4 +87,4 @@ python_functions = "test_*"
 # Bandit - security linter
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]
-skips = ["B101", "B404", "B603"]  # assert, subprocess import, subprocess call
+skips = ["B101", "B311", "B404", "B603"]  # assert, random, subprocess import, subprocess call

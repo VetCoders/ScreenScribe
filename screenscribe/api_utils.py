@@ -85,9 +85,7 @@ def retry_request(
 
             # Check if we have retries left
             if attempt >= max_retries:
-                console.print(
-                    f"[red]{operation_name} failed after {max_retries + 1} attempts[/]"
-                )
+                console.print(f"[red]{operation_name} failed after {max_retries + 1} attempts[/]")
                 raise
 
             # Calculate delay with exponential backoff

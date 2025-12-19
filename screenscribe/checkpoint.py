@@ -153,9 +153,7 @@ def checkpoint_valid_for_video(
     return True
 
 
-def create_checkpoint(
-    video_path: Path, output_dir: Path, language: str
-) -> PipelineCheckpoint:
+def create_checkpoint(video_path: Path, output_dir: Path, language: str) -> PipelineCheckpoint:
     """Create a new checkpoint for a video."""
     return PipelineCheckpoint(
         video_path=str(video_path.absolute()),
@@ -186,9 +184,7 @@ def deserialize_transcription(data: dict[str, Any]) -> TranscriptionResult:
         Segment(id=s["id"], start=s["start"], end=s["end"], text=s["text"])
         for s in data["segments"]
     ]
-    return TranscriptionResult(
-        text=data["text"], language=data["language"], segments=segments
-    )
+    return TranscriptionResult(text=data["text"], language=data["language"], segments=segments)
 
 
 def serialize_detection(detection: Detection) -> dict[str, Any]:

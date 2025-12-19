@@ -13,7 +13,6 @@ from screenscribe.detect import (
 )
 from screenscribe.transcribe import Segment, TranscriptionResult
 
-
 # --- Fixtures ---
 
 

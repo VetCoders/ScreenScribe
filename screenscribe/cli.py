@@ -201,9 +201,7 @@ def review(
     if checkpoint.screenshots:
         screenshots = [deserialize_screenshot(s) for s in checkpoint.screenshots]
     if checkpoint.semantic_analyses:
-        semantic_analyses = [
-            deserialize_semantic_analysis(s) for s in checkpoint.semantic_analyses
-        ]
+        semantic_analyses = [deserialize_semantic_analysis(s) for s in checkpoint.semantic_analyses]
     executive_summary = checkpoint.executive_summary
     visual_summary = checkpoint.visual_summary
 
@@ -496,7 +494,9 @@ def version() -> None:
     """Show version information."""
     console.print(f"[bold]ScreenScribe v{__version__}[/]")
     console.print("[dim]Video review automation powered by LibraxisAI[/]")
-    console.print("[dim]⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Klaudiusz (AI) & Mikserka (AI)[/]")
+    console.print(
+        "[dim]⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Klaudiusz (AI) & Mikserka (AI)[/]"
+    )
 
 
 if __name__ == "__main__":
