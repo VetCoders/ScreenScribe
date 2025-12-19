@@ -324,4 +324,5 @@ MIT License
 
 ---
 
-**Created by M&K ⌜©2025⌟ The LibraxisAI Team**
+**Made with (งಠ_ಠ)ง by the ⌜ ScreenScribe ⌟ 𝖙𝖊𝖆𝖒 (c) 2025
+Maciej & Monika + Klaudiusz (AI) + Mixerka (AI)**

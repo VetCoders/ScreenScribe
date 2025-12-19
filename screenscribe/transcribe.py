@@ -10,8 +10,8 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 console = Console()
 
-# LibraxisAI STT endpoints
-LIBRAXIS_STT_URL = "https://api.libraxis.cloud/v1/audio/transcriptions"
+# Default LibraxisAI STT endpoints (used only as fallback)
+DEFAULT_LIBRAXIS_STT_URL = "https://api.libraxis.cloud/v1/audio/transcriptions"
 LOCAL_STT_URL = "http://localhost:8237/transcribe"
 
 
@@ -35,7 +35,11 @@ class TranscriptionResult:
 
 
 def transcribe_audio(
-    audio_path: Path, language: str = "pl", use_local: bool = False, api_key: str | None = None
+    audio_path: Path,
+    language: str = "pl",
+    use_local: bool = False,
+    api_key: str | None = None,
+    stt_endpoint: str | None = None,
 ) -> TranscriptionResult:
     """
     Transcribe audio using LibraxisAI STT.
@@ -45,6 +49,7 @@ def transcribe_audio(
         language: Language code (default: pl)
         use_local: Use local STT server instead of cloud
         api_key: LibraxisAI API key (reads from LIBRAXIS_API_KEY env if not provided)
+        stt_endpoint: Custom STT endpoint URL (overrides default)
 
     Returns:
         TranscriptionResult with full text and segments
@@ -61,7 +66,13 @@ def transcribe_audio(
                 "Set it or use --local flag for local STT."
             )
 
-    url = LOCAL_STT_URL if use_local else LIBRAXIS_STT_URL
+    # Determine URL: local > custom endpoint > default cloud
+    if use_local:
+        url = LOCAL_STT_URL
+    elif stt_endpoint:
+        url = stt_endpoint
+    else:
+        url = DEFAULT_LIBRAXIS_STT_URL
 
     console.print(f"[blue]Transcribing:[/] {audio_path.name}")
     console.print(f"[dim]Using {'local' if use_local else 'cloud'} STT[/]")
