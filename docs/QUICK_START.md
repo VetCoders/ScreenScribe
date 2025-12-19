@@ -41,6 +41,23 @@ choco install ffmpeg
 sudo apt install ffmpeg
 ```
 
+### Instalacja ScreenScribe (jednorazowo)
+
+```bash
+# Przejdź do folderu z projektem
+cd ~/Git/ScreenScribe   # lub gdzie masz sklonowane repo
+
+# Zainstaluj globalnie
+uv tool install .
+```
+
+Teraz komenda `screenscribe` będzie działać z każdego miejsca.
+
+> **Alternatywa:** Jeśli nie chcesz instalować globalnie, zawsze możesz uruchomić przez:
+> ```bash
+> uv run screenscribe review video.mov
+> ```
+
 ### Ustawienie klucza API (jednorazowo)
 
 ```bash
