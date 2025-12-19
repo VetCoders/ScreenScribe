@@ -1,12 +1,52 @@
 """Audio extraction from video files using FFmpeg."""
 
+import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 from rich.console import Console
 
 console = Console()
+
+
+class FFmpegNotFoundError(Exception):
+    """Raised when FFmpeg is not installed."""
+
+    pass
+
+
+def check_ffmpeg_installed() -> None:
+    """
+    Check if FFmpeg and FFprobe are installed and accessible.
+
+    Raises:
+        FFmpegNotFoundError: If FFmpeg or FFprobe is not found
+    """
+    ffmpeg_path = shutil.which("ffmpeg")
+    ffprobe_path = shutil.which("ffprobe")
+
+    missing = []
+    if not ffmpeg_path:
+        missing.append("ffmpeg")
+    if not ffprobe_path:
+        missing.append("ffprobe")
+
+    if missing:
+        # Detect platform for install instructions
+        if sys.platform == "darwin":
+            install_cmd = "brew install ffmpeg"
+        elif sys.platform == "win32":
+            install_cmd = "choco install ffmpeg"
+        else:
+            install_cmd = "sudo apt install ffmpeg"
+
+        raise FFmpegNotFoundError(
+            f"Required tools not found: {', '.join(missing)}\n\n"
+            f"Install FFmpeg:\n  {install_cmd}\n\n"
+            f"Then try again."
+        )
 
 
 def extract_audio(video_path: Path, output_path: Path | None = None) -> Path:

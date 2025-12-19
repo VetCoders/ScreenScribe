@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from . import __version__
-from .audio import extract_audio, get_video_duration
+from .audio import FFmpegNotFoundError, check_ffmpeg_installed, extract_audio, get_video_duration
 from .checkpoint import (
     PipelineCheckpoint,
     checkpoint_valid_for_video,
@@ -44,6 +44,101 @@ app = typer.Typer(
     help="Video review automation - extract bugs and changes from screencast commentary.",
     add_completion=False,
 )
+
+# Time estimates (seconds per unit)
+ESTIMATE_STT_PER_MINUTE = 2.0  # ~2s per minute of video
+ESTIMATE_SEMANTIC_PER_DETECTION = 12.0  # ~12s per detection
+ESTIMATE_VISION_PER_DETECTION = 25.0  # ~25s per screenshot
+
+
+def _show_estimate(
+    duration: float,
+    semantic: bool,
+    vision: bool,
+    detection_count: int | None = None,
+) -> None:
+    """Show estimated processing times."""
+    from rich.table import Table
+
+    table = Table(title="Estimated Processing Time")
+    table.add_column("Step", style="cyan")
+    table.add_column("Estimate", justify="right")
+    table.add_column("Notes", style="dim")
+
+    # Audio extraction (~5s fixed)
+    table.add_row("Audio extraction", "~5s", "FFmpeg")
+
+    # STT transcription
+    video_minutes = duration / 60
+    stt_time = max(30, video_minutes * ESTIMATE_STT_PER_MINUTE)
+    table.add_row("Transcription", f"~{int(stt_time)}s", f"{video_minutes:.1f} min video")
+
+    # Detection (~instant)
+    table.add_row("Issue detection", "<1s", "Keyword matching")
+
+    # Screenshot extraction
+    table.add_row("Screenshots", "~10s", "FFmpeg frame extraction")
+
+    # Semantic analysis (if enabled)
+    if semantic:
+        if detection_count:
+            sem_time = detection_count * ESTIMATE_SEMANTIC_PER_DETECTION
+            table.add_row(
+                "Semantic analysis",
+                f"~{int(sem_time / 60)}min",
+                f"{detection_count} detections x ~{int(ESTIMATE_SEMANTIC_PER_DETECTION)}s",
+            )
+        else:
+            # Estimate ~3-5 detections per minute of video
+            est_detections = int(video_minutes * 4)
+            sem_time = est_detections * ESTIMATE_SEMANTIC_PER_DETECTION
+            table.add_row(
+                "Semantic analysis",
+                f"~{int(sem_time / 60)}min",
+                f"~{est_detections} detections (estimated)",
+            )
+    else:
+        table.add_row("Semantic analysis", "skipped", "--no-semantic")
+
+    # Vision analysis (if enabled)
+    if vision:
+        if detection_count:
+            vis_time = detection_count * ESTIMATE_VISION_PER_DETECTION
+            table.add_row(
+                "Vision analysis",
+                f"~{int(vis_time / 60)}min",
+                f"{detection_count} screenshots x ~{int(ESTIMATE_VISION_PER_DETECTION)}s",
+            )
+        else:
+            est_detections = int(video_minutes * 4)
+            vis_time = est_detections * ESTIMATE_VISION_PER_DETECTION
+            table.add_row(
+                "Vision analysis",
+                f"~{int(vis_time / 60)}min",
+                f"~{est_detections} screenshots (estimated)",
+            )
+    else:
+        table.add_row("Vision analysis", "skipped", "--no-vision")
+
+    console.print(table)
+
+    # Total estimate
+    total_fixed = 5 + stt_time + 1 + 10
+    if detection_count:
+        total_sem = detection_count * ESTIMATE_SEMANTIC_PER_DETECTION if semantic else 0
+        total_vis = detection_count * ESTIMATE_VISION_PER_DETECTION if vision else 0
+    else:
+        est_detections = int(video_minutes * 4)
+        total_sem = est_detections * ESTIMATE_SEMANTIC_PER_DETECTION if semantic else 0
+        total_vis = est_detections * ESTIMATE_VISION_PER_DETECTION if vision else 0
+
+    total = total_fixed + total_sem + total_vis
+    console.print(f"\n[bold]Total estimated time:[/] ~{int(total / 60)} minutes")
+
+    if not semantic and not vision:
+        console.print("[dim]Tip: Without AI analysis, processing is very fast![/]")
+    elif vision:
+        console.print("[dim]Tip: Use --no-vision for faster processing (saves ~60% time)[/]")
 
 
 @app.command()
@@ -125,6 +220,20 @@ def review(
             help="Resume from previous checkpoint if available",
         ),
     ] = False,
+    estimate: Annotated[
+        bool,
+        typer.Option(
+            "--estimate",
+            help="Show time estimate without processing (uses video duration)",
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Run transcription and detection only, show what would be processed",
+        ),
+    ] = False,
 ) -> None:
     """
     Analyze a screencast video for bugs and change requests.
@@ -133,6 +242,8 @@ def review(
     captures screenshots, and optionally analyzes with AI models.
 
     Use --resume to continue from a previous interrupted run.
+    Use --estimate to see time estimates without processing.
+    Use --dry-run to run only transcription and detection (no AI, no screenshots).
     """
     console.print(
         Panel(
@@ -141,6 +252,13 @@ def review(
             border_style="cyan",
         )
     )
+
+    # Check FFmpeg is installed
+    try:
+        check_ffmpeg_installed()
+    except FFmpegNotFoundError as e:
+        console.print(f"[red]Error:[/] {e}")
+        raise typer.Exit(1) from None
 
     # Load configuration
     config = ScreenScribeConfig.load()
@@ -160,11 +278,17 @@ def review(
     )
 
     # Get video duration
+    duration = 0.0
     try:
         duration = get_video_duration(video)
         console.print(f"[blue]Duration:[/] {format_timestamp(duration)}\n")
     except RuntimeError:
         console.print("[yellow]Could not determine video duration[/]\n")
+
+    # --estimate mode: show time estimates and exit
+    if estimate:
+        _show_estimate(duration, semantic, vision)
+        return
 
     # Check for existing checkpoint
     checkpoint: PipelineCheckpoint | None = None
@@ -186,12 +310,13 @@ def review(
 
     # Initialize variables from checkpoint or fresh
     transcription = None
-    detections = []
-    screenshots = []
-    semantic_analyses = []
-    vision_analyses = []
+    detections: list = []
+    screenshots: list = []
+    semantic_analyses: list = []
+    vision_analyses: list = []
     executive_summary = ""
     visual_summary = ""
+    pipeline_errors: list[dict] = []  # Collect errors for best-effort processing
 
     # Restore state from checkpoint
     if checkpoint.transcription:
@@ -258,6 +383,30 @@ def review(
         delete_checkpoint(output)
         return
 
+    # --dry-run mode: show detection results and estimates, then exit
+    if dry_run:
+        console.rule("[bold]Dry Run Results[/]")
+        console.print(f"\n[green]Found {len(detections)} issues:[/]")
+        console.print(f"  • {sum(1 for d in detections if d.category == 'bug')} bugs")
+        console.print(f"  • {sum(1 for d in detections if d.category == 'change')} changes")
+        console.print(f"  • {sum(1 for d in detections if d.category == 'ui')} UI issues")
+
+        console.print("\n[bold]Sample detections:[/]")
+        for i, d in enumerate(detections[:5], 1):
+            console.print(
+                f"  {i}. [{d.category}] @ {format_timestamp(d.segment.start)}: "
+                f"{d.segment.text[:60]}..."
+            )
+        if len(detections) > 5:
+            console.print(f"  ... and {len(detections) - 5} more")
+
+        console.print("\n[bold]Estimated time for full processing:[/]")
+        _show_estimate(duration, semantic, vision, detection_count=len(detections))
+
+        console.print("\n[dim]Run without --dry-run to process fully.[/]")
+        delete_checkpoint(output)
+        return
+
     # Step 4: Extract screenshots
     if not checkpoint.is_stage_complete("screenshots"):
         console.rule("[bold]Step 4: Screenshot Extraction[/]")
@@ -270,17 +419,63 @@ def review(
     else:
         console.print("[dim]Step 4: Screenshot Extraction - skipped (cached)[/]")
 
-    # Step 5: Semantic Analysis (LLM)
+    # Save basic report immediately (before AI analysis)
+    # This ensures we have results even if AI steps fail
+    if json_report:
+        save_enhanced_json_report(
+            detections,
+            screenshots,
+            video,
+            output / "report.json",
+            semantic_analyses=[],
+            vision_analyses=[],
+            executive_summary="",
+            errors=[],
+        )
+    if markdown_report:
+        save_enhanced_markdown_report(
+            detections,
+            screenshots,
+            video,
+            output / "report.md",
+            semantic_analyses=[],
+            vision_analyses=[],
+            executive_summary="",
+            visual_summary="",
+            errors=[],
+        )
+    console.print("[dim]Basic report saved (AI analysis pending)[/]")
+
+    # Step 5: Semantic Analysis (LLM) - best effort
     if semantic and config.api_key:
         if not checkpoint.is_stage_complete("semantic"):
             console.rule("[bold]Step 5: Semantic Analysis (LLM)[/]")
-            semantic_analyses = analyze_detections_semantically(detections, config)
-            checkpoint.semantic_analyses = [
-                serialize_semantic_analysis(s) for s in semantic_analyses
-            ]
-            if semantic_analyses:
-                executive_summary = generate_executive_summary(semantic_analyses, config)
-                checkpoint.executive_summary = executive_summary
+            try:
+                semantic_analyses = analyze_detections_semantically(detections, config)
+                checkpoint.semantic_analyses = [
+                    serialize_semantic_analysis(s) for s in semantic_analyses
+                ]
+                if semantic_analyses:
+                    try:
+                        executive_summary = generate_executive_summary(semantic_analyses, config)
+                        checkpoint.executive_summary = executive_summary
+                    except Exception as e:
+                        console.print(f"[yellow]Executive summary failed: {e}[/]")
+                        pipeline_errors.append(
+                            {
+                                "stage": "executive_summary",
+                                "message": str(e),
+                            }
+                        )
+            except Exception as e:
+                console.print(f"[yellow]Semantic analysis failed: {e}[/]")
+                console.print("[dim]Continuing without semantic analysis...[/]")
+                pipeline_errors.append(
+                    {
+                        "stage": "semantic_analysis",
+                        "message": str(e),
+                    }
+                )
             checkpoint.mark_stage_complete("semantic")
             save_checkpoint(checkpoint, output)
             console.print()
@@ -289,14 +484,24 @@ def review(
     else:
         checkpoint.mark_stage_complete("semantic")
 
-    # Step 6: Vision Analysis
+    # Step 6: Vision Analysis - best effort
     if vision and config.api_key:
         if not checkpoint.is_stage_complete("vision"):
             console.rule("[bold]Step 6: Vision Analysis[/]")
-            vision_analyses = analyze_screenshots(screenshots, config)
-            if vision_analyses:
-                visual_summary = generate_visual_summary(vision_analyses, config)
-                checkpoint.visual_summary = visual_summary
+            try:
+                vision_analyses = analyze_screenshots(screenshots, config)
+                if vision_analyses:
+                    visual_summary = generate_visual_summary(vision_analyses, config)
+                    checkpoint.visual_summary = visual_summary
+            except Exception as e:
+                console.print(f"[yellow]Vision analysis failed: {e}[/]")
+                console.print("[dim]Continuing without vision analysis...[/]")
+                pipeline_errors.append(
+                    {
+                        "stage": "vision_analysis",
+                        "message": str(e),
+                    }
+                )
             checkpoint.mark_stage_complete("vision")
             save_checkpoint(checkpoint, output)
             console.print()
@@ -317,6 +522,7 @@ def review(
             semantic_analyses=semantic_analyses,
             vision_analyses=vision_analyses,
             executive_summary=executive_summary,
+            errors=pipeline_errors,
         )
 
     if markdown_report:
@@ -329,7 +535,13 @@ def review(
             vision_analyses=vision_analyses,
             executive_summary=executive_summary,
             visual_summary=visual_summary,
+            errors=pipeline_errors,
         )
+
+    # Show errors summary if any
+    if pipeline_errors:
+        console.print(f"[yellow]⚠️ {len(pipeline_errors)} error(s) occurred during processing.[/]")
+        console.print("[dim]Check report for details. Results are partial.[/]")
 
     console.print()
 
