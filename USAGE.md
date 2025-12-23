@@ -8,7 +8,10 @@ This guide covers practical examples and workflows for using ScreenScribe to ana
 2. [Common Workflows](#common-workflows)
 3. [Understanding Output](#understanding-output)
 4. [Advanced Options](#advanced-options)
-5. [Troubleshooting](#troubleshooting)
+5. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
+6. [Custom Keywords](#custom-keywords)
+7. [Resuming Interrupted Processing](#resuming-interrupted-processing)
+8. [Troubleshooting](#troubleshooting)
 
 ## Basic Usage
 
@@ -265,6 +268,250 @@ Semantic Analysis: True
 Vision Analysis: True
 ```
 
+## Time Estimates and Dry Run
+
+Before committing to a full analysis (which can take 30+ minutes for long videos), you can preview what will happen.
+
+### Quick Time Estimate
+
+See how long processing will take without doing any work:
+
+```bash
+screenscribe review video.mov --estimate
+```
+
+Output:
+```
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃              Estimated Processing Time                         ┃
+┣━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
+┃ Step                ┃ Estimate  ┃ Notes                        ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ Audio extraction    │ ~5s       │ FFmpeg                       │
+│ Transcription       │ ~30s      │ 15.0 min video               │
+│ Issue detection     │ <1s       │ Keyword matching             │
+│ Screenshots         │ ~10s      │ FFmpeg frame extraction      │
+│ Semantic analysis   │ ~8min     │ ~40 detections (estimated)   │
+│ Vision analysis     │ ~16min    │ ~40 screenshots (estimated)  │
+└─────────────────────┴───────────┴──────────────────────────────┘
+
+Total estimated time: ~25 minutes
+Tip: Use --no-vision for faster processing (saves ~60% time)
+```
+
+### Dry Run Mode
+
+Run transcription and detection to see exactly what issues will be found, then stop:
+
+```bash
+screenscribe review video.mov --dry-run
+```
+
+This actually processes the video (transcription takes ~30s), but stops before:
+- Taking screenshots
+- Running AI analysis
+- Generating full reports
+
+Output:
+```
+─────────────────── Dry Run Results ───────────────────
+
+Found 44 issues:
+  • 18 bugs
+  • 14 changes
+  • 12 UI issues
+
+Sample detections:
+  1. [bug] @ 01:23: Ten przycisk nie działa, trzeba to naprawić...
+  2. [change] @ 02:45: Powinniśmy zmienić ten layout na bardziej...
+  3. [ui] @ 03:12: Modal jest za mały, nie widać całego tekstu...
+  ... and 41 more
+
+Estimated time for full processing:
+  Semantic analysis: ~8min (44 detections x ~12s)
+  Vision analysis: ~18min (44 screenshots x ~25s)
+
+Run without --dry-run to process fully.
+```
+
+### When to Use Which
+
+| Mode | Use When |
+|------|----------|
+| `--estimate` | Quick check before starting, no API calls |
+| `--dry-run` | Want to see actual detections before full processing |
+| (no flag) | Ready to run full analysis |
+
+## Custom Keywords
+
+ScreenScribe allows you to define custom keywords for issue detection, tailored to your project's vocabulary.
+
+### Creating a Keywords File
+
+```bash
+# Generate default keywords.yaml in current directory
+screenscribe config --init-keywords
+```
+
+This creates a `keywords.yaml` file you can customize:
+
+```yaml
+# keywords.yaml
+bug:
+  # Polish
+  - "nie działa"
+  - "błąd"
+  - "zepsute"
+  # English
+  - "broken"
+  - "crash"
+  - "error"
+  # Project-specific
+  - "regression"
+  - "flaky test"
+
+change:
+  - "trzeba zmienić"
+  - "should refactor"
+  - "TODO"
+  - "FIXME"
+
+ui:
+  - "button"
+  - "modal"
+  - "dropdown"
+  - "navbar"
+```
+
+### Using Custom Keywords
+
+```bash
+# Explicit file path
+screenscribe review video.mov --keywords-file ~/my-project/keywords.yaml
+
+# Auto-detect (looks for keywords.yaml in current directory)
+cd ~/my-project
+screenscribe review ~/Videos/review.mov
+```
+
+### Keywords Search Order
+
+1. Explicit `--keywords-file` path
+2. `keywords.yaml` in current directory
+3. `screenscribe_keywords.yaml` in current directory
+4. `.screenscribe/keywords.yaml` in current directory
+5. Built-in defaults (Polish + English)
+
+## Resuming Interrupted Processing
+
+Long videos with many issues can take 30+ minutes to process. If processing is interrupted (Ctrl+C, network error, system restart), you can resume from where it left off.
+
+### How It Works
+
+ScreenScribe automatically saves checkpoints after each pipeline stage:
+
+1. Audio extraction
+2. Transcription
+3. Issue detection
+4. Screenshot extraction
+5. Semantic analysis
+6. Vision analysis
+
+Checkpoints are stored in `.screenscribe_cache/` inside the output directory.
+
+### Resuming Processing
+
+```bash
+# Resume from last checkpoint
+screenscribe review video.mov --resume
+
+# With specific output directory
+screenscribe review video.mov -o ./my-review --resume
+```
+
+When resuming, you'll see:
+
+```
+Resuming from checkpoint: 4 stages complete
+Completed: audio, transcription, detection, screenshots
+
+Step 1: Audio Extraction - skipped (cached)
+Step 2: Transcription - skipped (cached)
+Step 3: Issue Detection - skipped (cached)
+Step 4: Screenshot Extraction - skipped (cached)
+Step 5: Semantic Analysis (LLM)
+  [1/44] Analyzing bug @ 12.3s...
+```
+
+### Checkpoint Validation
+
+Checkpoints are validated before resuming:
+
+- Video file hash must match (detects if video changed)
+- Output directory must match
+- Language setting must match
+
+If validation fails, processing starts fresh.
+
+### Clearing Checkpoints
+
+Checkpoints are automatically deleted after successful completion. To force a fresh start:
+
+```bash
+# Remove checkpoint manually
+rm -rf ./video_review/.screenscribe_cache/
+
+# Or just don't use --resume
+screenscribe review video.mov
+```
+
+## Error Handling
+
+ScreenScribe uses a "best effort" approach - if something fails, it continues and gives you partial results.
+
+### What Happens When Things Fail
+
+| If this fails... | ScreenScribe will... |
+|------------------|----------------------|
+| Semantic analysis | Continue without AI insights, report basic detections |
+| Vision analysis | Continue without screenshot analysis |
+| Executive summary | Continue with individual analyses |
+| Single API request | Retry 3 times with backoff, then skip that item |
+
+### Errors in Reports
+
+When errors occur, they appear in your report:
+
+**In Markdown:**
+```markdown
+## ⚠️ Processing Errors
+
+Some analysis steps encountered errors but processing continued:
+
+- **semantic_analysis:** Connection timeout after 3 retries
+- **vision_analysis:** API rate limit exceeded
+```
+
+**In JSON:**
+```json
+{
+  "errors": [
+    {"stage": "semantic_analysis", "message": "Connection timeout"},
+    {"stage": "vision_analysis", "message": "Rate limit exceeded"}
+  ]
+}
+```
+
+### Partial Results Are Still Useful
+
+Even with errors, you get:
+- Full transcript
+- All detected issues
+- Screenshots
+- Whatever AI analysis succeeded
+
+This means you never lose work due to a temporary API issue.
+
 ## Troubleshooting
 
 ### "No API key" Error
@@ -312,13 +559,20 @@ If no issues are found, check:
    cat transcript.txt | grep -i "bug\|error\|problem\|zmiana"
    ```
 
-### API Timeout
+### API Timeout or Network Errors
 
-For large videos with many issues, the API might timeout. Solutions:
+ScreenScribe includes automatic retry logic with exponential backoff. Most transient errors are handled automatically.
 
-1. Process in smaller batches (split video)
+If you still experience issues:
+
+1. Use `--resume` to continue from where it stopped
 2. Skip vision analysis: `--no-vision`
-3. Increase timeout in code (edit `semantic.py`, `vision.py`)
+3. Process in smaller batches (split video)
+
+```bash
+# Resume after network error
+screenscribe review video.mov --resume
+```
 
 ### Permission Denied
 
@@ -366,4 +620,6 @@ screenscribe review part2.mov -o review-part2
 
 ---
 
-**Created by M&K (c)2025 The LibraxisAI Team**
+**Made with (งಠ_ಠ)ง by ⌜ ScreenScribe ⌟ © 2025**
+
+*Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)*

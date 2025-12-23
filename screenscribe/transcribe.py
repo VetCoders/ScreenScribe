@@ -1,6 +1,5 @@
 """Transcription using LibraxisAI STT API."""
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,10 +7,12 @@ import httpx
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from .api_utils import retry_request
+
 console = Console()
 
-# LibraxisAI STT endpoints
-LIBRAXIS_STT_URL = "https://api.libraxis.cloud/v1/audio/transcriptions"
+# Default LibraxisAI STT endpoint (used if not configured otherwise)
+DEFAULT_STT_URL = "https://api.libraxis.cloud/v1/audio/transcriptions"
 LOCAL_STT_URL = "http://localhost:8237/transcribe"
 
 
@@ -35,7 +36,11 @@ class TranscriptionResult:
 
 
 def transcribe_audio(
-    audio_path: Path, language: str = "pl", use_local: bool = False, api_key: str | None = None
+    audio_path: Path,
+    language: str = "pl",
+    use_local: bool = False,
+    api_key: str | None = None,
+    stt_endpoint: str | None = None,
 ) -> TranscriptionResult:
     """
     Transcribe audio using LibraxisAI STT.
@@ -44,7 +49,8 @@ def transcribe_audio(
         audio_path: Path to audio file
         language: Language code (default: pl)
         use_local: Use local STT server instead of cloud
-        api_key: LibraxisAI API key (reads from LIBRAXIS_API_KEY env if not provided)
+        api_key: LibraxisAI API key
+        stt_endpoint: Custom STT endpoint URL (overrides default)
 
     Returns:
         TranscriptionResult with full text and segments
@@ -52,16 +58,20 @@ def transcribe_audio(
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-    # Get API key
-    if api_key is None:
-        api_key = os.environ.get("LIBRAXIS_API_KEY")
-        if api_key is None and not use_local:
-            raise ValueError(
-                "LIBRAXIS_API_KEY environment variable not set. "
-                "Set it or use --local flag for local STT."
-            )
+    # Validate API key for cloud usage
+    if not api_key and not use_local:
+        raise ValueError(
+            "API key required for cloud STT. "
+            "Set it via config or use --local flag for local STT."
+        )
 
-    url = LOCAL_STT_URL if use_local else LIBRAXIS_STT_URL
+    # Determine URL: local > custom endpoint > default cloud
+    if use_local:
+        url = LOCAL_STT_URL
+    elif stt_endpoint:
+        url = stt_endpoint
+    else:
+        url = DEFAULT_STT_URL
 
     console.print(f"[blue]Transcribing:[/] {audio_path.name}")
     console.print(f"[dim]Using {'local' if use_local else 'cloud'} STT[/]")
@@ -74,22 +84,30 @@ def transcribe_audio(
         progress.add_task("Transcribing audio...", total=None)
 
         with open(audio_path, "rb") as f:
-            files = {"file": (audio_path.name, f, "audio/mpeg")}
-            data = {
-                "model": "whisper-1",
-                "language": language,
-                "response_format": "verbose_json",
-            }
-            headers = {}
-            if api_key and not use_local:
-                headers["Authorization"] = f"Bearer {api_key}"
+            audio_content = f.read()
 
+        files = {"file": (audio_path.name, audio_content, "audio/mpeg")}
+        data = {
+            "model": "whisper-1",
+            "language": language,
+            "response_format": "verbose_json",
+        }
+        headers = {}
+        if api_key and not use_local:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        def do_transcribe() -> httpx.Response:
             # Long timeout for large files
             with httpx.Client(timeout=600.0) as client:
                 response = client.post(url, files=files, data=data, headers=headers)
+                response.raise_for_status()
+                return response
 
-    if response.status_code != 200:
-        raise RuntimeError(f"STT API error ({response.status_code}): {response.text}")
+        response = retry_request(
+            do_transcribe,
+            max_retries=3,
+            operation_name="STT transcription",
+        )
 
     result = response.json()
 

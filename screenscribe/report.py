@@ -152,7 +152,7 @@ def save_markdown_report(
         [
             "",
             "---",
-            "*Created by M&K (c)2025 The LibraxisAI Team*",
+            "*Made with (งಠ_ಠ)ง by ⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)*",
         ]
     )
 
@@ -168,9 +168,10 @@ def save_enhanced_json_report(
     screenshots: list[tuple[Detection, Path]],
     video_path: Path,
     output_path: Path,
-    semantic_analyses: list = None,
-    vision_analyses: list = None,
+    semantic_analyses: list | None = None,
+    vision_analyses: list | None = None,
     executive_summary: str = "",
+    errors: list[dict] | None = None,
 ) -> Path:
     """Save enhanced report with AI analyses as JSON."""
     report = {
@@ -184,6 +185,7 @@ def save_enhanced_json_report(
             "ui": sum(1 for d in detections if d.category == "ui"),
         },
         "severity_breakdown": {},
+        "errors": errors or [],
         "findings": [],
     }
 
@@ -246,10 +248,11 @@ def save_enhanced_markdown_report(
     screenshots: list[tuple[Detection, Path]],
     video_path: Path,
     output_path: Path,
-    semantic_analyses: list = None,
-    vision_analyses: list = None,
+    semantic_analyses: list | None = None,
+    vision_analyses: list | None = None,
     executive_summary: str = "",
     visual_summary: str = "",
+    errors: list[dict] | None = None,
 ) -> Path:
     """Save enhanced report with AI analyses as Markdown."""
     lines = [
@@ -308,6 +311,22 @@ def save_enhanced_markdown_report(
     # Visual summary
     if visual_summary:
         lines.extend([visual_summary, ""])
+
+    # Errors section (if any)
+    if errors:
+        lines.extend(
+            [
+                "## ⚠️ Processing Errors",
+                "",
+                "Some analysis steps encountered errors but processing continued:",
+                "",
+            ]
+        )
+        for error in errors:
+            stage = error.get("stage", "unknown")
+            message = error.get("message", "Unknown error")
+            lines.append(f"- **{stage}:** {message}")
+        lines.extend(["", "---", ""])
 
     # Detailed findings
     lines.extend(["## Findings", ""])
@@ -383,7 +402,7 @@ def save_enhanced_markdown_report(
         [
             "",
             "---",
-            "*Created by M&K (c)2025 The LibraxisAI Team*",
+            "*Made with (งಠ_ಠ)ง by ⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)*",
         ]
     )
 

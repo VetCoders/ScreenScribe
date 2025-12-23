@@ -4,17 +4,24 @@
 
 ScreenScribe extracts actionable insights from screencast recordings by transcribing audio commentary, detecting mentions of bugs, changes, and UI issues, capturing relevant screenshots, and generating comprehensive reports with AI-powered semantic analysis.
 
-> **Status:** v0.1.0 — Fully functional CLI with AI-powered analysis. Production-ready for single-video workflows.
+> **Status:** v0.1.0 — Fully functional CLI with AI-powered analysis.
 
 ## Features
 
 - **Audio Extraction**: Automatically extracts audio from video files (MOV, MP4, etc.) using FFmpeg
 - **Speech-to-Text**: Transcribes audio with word-level timestamps via LibraxisAI STT API
 - **Issue Detection**: Identifies bugs, change requests, and UI issues from Polish and English keywords
+- **Custom Keywords**: Define your own detection keywords via YAML configuration
 - **Screenshot Capture**: Extracts frames at timestamps where issues are mentioned
 - **Semantic Analysis**: Uses LLM to analyze each finding, assign severity, and suggest fixes
 - **Vision Analysis**: Optional screenshot analysis using vision-capable models
 - **Report Generation**: Creates JSON and Markdown reports with executive summaries
+- **Resumable Pipeline**: Checkpoint system allows resuming interrupted processing
+- **Graceful Degradation**: Best-effort processing - errors don't stop the pipeline
+- **Retry Logic**: Automatic retry with exponential backoff for API resilience
+- **i18n Support**: Prompts adapt to selected language (Polish, English)
+- **Dry Run Mode**: Preview what would be processed before committing
+- **Time Estimates**: Get processing time estimates before starting
 
 ## Tech Stack
 
@@ -79,11 +86,26 @@ screenscribe config --set-key YOUR_LIBRAXIS_API_KEY
 # Full analysis of a screencast video
 screenscribe review path/to/video.mov
 
+# See time estimate before processing
+screenscribe review video.mov --estimate
+
+# Dry run: transcribe + detect only (no AI, no screenshots)
+screenscribe review video.mov --dry-run
+
 # Output to specific directory
 screenscribe review video.mov -o ./my-review
 
 # Skip vision analysis (faster)
 screenscribe review video.mov --no-vision
+
+# Resume interrupted processing
+screenscribe review video.mov --resume
+
+# Use custom keywords
+screenscribe review video.mov --keywords-file my_keywords.yaml
+
+# English language (affects transcription + AI prompts)
+screenscribe review video.mov --lang en
 
 # Transcription only
 screenscribe transcribe video.mov -o transcript.txt
@@ -171,13 +193,17 @@ Full video analysis pipeline.
 screenscribe review VIDEO [OPTIONS]
 
 Options:
-  -o, --output PATH       Output directory (default: VIDEO_review/)
-  -l, --lang TEXT         Language code for transcription (default: pl)
-  --local                 Use local STT server instead of cloud
+  -o, --output PATH         Output directory (default: VIDEO_review/)
+  -l, --lang TEXT           Language code for transcription and AI prompts (default: pl)
+  -k, --keywords-file PATH  Custom keywords YAML file
+  --local                   Use local STT server instead of cloud
   --semantic/--no-semantic  Enable/disable LLM analysis (default: enabled)
-  --vision/--no-vision    Enable/disable vision analysis (default: enabled)
-  --json/--no-json        Save JSON report (default: enabled)
+  --vision/--no-vision      Enable/disable vision analysis (default: enabled)
+  --json/--no-json          Save JSON report (default: enabled)
   --markdown/--no-markdown  Save Markdown report (default: enabled)
+  --resume                  Resume from previous checkpoint if available
+  --estimate                Show time estimate without processing
+  --dry-run                 Run transcription and detection only, then stop
 ```
 
 ### `screenscribe transcribe`
@@ -203,6 +229,7 @@ screenscribe config [OPTIONS]
 Options:
   --show                  Show current configuration
   --init                  Create default config file
+  --init-keywords         Create keywords.yaml for customization
   --set-key TEXT          Set API key in config
 ```
 
@@ -219,6 +246,35 @@ ScreenScribe detects issues based on keywords in both Polish and English:
 **Changes**: zmiana, zmienić, poprawić, update, modify, refactor, rename...
 
 **UI Issues**: UI, interfejs, wygląd, layout, design, button, margin, padding...
+
+### Custom Keywords
+
+Create a custom keywords file for your project:
+
+```bash
+# Generate default keywords.yaml
+screenscribe config --init-keywords
+
+# Or use with review command
+screenscribe review video.mov --keywords-file my_keywords.yaml
+```
+
+Keywords file format (YAML):
+
+```yaml
+bug:
+  - "nie działa"
+  - "broken"
+  - "crash"
+change:
+  - "trzeba zmienić"
+  - "should fix"
+ui:
+  - "button"
+  - "layout"
+```
+
+ScreenScribe automatically searches for `keywords.yaml` in the current directory.
 
 ## Performance
 
@@ -256,16 +312,21 @@ uv run pytest
 
 ```
 screenscribe/
-├── __init__.py       # Version info
-├── cli.py            # Typer CLI interface
-├── config.py         # Configuration management
-├── audio.py          # FFmpeg audio extraction
-├── transcribe.py     # LibraxisAI STT integration
-├── detect.py         # Keyword-based issue detection
-├── screenshots.py    # Frame extraction
-├── semantic.py       # LLM semantic analysis
-├── vision.py         # Vision model analysis
-└── report.py         # Report generation (JSON/Markdown)
+├── __init__.py            # Version info
+├── cli.py                 # Typer CLI interface
+├── config.py              # Configuration management
+├── audio.py               # FFmpeg audio extraction
+├── transcribe.py          # LibraxisAI STT integration
+├── detect.py              # Keyword-based issue detection
+├── keywords.py            # Custom keywords loading (YAML)
+├── screenshots.py         # Frame extraction
+├── semantic.py            # LLM semantic analysis
+├── vision.py              # Vision model analysis
+├── report.py              # Report generation (JSON/Markdown)
+├── prompts.py             # i18n prompt templates (PL/EN)
+├── api_utils.py           # Retry logic, API utilities
+├── checkpoint.py          # Pipeline checkpointing
+└── default_keywords.yaml  # Default detection keywords
 ```
 
 ## API Integration
@@ -303,20 +364,22 @@ All code is fully type-hinted and passes strict mypy checks.
 - [x] CLI with 4 commands
 - [x] Pre-commit hooks
 - [x] Type hints (mypy strict)
+- [x] Custom keyword configuration (YAML)
+- [x] Progress save/resume (checkpointing)
+- [x] Retry logic with exponential backoff
+- [x] i18n prompts (PL/EN)
+- [x] Test suite (pytest)
 
 ### Planned
 
-- [ ] Test suite (pytest configured)
 - [ ] Local model support for LLM/Vision
 - [ ] Batch processing / queue system
-- [ ] Custom keyword configuration
-- [ ] Progress save/resume for long videos
+- [ ] More languages for prompts
+- [ ] Web UI
 
 ### Known Limitations
 
 - Vision analysis can be slow (~20+ min for many issues)
-- No error recovery mid-pipeline
-- Keywords are hardcoded (PL + EN only)
 
 ## License
 
@@ -324,4 +387,5 @@ MIT License
 
 ---
 
-**Created by M&K ⌜©2025⌟ The LibraxisAI Team**
+**Made with (งಠ_ಠ)ง by the ⌜ ScreenScribe ⌟ 𝖙𝖊𝖆𝖒 (c) 2025
+Maciej & Monika + Klaudiusz (AI) + Mixerka (AI)**

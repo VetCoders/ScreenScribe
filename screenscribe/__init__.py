@@ -2,7 +2,7 @@
 ScreenScribe - Video review automation for screencast commentary analysis.
 
 Extract bugs, changes, and action items from video walkthroughs.
-Created by M&K (c)2025 The LibraxisAI Team
+Made with (งಠ_ಠ)ง by ⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)
 """
 
 __version__ = "0.1.0"

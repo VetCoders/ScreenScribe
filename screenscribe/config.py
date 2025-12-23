@@ -16,11 +16,12 @@ DEFAULT_LLM_MODEL = "ai-suggestions"  # LibraxisAI default
 DEFAULT_VISION_MODEL = "ai-suggestions"  # Same model, API router handles vision
 
 # Config file locations (checked in order)
+# User config has priority - local .env is for development/examples only
 CONFIG_PATHS = [
-    Path.cwd() / ".env",  # Local project .env first
-    Path.home() / ".config" / "screenscribe" / "config.env",
-    Path.home() / ".screenscribe.env",
-    Path("/etc/screenscribe/config.env"),
+    Path.home() / ".config" / "screenscribe" / "config.env",  # User config (primary)
+    Path.home() / ".screenscribe.env",  # Alternative user config
+    Path("/etc/screenscribe/config.env"),  # System-wide config
+    # Note: Local .env is NOT auto-loaded - use env vars for overrides
 ]
 
 
@@ -101,11 +102,18 @@ class ScreenScribeConfig:
         if "api_key" in key_lower:
             self.api_key = value
         elif "api_base" in key_lower:
-            self.api_base = value
-            # Update endpoints
-            self.stt_endpoint = f"{value}/v1/audio/transcriptions"
-            self.llm_endpoint = f"{value}/v1/responses"
-            self.vision_endpoint = f"{value}/v1/responses"
+            # Normalize api_base - remove trailing paths like /v1/responses, /v1, etc.
+            normalized = value.rstrip("/")
+            # Strip common API path suffixes
+            for suffix in ["/v1/responses", "/v1/audio/transcriptions", "/v1/chat/completions", "/v1"]:
+                if normalized.endswith(suffix):
+                    normalized = normalized[: -len(suffix)]
+                    break
+            self.api_base = normalized
+            # Update endpoints with normalized base
+            self.stt_endpoint = f"{normalized}/v1/audio/transcriptions"
+            self.llm_endpoint = f"{normalized}/v1/responses"
+            self.vision_endpoint = f"{normalized}/v1/responses"
         elif "stt_model" in key_lower:
             self.stt_model = value
         elif "llm_model" in key_lower:
@@ -126,7 +134,7 @@ class ScreenScribeConfig:
         config_path = config_dir / "config.env"
 
         content = f"""# ScreenScribe Configuration
-# Created by M&K (c)2025 The LibraxisAI Team
+# Made with (งಠ_ಠ)ง by ⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)
 
 # API Key (required)
 LIBRAXIS_API_KEY={self.api_key}
