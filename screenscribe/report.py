@@ -1,14 +1,20 @@
 """Report generation for video review results."""
 
+from __future__ import annotations
+
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from .detect import Detection, format_timestamp
+
+if TYPE_CHECKING:
+    from .codebase import CodeMapping
 
 console = Console()
 
@@ -172,6 +178,7 @@ def save_enhanced_json_report(
     vision_analyses: list | None = None,
     executive_summary: str = "",
     errors: list[dict] | None = None,
+    code_mappings: list[CodeMapping] | None = None,
 ) -> Path:
     """Save enhanced report with AI analyses as JSON."""
     report = {
@@ -234,7 +241,34 @@ def save_enhanced_json_report(
                 "technical_observations": vis.technical_observations,
             }
 
+        # Add code mapping if available
+        if code_mappings:
+            mapping = next(
+                (m for m in code_mappings if m.finding_id == detection.segment.id), None
+            )
+            if mapping and mapping.matched_files:
+                finding["code_mapping"] = {
+                    "matched_files": mapping.matched_files,
+                    "search_patterns": mapping.search_patterns,
+                    "component_hints": mapping.component_hints,
+                }
+
         report["findings"].append(finding)
+
+    # Add top-level code_mappings summary
+    if code_mappings:
+        report["code_mappings"] = {
+            "total_mapped": sum(1 for m in code_mappings if m.matched_files),
+            "mappings": [
+                {
+                    "finding_id": m.finding_id,
+                    "component_hints": m.component_hints,
+                    "matched_files": m.matched_files,
+                }
+                for m in code_mappings
+                if m.matched_files
+            ],
+        }
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
@@ -253,6 +287,7 @@ def save_enhanced_markdown_report(
     executive_summary: str = "",
     visual_summary: str = "",
     errors: list[dict] | None = None,
+    code_mappings: list[CodeMapping] | None = None,
 ) -> Path:
     """Save enhanced report with AI analyses as Markdown."""
     lines = [
@@ -387,6 +422,23 @@ def save_enhanced_markdown_report(
                 lines.append("")
             if vis.design_feedback:
                 lines.append(f"**Design Feedback:** {vis.design_feedback}")
+                lines.append("")
+
+        # Code mapping
+        if code_mappings:
+            mapping = next(
+                (m for m in code_mappings if m.finding_id == detection.segment.id), None
+            )
+            if mapping and mapping.matched_files:
+                lines.extend(["**Suggested Files:**", ""])
+                for mf in mapping.matched_files[:5]:  # Top 5 matches
+                    confidence_pct = int(mf["confidence"] * 100)
+                    lines.append(
+                        f"- `{mf['path']}` ({confidence_pct}% confidence)"
+                    )
+                    if mf.get("testids"):
+                        for testid in mf["testids"][:2]:
+                            lines.append(f"  - Found: `{testid[:60]}...`" if len(testid) > 60 else f"  - Found: `{testid}`")
                 lines.append("")
 
         lines.extend(

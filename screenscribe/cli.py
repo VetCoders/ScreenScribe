@@ -34,6 +34,7 @@ from .report import (
     save_enhanced_markdown_report,
 )
 from .screenshots import extract_screenshots_for_detections
+from .codebase import CodeMapping, load_codebase_context, map_all_findings
 from .semantic import analyze_detections_semantically, generate_executive_summary
 from .transcribe import transcribe_audio
 from .vision import analyze_screenshots, generate_visual_summary
@@ -234,6 +235,17 @@ def review(
             help="Run transcription and detection only, show what would be processed",
         ),
     ] = False,
+    codebase: Annotated[
+        Path | None,
+        typer.Option(
+            "--codebase",
+            "-c",
+            help="Path to codebase for mapping findings to source files (requires component-manifest.json or .loctree/)",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+        ),
+    ] = None,
 ) -> None:
     """
     Analyze a screencast video for bugs and change requests.
@@ -314,9 +326,22 @@ def review(
     screenshots: list = []
     semantic_analyses: list = []
     vision_analyses: list = []
+    code_mappings: list[CodeMapping] = []
     executive_summary = ""
     visual_summary = ""
     pipeline_errors: list[dict] = []  # Collect errors for best-effort processing
+
+    # Load codebase context if provided
+    codebase_context = None
+    if codebase:
+        console.print(f"[blue]Loading codebase context from:[/] {codebase}")
+        codebase_context = load_codebase_context(codebase)
+        if codebase_context:
+            console.print(
+                f"[green]Codebase loaded:[/] {codebase_context.total_components} components"
+            )
+        else:
+            console.print("[yellow]Could not load codebase context - code mapping disabled[/]")
 
     # Restore state from checkpoint
     if checkpoint.transcription:
@@ -514,8 +539,29 @@ def review(
     else:
         checkpoint.mark_stage_complete("vision")
 
-    # Step 7: Generate reports
-    console.rule("[bold]Step 7: Report Generation[/]")
+    # Step 7: Code Mapping (if codebase provided)
+    if codebase_context and semantic_analyses:
+        console.rule("[bold]Step 7: Code Mapping[/]")
+        try:
+            code_mappings = map_all_findings(semantic_analyses, codebase_context)
+            matched_count = sum(1 for m in code_mappings if m.matched_files)
+            console.print(
+                f"[green]Code mapping complete:[/] "
+                f"{matched_count}/{len(code_mappings)} findings mapped to source files"
+            )
+        except Exception as e:
+            console.print(f"[yellow]Code mapping failed: {e}[/]")
+            console.print("[dim]Continuing without code mapping...[/]")
+            pipeline_errors.append(
+                {
+                    "stage": "code_mapping",
+                    "message": str(e),
+                }
+            )
+        console.print()
+
+    # Step 8: Generate reports
+    console.rule("[bold]Step 8: Report Generation[/]")
 
     if json_report:
         save_enhanced_json_report(
@@ -527,6 +573,7 @@ def review(
             vision_analyses=vision_analyses,
             executive_summary=executive_summary,
             errors=pipeline_errors,
+            code_mappings=code_mappings,
         )
 
     if markdown_report:
@@ -540,6 +587,7 @@ def review(
             executive_summary=executive_summary,
             visual_summary=visual_summary,
             errors=pipeline_errors,
+            code_mappings=code_mappings,
         )
 
     # Show errors summary if any
