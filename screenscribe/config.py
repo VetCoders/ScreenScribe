@@ -16,11 +16,12 @@ DEFAULT_LLM_MODEL = "ai-suggestions"  # LibraxisAI default
 DEFAULT_VISION_MODEL = "ai-suggestions"  # Same model, API router handles vision
 
 # Config file locations (checked in order)
+# User config has priority - local .env is for development/examples only
 CONFIG_PATHS = [
-    Path.cwd() / ".env",  # Local project .env first
-    Path.home() / ".config" / "screenscribe" / "config.env",
-    Path.home() / ".screenscribe.env",
-    Path("/etc/screenscribe/config.env"),
+    Path.home() / ".config" / "screenscribe" / "config.env",  # User config (primary)
+    Path.home() / ".screenscribe.env",  # Alternative user config
+    Path("/etc/screenscribe/config.env"),  # System-wide config
+    # Note: Local .env is NOT auto-loaded - use env vars for overrides
 ]
 
 
