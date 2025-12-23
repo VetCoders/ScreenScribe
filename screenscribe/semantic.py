@@ -55,7 +55,7 @@ def analyze_detection_semantically(
                 response = client.post(
                     config.llm_endpoint,
                     headers={
-                        "Authorization": f"Bearer {config.api_key}",
+                        "x-api-key": config.api_key,
                         "Content-Type": "application/json",
                     },
                     json={
@@ -117,6 +117,17 @@ def analyze_detection_semantically(
 
         # Parse JSON from response
         import json
+        import re
+
+        # Strip model control tokens (e.g. <|channel|>final <|constrain|>JSON<|message|>)
+        # Remove all <|...|>tag patterns
+        content = re.sub(r"<\|[^|]+\|>\w*\s*", "", content)
+
+        # If content starts with non-JSON, try to find JSON object
+        if not content.strip().startswith("{"):
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
+            if json_match:
+                content = json_match.group(0)
 
         # Handle potential markdown code blocks
         json_content = content
@@ -237,7 +248,7 @@ def generate_executive_summary(analyses: list[SemanticAnalysis], config: ScreenS
                 response = client.post(
                     config.llm_endpoint,
                     headers={
-                        "Authorization": f"Bearer {config.api_key}",
+                        "x-api-key": config.api_key,
                         "Content-Type": "application/json",
                     },
                     json={
