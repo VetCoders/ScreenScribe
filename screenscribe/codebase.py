@@ -14,6 +14,128 @@ from rich.console import Console
 
 console = Console()
 
+# Polish → English translation for common UI terms
+PL_EN_TRANSLATIONS: dict[str, list[str]] = {
+    # UI elements
+    "komponent": ["component"],
+    "przycisk": ["button", "btn"],
+    "okno": ["window", "modal", "dialog"],
+    "modalne": ["modal"],
+    "modal": ["modal"],
+    "lista": ["list", "dropdown"],
+    "dropdown": ["dropdown", "select"],
+    "wyszukiwarka": ["search", "searchbar", "searchinput", "patientsearch"],
+    "wyszukiwarki": ["search", "searchbar", "dropdown", "patientsearch"],  # genitive
+    "wyszukiwanie": ["search"],
+    "scrollbar": ["scroll", "scrollbar"],
+    "scrollbara": ["scroll", "scrollbar"],  # genitive form
+    "scrollbarem": ["scroll", "scrollbar"],  # instrumental form
+    "scroll": ["scroll", "scrollbar"],
+    "pasek": ["bar", "toolbar", "strip"],
+    "dolny": ["bottom", "footer"],
+    "górny": ["top", "header"],
+    "boczny": ["side", "sidebar"],
+    "panel": ["panel", "pane"],
+    "szuflada": ["drawer", "tray"],
+    "ikona": ["icon"],
+    "etykieta": ["label", "tag"],
+    "chip": ["chip", "tag", "badge"],
+    "chipsy": ["chip", "chips"],
+    "zamykający": ["close"],
+    "zamknięcia": ["close"],
+    "otwierający": ["open"],
+    "notatka": ["note", "notes"],
+    "notatki": ["note", "notes", "notessidebar"],
+    "napis": ["label", "text", "title"],
+    "tekst": ["text"],
+    "formularz": ["form"],
+    "pole": ["field", "input"],
+    "nawigacja": ["nav", "navigation"],
+    "menu": ["menu", "sidebar"],
+    "karta": ["card"],
+    "kafelek": ["tile", "card"],
+    "baton": ["button", "btn"],
+    "batony": ["button", "buttons"],
+    # Layout
+    "układ": ["layout"],
+    "interfejs": ["ui", "interface"],
+    "widok": ["view"],
+    "sekcja": ["section"],
+    "obszar": ["area", "region"],
+    "kontener": ["container"],
+    "warstwa": ["layer"],
+    "tło": ["background", "bg"],
+    # Actions/states
+    "wyświetlania": ["display", "render", "show"],
+    "renderowania": ["render"],
+    "ładowania": ["loading", "loader"],
+    "błąd": ["error"],
+    "sukces": ["success"],
+    "ostrzeżenie": ["warning"],
+    # Theme/styling
+    "motyw": ["theme"],
+    "kolorystyczny": ["color", "theme"],
+    "skórka": ["skin", "theme"],
+    "styl": ["style"],
+    "paleta": ["palette", "colors"],
+    # Vista-specific
+    "wizyta": ["visit"],
+    "nowa wizyta": ["newvisit", "visitmodal"],
+    "pacjent": ["patient"],
+    "mikrofon": ["mic", "microphone"],
+    "diagnoza": ["diagnostics", "diagnosis"],
+    "asystent": ["assistant", "ai"],
+    "kliniczny": ["clinical"],
+    "kliniczne": ["clinical"],
+    "narzędzia": ["tools"],
+    "narzędzi": ["tools"],
+    "dawki": ["dose", "dosecalculator"],
+    "płyny": ["fluids", "fluidscalculator"],
+    "różnicówka": ["differential"],
+    "kalendarz": ["calendar"],
+    "zadania": ["tasks", "todos"],
+    "ustawienia": ["settings"],
+    "pulpit": ["dashboard"],
+}
+
+# Vista-specific component mappings (Polish phrase → component names)
+VISTA_DOMAIN_MAPPINGS: dict[str, list[str]] = {
+    # Clinical tools
+    "narzędzia kliniczne": ["ToolsTray", "DoseCalculatorCard", "CriCalculatorCard", "BsaCalculatorCard", "FluidsCalculatorCard", "MiniToolsDifferentialCard"],
+    "szuflada narzędzi": ["ToolsTray"],
+    "narzędzia klinicznych": ["ToolsTray", "DoseCalculatorCard"],
+    "pasek dolny": ["ToolsTray", "BottomBar"],
+    "bottom bar": ["ToolsTray"],
+    # Notes
+    "notatka": ["NotesEditor", "NotesSidebar", "StickyNote", "ClinicalNoteCard", "WorkspacePersonalNotes"],
+    "panel notatek": ["NotesSidebar", "WorkspacePersonalNotes"],
+    # Modals
+    "okno modalne": ["Modal"],
+    "wyskakujące okno": ["Modal", "Dialog"],
+    # Microphone
+    "diagnoza mikrofonu": ["MicTestDrawer", "MicInlinePlayer"],
+    "okno diagnozy mikrofonu": ["MicTestDrawer"],
+    # Theme
+    "motyw kolorystyczny": ["ThemeSettings", "ThemeToggle", "ThemeContext"],
+    "skórka aplikacji": ["ThemeSettings", "ThemeContext"],
+    "paleta kolorów": ["ThemeSettings", "colors"],
+    # Visits
+    "nowa wizyta": ["NewVisitModal", "VisitModal", "NewPatientModal"],
+    "wizyta nagła": ["EmergencyVisit"],
+    # AI/Assistant
+    "asystent gotowy": ["AIFloatingHost", "AIFloatingPresence", "AISystemHost"],
+    "asystent": ["AIFloatingHost", "AISpecialistHost", "AISuggestionsSection"],
+    # Dashboard
+    "wiedza visty": ["VistaInsights", "AITaskSuggestionsPanel"],
+    "vista insights": ["VistaInsights", "AITaskSuggestionsPanel"],
+    # Search
+    "wyszukiwarka": ["PatientSearch", "SearchBar", "SearchInput", "UnifiedTopToolbar"],
+    "dropdown wyszukiwarki": ["SearchDropdown", "PatientSearch"],
+    # Layout
+    "górny pasek": ["UnifiedTopToolbar", "TopBar"],
+    "boczne menu": ["VistaSidebar", "Sidebar"],
+}
+
 
 @dataclass
 class ComponentInfo:
@@ -168,21 +290,58 @@ def _load_loctree_snapshot(snapshot_path: Path, project_path: Path) -> CodebaseC
     )
 
 
+def translate_polish_terms(text: str) -> list[str]:
+    """
+    Translate Polish UI terms to English equivalents.
+
+    Returns list of English translations/variations.
+    """
+    text_lower = text.lower().strip()
+    translations = []
+
+    # Check for exact domain mapping first (most specific)
+    if text_lower in VISTA_DOMAIN_MAPPINGS:
+        translations.extend(VISTA_DOMAIN_MAPPINGS[text_lower])
+
+    # Check for partial domain mapping matches
+    for phrase, components in VISTA_DOMAIN_MAPPINGS.items():
+        if phrase in text_lower or text_lower in phrase:
+            translations.extend(components)
+
+    # Translate individual words
+    words = re.split(r"\W+", text_lower)
+    for word in words:
+        if word in PL_EN_TRANSLATIONS:
+            translations.extend(PL_EN_TRANSLATIONS[word])
+
+    return translations
+
+
 def normalize_component_name(name: str) -> list[str]:
     """
     Generate search variations for a component name.
 
     "search icon in title bar" -> ["search", "icon", "titlebar", "searchicon", ...]
+    "Komponent scrollbara" -> ["scroll", "scrollbar", "component", ...]
+
     Returns list ordered by specificity (more specific first).
     """
     # Clean and lowercase
     name = name.lower().strip()
 
-    # Remove common filler words
-    filler_words = {"the", "a", "an", "in", "on", "at", "to", "for", "of", "with", "is", "are"}
-    words = [w for w in re.split(r"\W+", name) if w and w not in filler_words and len(w) > 2]
-
     variations = []
+
+    # First: get Polish → English translations
+    translations = translate_polish_terms(name)
+    variations.extend(translations)
+
+    # Remove common filler words (both EN and PL)
+    filler_words = {
+        "the", "a", "an", "in", "on", "at", "to", "for", "of", "with", "is", "are",
+        "w", "z", "do", "na", "i", "lub", "oraz", "który", "która", "które",
+        "ten", "ta", "to", "się", "jest", "być", "część", "elementy", "element",
+    }
+    words = [w for w in re.split(r"\W+", name) if w and w not in filler_words and len(w) > 2]
 
     # Most specific: concatenated full phrase (searchicon, titlebar)
     if len(words) >= 2:
@@ -196,13 +355,19 @@ def normalize_component_name(name: str) -> list[str]:
     variations.extend(long_words)
     variations.extend(short_words)
 
+    # Also translate each remaining word
+    for word in words:
+        if word in PL_EN_TRANSLATIONS:
+            variations.extend(PL_EN_TRANSLATIONS[word])
+
     # Remove duplicates while preserving order
     seen = set()
     unique = []
     for v in variations:
-        if v not in seen:
-            seen.add(v)
-            unique.append(v)
+        v_lower = v.lower()
+        if v_lower not in seen and len(v_lower) >= 3:
+            seen.add(v_lower)
+            unique.append(v_lower)
 
     return unique
 
