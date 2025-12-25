@@ -259,14 +259,13 @@ def review(
             help="Run transcription and detection only, show what would be processed",
         ),
     ] = False,
-    filter_level: Annotated[
-        str,
+    keywords_only: Annotated[
+        bool,
         typer.Option(
-            "--filter-level",
-            "-f",
-            help="Semantic filtering level: keywords (fast), base (LLM pre-filter), combined (both)",
+            "--keywords-only",
+            help="Use fast keyword-based detection instead of semantic pre-filter",
         ),
-    ] = "keywords",
+    ] = False,
 ) -> None:
     """
     Analyze a screencast video for bugs and change requests.
@@ -274,15 +273,13 @@ def review(
     Extracts audio, transcribes it, detects issues mentioned in commentary,
     captures screenshots, and optionally analyzes with AI models.
 
-    FILTER LEVELS:
-    - keywords: Fast keyword-based detection (original approach)
-    - base: LLM analyzes entire transcript before frame extraction (more findings)
-    - combined: Both keywords + semantic pre-filter (most comprehensive)
+    By default, uses semantic pre-filtering (LLM analyzes entire transcript)
+    for comprehensive issue detection. Use --keywords-only for faster,
+    keyword-based detection.
 
     Use --resume to continue from a previous interrupted run.
     Use --estimate to see time estimates without processing.
     Use --dry-run to run only transcription and detection (no AI, no screenshots).
-    Use --filter-level base for semantic pre-filtering (recommended for thorough analysis).
     """
     console.print(
         Panel(
@@ -305,12 +302,8 @@ def review(
     config.use_semantic_analysis = semantic
     config.use_vision_analysis = vision
 
-    # Parse filter level
-    try:
-        semantic_filter_level = SemanticFilterLevel(filter_level.lower())
-    except ValueError:
-        console.print(f"[yellow]Unknown filter level '{filter_level}', using 'keywords'[/]")
-        semantic_filter_level = SemanticFilterLevel.KEYWORDS
+    # Set filter level based on --keywords-only flag
+    semantic_filter_level = SemanticFilterLevel.KEYWORDS if keywords_only else SemanticFilterLevel.BASE
 
     # Setup output directory
     if output is None:
