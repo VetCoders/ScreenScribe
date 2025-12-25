@@ -36,7 +36,7 @@ help:
 # ============================================================================
 
 install:
-	uv pip install -e .
+	uv tool install .
 
 dev:
 	uv pip install -e ".[dev]" || uv pip install -e . && uv pip install pytest ruff mypy bandit
