@@ -35,6 +35,12 @@ from .report import (
 )
 from .screenshots import extract_screenshots_for_detections
 from .semantic import analyze_detections_semantically, generate_executive_summary
+from .semantic_filter import (
+    SemanticFilterLevel,
+    merge_pois_with_detections,
+    pois_to_detections,
+    semantic_prefilter,
+)
 from .transcribe import transcribe_audio
 from .vision import analyze_screenshots, generate_visual_summary
 
@@ -49,6 +55,7 @@ app = typer.Typer(
 ESTIMATE_STT_PER_MINUTE = 2.0  # ~2s per minute of video
 ESTIMATE_SEMANTIC_PER_DETECTION = 12.0  # ~12s per detection
 ESTIMATE_VISION_PER_DETECTION = 25.0  # ~25s per screenshot
+ESTIMATE_SEMANTIC_PREFILTER_PER_MINUTE = 8.0  # ~8s per minute for semantic pre-filter
 
 
 def _show_estimate(
@@ -56,6 +63,7 @@ def _show_estimate(
     semantic: bool,
     vision: bool,
     detection_count: int | None = None,
+    filter_level: str = "keywords",
 ) -> None:
     """Show estimated processing times."""
     from rich.table import Table
@@ -73,8 +81,21 @@ def _show_estimate(
     stt_time = max(30, video_minutes * ESTIMATE_STT_PER_MINUTE)
     table.add_row("Transcription", f"~{int(stt_time)}s", f"{video_minutes:.1f} min video")
 
-    # Detection (~instant)
-    table.add_row("Issue detection", "<1s", "Keyword matching")
+    # Detection (depends on filter level)
+    prefilter_time = 0.0
+    if filter_level in ("base", "combined"):
+        prefilter_time = video_minutes * ESTIMATE_SEMANTIC_PREFILTER_PER_MINUTE
+        table.add_row(
+            "Semantic pre-filter",
+            f"~{int(prefilter_time)}s",
+            f"LLM analyzes full transcript"
+        )
+        if filter_level == "combined":
+            table.add_row("Issue detection", "<1s", "Keyword matching + merge")
+        else:
+            table.add_row("Issue detection", "<1s", "From semantic analysis")
+    else:
+        table.add_row("Issue detection", "<1s", "Keyword matching")
 
     # Screenshot extraction
     table.add_row("Screenshots", "~10s", "FFmpeg frame extraction")
@@ -123,12 +144,16 @@ def _show_estimate(
     console.print(table)
 
     # Total estimate
-    total_fixed = 5 + stt_time + 1 + 10
+    total_fixed = 5 + stt_time + 1 + 10 + prefilter_time
     if detection_count:
         total_sem = detection_count * ESTIMATE_SEMANTIC_PER_DETECTION if semantic else 0
         total_vis = detection_count * ESTIMATE_VISION_PER_DETECTION if vision else 0
     else:
-        est_detections = int(video_minutes * 4)
+        # Semantic pre-filter typically finds more detections
+        if filter_level in ("base", "combined"):
+            est_detections = int(video_minutes * 6)  # More findings with semantic
+        else:
+            est_detections = int(video_minutes * 4)
         total_sem = est_detections * ESTIMATE_SEMANTIC_PER_DETECTION if semantic else 0
         total_vis = est_detections * ESTIMATE_VISION_PER_DETECTION if vision else 0
 
@@ -234,6 +259,14 @@ def review(
             help="Run transcription and detection only, show what would be processed",
         ),
     ] = False,
+    filter_level: Annotated[
+        str,
+        typer.Option(
+            "--filter-level",
+            "-f",
+            help="Semantic filtering level: keywords (fast), base (LLM pre-filter), combined (both)",
+        ),
+    ] = "keywords",
 ) -> None:
     """
     Analyze a screencast video for bugs and change requests.
@@ -241,9 +274,15 @@ def review(
     Extracts audio, transcribes it, detects issues mentioned in commentary,
     captures screenshots, and optionally analyzes with AI models.
 
+    FILTER LEVELS:
+    - keywords: Fast keyword-based detection (original approach)
+    - base: LLM analyzes entire transcript before frame extraction (more findings)
+    - combined: Both keywords + semantic pre-filter (most comprehensive)
+
     Use --resume to continue from a previous interrupted run.
     Use --estimate to see time estimates without processing.
     Use --dry-run to run only transcription and detection (no AI, no screenshots).
+    Use --filter-level base for semantic pre-filtering (recommended for thorough analysis).
     """
     console.print(
         Panel(
@@ -266,6 +305,13 @@ def review(
     config.use_semantic_analysis = semantic
     config.use_vision_analysis = vision
 
+    # Parse filter level
+    try:
+        semantic_filter_level = SemanticFilterLevel(filter_level.lower())
+    except ValueError:
+        console.print(f"[yellow]Unknown filter level '{filter_level}', using 'keywords'[/]")
+        semantic_filter_level = SemanticFilterLevel.KEYWORDS
+
     # Setup output directory
     if output is None:
         output = video.parent / f"{video.stem}_review"
@@ -276,6 +322,7 @@ def review(
     console.print(
         f"[blue]AI Analysis:[/] Semantic={'✓' if semantic else '✗'} Vision={'✓' if vision else '✗'}"
     )
+    console.print(f"[blue]Filter Level:[/] {semantic_filter_level.value}")
 
     # Get video duration
     duration = 0.0
@@ -287,7 +334,7 @@ def review(
 
     # --estimate mode: show time estimates and exit
     if estimate:
-        _show_estimate(duration, semantic, vision)
+        _show_estimate(duration, semantic, vision, filter_level=semantic_filter_level.value)
         return
 
     # Check for existing checkpoint
@@ -371,10 +418,52 @@ def review(
         console.print("[red]Error: No transcription available[/]")
         return
 
-    # Step 3: Detect issues
+    # Step 3: Issue Detection (varies by filter level)
+    pois = []  # Points of interest from semantic pre-filter
+
     if not checkpoint.is_stage_complete("detection"):
         console.rule("[bold]Step 3: Issue Detection[/]")
-        detections = detect_issues(transcription, keywords_file=keywords_file)
+
+        if semantic_filter_level == SemanticFilterLevel.KEYWORDS:
+            # Level 0: Original keyword-based approach
+            console.print("[dim]Using keyword-based detection[/]")
+            detections = detect_issues(transcription, keywords_file=keywords_file)
+
+        elif semantic_filter_level == SemanticFilterLevel.BASE:
+            # Level 1: Semantic pre-filter on entire transcript
+            console.print("[cyan]Using semantic pre-filter (analyzing entire transcript)[/]")
+            pois = semantic_prefilter(transcription, config)
+            if pois:
+                # Convert POIs to Detection objects for compatibility
+                detections = pois_to_detections(pois, transcription)
+                console.print(f"[green]Semantic pre-filter identified {len(detections)} findings[/]")
+            else:
+                # Fallback to keywords if semantic fails
+                console.print("[yellow]Semantic pre-filter returned no results, falling back to keywords[/]")
+                detections = detect_issues(transcription, keywords_file=keywords_file)
+
+        elif semantic_filter_level == SemanticFilterLevel.COMBINED:
+            # Level 2: Keywords + semantic pre-filter
+            console.print("[cyan]Using combined detection (keywords + semantic)[/]")
+
+            # First: keyword detection
+            keyword_detections = detect_issues(transcription, keywords_file=keywords_file)
+
+            # Second: semantic pre-filter
+            pois = semantic_prefilter(transcription, config)
+
+            if pois:
+                # Merge semantic POIs with keyword detections
+                merged_pois = merge_pois_with_detections(pois, keyword_detections)
+                detections = pois_to_detections(merged_pois, transcription)
+                console.print(
+                    f"[green]Combined detection: {len(keyword_detections)} keywords + "
+                    f"{len(pois)} semantic → {len(detections)} merged findings[/]"
+                )
+            else:
+                # Use keyword detections if semantic fails
+                detections = keyword_detections
+
         checkpoint.detections = [serialize_detection(d) for d in detections]
         checkpoint.mark_stage_complete("detection")
         save_checkpoint(checkpoint, output)
@@ -405,7 +494,11 @@ def review(
             console.print(f"  ... and {len(detections) - 5} more")
 
         console.print("\n[bold]Estimated time for full processing:[/]")
-        _show_estimate(duration, semantic, vision, detection_count=len(detections))
+        _show_estimate(
+            duration, semantic, vision,
+            detection_count=len(detections),
+            filter_level=semantic_filter_level.value
+        )
 
         console.print("\n[dim]Run without --dry-run to process fully.[/]")
         delete_checkpoint(output)
