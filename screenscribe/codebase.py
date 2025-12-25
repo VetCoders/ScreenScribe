@@ -99,41 +99,124 @@ PL_EN_TRANSLATIONS: dict[str, list[str]] = {
 }
 
 # Vista-specific component mappings (Polish phrase → component names)
+# Generated from Vista component-manifest.json (893 components)
 VISTA_DOMAIN_MAPPINGS: dict[str, list[str]] = {
-    # Clinical tools
+    # === Clinical Tools ===
     "narzędzia kliniczne": ["ToolsTray", "DoseCalculatorCard", "CriCalculatorCard", "BsaCalculatorCard", "FluidsCalculatorCard", "MiniToolsDifferentialCard"],
     "szuflada narzędzi": ["ToolsTray"],
     "narzędzia klinicznych": ["ToolsTray", "DoseCalculatorCard"],
-    "pasek dolny": ["ToolsTray", "BottomBar"],
+    "kalkulator dawek": ["DoseCalculatorCard"],
+    "kalkulator cri": ["CriCalculatorCard"],
+    "kalkulator bsa": ["BsaCalculatorCard"],
+    "kalkulator płynów": ["FluidsCalculatorCard"],
+    "różnicówka": ["MiniToolsDifferentialCard", "differentialRules"],
+    "pasek dolny": ["ToolsTray"],
     "bottom bar": ["ToolsTray"],
-    # Notes
+
+    # === Notes ===
     "notatka": ["NotesEditor", "NotesSidebar", "StickyNote", "ClinicalNoteCard", "WorkspacePersonalNotes"],
+    "notatki": ["NotesEditor", "NotesSidebar", "WorkspacePersonalNotes", "PinnedNotesBoard"],
     "panel notatek": ["NotesSidebar", "WorkspacePersonalNotes"],
-    # Modals
-    "okno modalne": ["Modal"],
+    "edytor notatek": ["NotesEditor", "NoteEditorToolbar", "NoteEditorFooter"],
+    "karteczka": ["StickyNote", "StickyNoteDay"],
+    "notatka kliniczna": ["ClinicalNoteCard", "clinicalNotes"],
+    "szybka notatka": ["QuickNoteModal", "StickyNote"],
+
+    # === Modals/Dialogs ===
+    "okno modalne": ["Modal", "Dialog", "VistaSheet"],
     "wyskakujące okno": ["Modal", "Dialog"],
-    # Microphone
-    "diagnoza mikrofonu": ["MicTestDrawer", "MicInlinePlayer"],
+    "dialog": ["Dialog", "ConfirmationModal", "DeleteConfirmationModal"],
+    "potwierdzenie": ["ConfirmationModal", "DeleteConfirmationModal"],
+    "arkusz": ["VistaSheet"],
+
+    # === Microphone/Audio ===
+    "diagnoza mikrofonu": ["MicTestDrawer", "MicInlinePlayer", "useMicDiagnostics"],
     "okno diagnozy mikrofonu": ["MicTestDrawer"],
-    # Theme
+    "mikrofon": ["MicTestDrawer", "MicInlinePlayer", "VoiceControlPanel"],
+    "nagrywanie": ["AudioRecordingSection", "useAudioRecording", "RecordingSettings"],
+    "głos": ["VoiceAgent", "VoiceControlPanel", "voiceService"],
+    "sterowanie głosem": ["VoiceControlPanel", "VoiceControlMicrophoneTab"],
+    "transkrypcja": ["useAudioTranscription", "WorkspaceTranscripts", "TranscriptionViewer"],
+
+    # === Theme/Styling ===
     "motyw kolorystyczny": ["ThemeSettings", "ThemeToggle", "ThemeContext"],
     "skórka aplikacji": ["ThemeSettings", "ThemeContext"],
-    "paleta kolorów": ["ThemeSettings", "colors"],
-    # Visits
-    "nowa wizyta": ["NewVisitModal", "VisitModal", "NewPatientModal"],
-    "wizyta nagła": ["EmergencyVisit"],
-    # AI/Assistant
+    "paleta kolorów": ["ThemeSettings", "ThemeContext"],
+    "ustawienia motywu": ["ThemeSettings", "ThemeToggle"],
+    "tryb ciemny": ["ThemeSettings", "ThemeToggle"],
+
+    # === Patient ===
+    "pacjent": ["PatientCard", "PatientFormBase", "PatientHeader", "PatientSelector"],
+    "dane pacjenta": ["PatientFormBase", "PatientFormFull", "PatientDemographicsPanel"],
+    "karta pacjenta": ["PatientCard", "PatientSummaryCard", "PatientClinicalCard"],
+    "historia pacjenta": ["PatientHistoryPanel", "PatientMedicalHistory", "PatientsHistoryPanel"],
+    "wyszukiwarka pacjentów": ["PatientSelector", "PatientsRailFlat"],
+    "edycja pacjenta": ["PatientEditModal", "PatientQuickEditModal"],
+    "nowy pacjent": ["NewPatientModal", "NewPatientFast", "NewPatientView"],
+    "waga pacjenta": ["PatientWeightHistory"],
+
+    # === Visits ===
+    "nowa wizyta": ["VisitModals", "VisitEditor"],
+    "wizyta": ["VisitCard", "VisitEditor", "VisitDetailsSection"],
+    "wizyta nagła": ["EmergencyRecordingButton"],
+    "edytor wizyty": ["VisitEditor", "VisitSupportPanel"],
+    "szczegóły wizyty": ["VisitDetailsSection", "VisitSupportTabs"],
+    "lista wizyt": ["VisitsRailFlat", "VisitsWorkspaceView"],
+
+    # === AI/Assistant ===
+    "asystent": ["AIFloatingHost", "AISpecialistHost", "AISuggestionsSection", "AssistantBubble"],
     "asystent gotowy": ["AIFloatingHost", "AIFloatingPresence", "AISystemHost"],
-    "asystent": ["AIFloatingHost", "AISpecialistHost", "AISuggestionsSection"],
-    # Dashboard
-    "wiedza visty": ["VistaInsights", "AITaskSuggestionsPanel"],
-    "vista insights": ["VistaInsights", "AITaskSuggestionsPanel"],
-    # Search
-    "wyszukiwarka": ["PatientSearch", "SearchBar", "SearchInput", "UnifiedTopToolbar"],
-    "dropdown wyszukiwarki": ["SearchDropdown", "PatientSearch"],
-    # Layout
-    "górny pasek": ["UnifiedTopToolbar", "TopBar"],
-    "boczne menu": ["VistaSidebar", "Sidebar"],
+    "asystent ai": ["AIFloatingHost", "AISpecialistHost", "AISystemHost"],
+    "sugestie ai": ["AISuggestionsSection", "AISuggestionsViewer", "aiChatSuggestions"],
+    "specjalista ai": ["AISpecialistHost", "AISpecialistCanvas", "SpecialistOutcomeBoard"],
+    "chat ai": ["AIChatCanvas", "ChatPanelConversation"],
+    "wiedza visty": ["AITaskSuggestionsPanel", "useDailyInsight"],
+    "vista insights": ["AITaskSuggestionsPanel", "useDailyInsight"],
+
+    # === Workspace ===
+    "szkice": ["WorkspaceDrafts", "WorkspaceDraftsPanel", "WorkspaceDraftsRailList"],
+    "transkrypcje": ["WorkspaceTranscripts", "WorkspaceTranscriptDetail", "WorkspaceTranscriptsRailList"],
+    "przypomnienia": ["WorkspaceReminders", "useWorkspaceRemindersPanel"],
+    "obszar roboczy": ["WorkspaceView", "WorkspaceViewLayout"],
+
+    # === Calendar/Appointments ===
+    "kalendarz": ["CalendarHeader", "CalendarRightPanel", "AppointmentScheduler"],
+    "wizyta zaplanowana": ["AppointmentDetailsPanel", "AppointmentPreview", "AppointmentScheduler"],
+    "harmonogram": ["AppointmentScheduler", "ScheduleManagementSettings"],
+
+    # === Dashboard ===
+    "pulpit": ["DashboardHeader", "MyDayPanel"],
+    "mój dzień": ["MyDayPanel"],
+
+    # === Search/Filter ===
+    "wyszukiwarka": ["GlobalSearch", "SearchInput", "SearchableSelect", "UnifiedTopToolbar"],
+    "dropdown wyszukiwarki": ["SearchableSelect", "CompactFilterDropdown"],
+    "filtry": ["FiltersPanel", "StatusPriorityFilters", "CompactFilterDropdown"],
+
+    # === Layout ===
+    "górny pasek": ["UnifiedTopToolbar", "Header"],
+    "boczne menu": ["VistaSidebar", "Sidebar", "LeftRail"],
+    "panel boczny": ["RightPanel", "LeftRail", "VistaRail"],
+    "nagłówek": ["Header", "DashboardHeader", "PanelHeader"],
+    "stopka": ["NoteEditorFooter"],
+
+    # === Settings ===
+    "ustawienia": ["SettingsTabsView", "SettingsSection", "SettingsRow"],
+    "ustawienia kliniki": ["ClinicSettings", "clinicSettings"],
+    "ustawienia profilu": ["ProfileSettings", "profileSettings"],
+    "ustawienia prywatności": ["PrivacySettings"],
+    "ustawienia nagrywania": ["RecordingSettings"],
+
+    # === Tasks ===
+    "zadania": ["TaskDrawer", "AITaskSuggestionsPanel"],
+    "lista zadań": ["TaskDrawer"],
+
+    # === UI Elements ===
+    "zegar": ["Header", "DashboardHeader"],
+    "data": ["Header", "DashboardHeader"],
+    "kategorie": ["VistaRailItem"],
+    "chip": ["VistaRailItem"],
+    "przycisk zamknięcia": ["Modal", "Dialog"],
 }
 
 
