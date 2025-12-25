@@ -7,7 +7,7 @@ the vision model to analyze more potential findings.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 from rich.console import Console
@@ -213,12 +213,11 @@ def semantic_prefilter(
         pois = _parse_prefilter_response(content, transcription)
 
         console.print(
-            f"[green]Semantic pre-filter complete:[/] "
-            f"identified {len(pois)} points of interest"
+            f"[green]Semantic pre-filter complete:[/] identified {len(pois)} points of interest"
         )
 
         # Summary by category
-        categories = {}
+        categories: dict[str, int] = {}
         for poi in pois:
             categories[poi.category] = categories.get(poi.category, 0) + 1
 
@@ -232,7 +231,7 @@ def semantic_prefilter(
         return []
 
 
-def _extract_content_from_response(result: dict) -> str:
+def _extract_content_from_response(result: dict[str, Any]) -> str:
     """Extract text content from API response."""
     content = ""
     for item in result.get("output", []):
@@ -305,7 +304,7 @@ def _parse_prefilter_response(
 
 def merge_pois_with_detections(
     pois: list[PointOfInterest],
-    keyword_detections: list,  # list[Detection] - avoiding circular import
+    keyword_detections: list[Any],  # list[Detection] - avoiding circular import
     max_gap: float = 3.0,
 ) -> list[PointOfInterest]:
     """
@@ -375,15 +374,17 @@ def merge_pois_with_detections(
     return merged
 
 
-def poi_to_detection(poi: PointOfInterest, transcription: TranscriptionResult):
+def poi_to_detection(poi: PointOfInterest, transcription: TranscriptionResult) -> Any:
     """
     Convert a PointOfInterest to a Detection object for compatibility.
 
     This allows the semantic pre-filter to integrate with existing
     screenshot extraction and analysis pipeline.
+
+    Returns:
+        Detection object (typed as object to avoid circular import)
     """
     from .detect import Detection
-    from .transcribe import Segment
 
     # Build context from surrounding segments
     context_segments = []
@@ -410,6 +411,6 @@ def poi_to_detection(poi: PointOfInterest, transcription: TranscriptionResult):
 
 def pois_to_detections(
     pois: list[PointOfInterest], transcription: TranscriptionResult
-) -> list:
+) -> list[Any]:
     """Convert list of POIs to Detection objects."""
     return [poi_to_detection(poi, transcription) for poi in pois]

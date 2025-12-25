@@ -18,7 +18,6 @@ from screenscribe.semantic_filter import (
 )
 from screenscribe.transcribe import Segment, TranscriptionResult
 
-
 # --- Fixtures ---
 
 
@@ -294,7 +293,10 @@ class TestExtractContentFromResponse:
         """Skips reasoning blocks."""
         response = {
             "output": [
-                {"type": "reasoning", "content": [{"type": "reasoning_text", "text": "Thinking..."}]},
+                {
+                    "type": "reasoning",
+                    "content": [{"type": "reasoning_text", "text": "Thinking..."}],
+                },
                 {"type": "output_text", "text": "Result"},
             ]
         }

@@ -86,9 +86,7 @@ def _show_estimate(
     if filter_level in ("base", "combined"):
         prefilter_time = video_minutes * ESTIMATE_SEMANTIC_PREFILTER_PER_MINUTE
         table.add_row(
-            "Semantic pre-filter",
-            f"~{int(prefilter_time)}s",
-            f"LLM analyzes full transcript"
+            "Semantic pre-filter", f"~{int(prefilter_time)}s", "LLM analyzes full transcript"
         )
         if filter_level == "combined":
             table.add_row("Issue detection", "<1s", "Keyword matching + merge")
@@ -303,7 +301,9 @@ def review(
     config.use_vision_analysis = vision
 
     # Set filter level based on --keywords-only flag
-    semantic_filter_level = SemanticFilterLevel.KEYWORDS if keywords_only else SemanticFilterLevel.BASE
+    semantic_filter_level = (
+        SemanticFilterLevel.KEYWORDS if keywords_only else SemanticFilterLevel.BASE
+    )
 
     # Setup output directory
     if output is None:
@@ -429,10 +429,14 @@ def review(
             if pois:
                 # Convert POIs to Detection objects for compatibility
                 detections = pois_to_detections(pois, transcription)
-                console.print(f"[green]Semantic pre-filter identified {len(detections)} findings[/]")
+                console.print(
+                    f"[green]Semantic pre-filter identified {len(detections)} findings[/]"
+                )
             else:
                 # Fallback to keywords if semantic fails
-                console.print("[yellow]Semantic pre-filter returned no results, falling back to keywords[/]")
+                console.print(
+                    "[yellow]Semantic pre-filter returned no results, falling back to keywords[/]"
+                )
                 detections = detect_issues(transcription, keywords_file=keywords_file)
 
         elif semantic_filter_level == SemanticFilterLevel.COMBINED:
@@ -488,9 +492,11 @@ def review(
 
         console.print("\n[bold]Estimated time for full processing:[/]")
         _show_estimate(
-            duration, semantic, vision,
+            duration,
+            semantic,
+            vision,
             detection_count=len(detections),
-            filter_level=semantic_filter_level.value
+            filter_level=semantic_filter_level.value,
         )
 
         console.print("\n[dim]Run without --dry-run to process fully.[/]")

@@ -13,14 +13,13 @@ import os
 import pytest
 
 from screenscribe.config import ScreenScribeConfig
+from screenscribe.detect import Detection
 from screenscribe.semantic import SemanticAnalysis, analyze_detection_semantically
 from screenscribe.semantic_filter import (
     PointOfInterest,
     semantic_prefilter,
 )
 from screenscribe.transcribe import Segment, TranscriptionResult
-from screenscribe.detect import Detection
-
 
 # Skip all tests if no API key
 pytestmark = pytest.mark.integration
@@ -56,7 +55,9 @@ def sample_transcription_pl() -> TranscriptionResult:
             Segment(id=0, start=0.0, end=4.0, text="Tutaj widzę problem z przyciskiem."),
             Segment(id=1, start=4.5, end=7.0, text="Nie reaguje na kliknięcie."),
             Segment(id=2, start=7.5, end=10.0, text="Trzeba to naprawić."),
-            Segment(id=3, start=11.0, end=16.0, text="Layout wygląda dobrze ale kolory są za ciemne."),
+            Segment(
+                id=3, start=11.0, end=16.0, text="Layout wygląda dobrze ale kolory są za ciemne."
+            ),
             Segment(id=4, start=17.0, end=21.0, text="Formularz rejestracji ma błąd walidacji."),
         ],
         language="pl",
@@ -76,8 +77,12 @@ def sample_transcription_en() -> TranscriptionResult:
             Segment(id=0, start=0.0, end=4.0, text="I see a bug with the submit button."),
             Segment(id=1, start=4.5, end=7.0, text="It doesn't respond to clicks."),
             Segment(id=2, start=7.5, end=10.0, text="We need to fix this."),
-            Segment(id=3, start=11.0, end=16.0, text="The layout looks good but colors are too dark."),
-            Segment(id=4, start=17.0, end=21.0, text="The registration form has a validation error."),
+            Segment(
+                id=3, start=11.0, end=16.0, text="The layout looks good but colors are too dark."
+            ),
+            Segment(
+                id=4, start=17.0, end=21.0, text="The registration form has a validation error."
+            ),
         ],
         language="en",
     )
@@ -175,7 +180,9 @@ class TestSemanticPrefilterIntegration:
 
         for poi in pois:
             # Allow some tolerance for LLM timestamp estimation
-            assert poi.timestamp_start >= min_time - 1.0, f"Start {poi.timestamp_start} before transcript"
+            assert poi.timestamp_start >= min_time - 1.0, (
+                f"Start {poi.timestamp_start} before transcript"
+            )
             assert poi.timestamp_end <= max_time + 1.0, f"End {poi.timestamp_end} after transcript"
 
 
@@ -216,8 +223,10 @@ class TestSemanticAnalysisIntegration:
         # Create a critical-sounding detection
         critical_detection = Detection(
             segment=Segment(
-                id=0, start=0.0, end=5.0,
-                text="Aplikacja się crashuje przy każdym otwarciu. Użytkownicy tracą dane."
+                id=0,
+                start=0.0,
+                end=5.0,
+                text="Aplikacja się crashuje przy każdym otwarciu. Użytkownicy tracą dane.",
             ),
             category="bug",
             keywords_found=["crashuje"],
@@ -229,7 +238,9 @@ class TestSemanticAnalysisIntegration:
 
         assert result is not None
         # Critical crash should be high or critical severity
-        assert result.severity in ("critical", "high"), f"Crash should be critical/high, got {result.severity}"
+        assert result.severity in ("critical", "high"), (
+            f"Crash should be critical/high, got {result.severity}"
+        )
 
 
 # ============================================================================

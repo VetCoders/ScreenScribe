@@ -61,8 +61,7 @@ def transcribe_audio(
     # Validate API key for cloud usage
     if not api_key and not use_local:
         raise ValueError(
-            "API key required for cloud STT. "
-            "Set it via config or use --local flag for local STT."
+            "API key required for cloud STT. Set it via config or use --local flag for local STT."
         )
 
     # Determine URL: local > custom endpoint > default cloud

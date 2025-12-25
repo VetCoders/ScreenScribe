@@ -76,7 +76,7 @@ def extract_screenshots_for_detections(
         try:
             extract_screenshot(video_path, timestamp, output_path)
             results.append((detection, output_path))
-            console.print(f"  [green]✓[/] {filename} " f"[dim]({format_timestamp(timestamp)})[/]")
+            console.print(f"  [green]✓[/] {filename} [dim]({format_timestamp(timestamp)})[/]")
         except RuntimeError as e:
             console.print(f"  [red]✗[/] Failed: {e}")
 
