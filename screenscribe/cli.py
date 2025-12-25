@@ -1,7 +1,7 @@
 """CLI interface for ScreenScribe video review automation."""
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -175,7 +175,7 @@ def review(
         ),
     ],
     output: Annotated[
-        Path,
+        Path | None,
         typer.Option(
             "--output",
             "-o",
@@ -350,13 +350,13 @@ def review(
 
     # Initialize variables from checkpoint or fresh
     transcription = None
-    detections: list = []
-    screenshots: list = []
-    semantic_analyses: list = []
-    vision_analyses: list = []
+    detections: list[Any] = []
+    screenshots: list[Any] = []
+    semantic_analyses: list[Any] = []
+    vision_analyses: list[Any] = []
     executive_summary = ""
     visual_summary = ""
-    pipeline_errors: list[dict] = []  # Collect errors for best-effort processing
+    pipeline_errors: list[dict[str, str]] = []  # Collect errors for best-effort processing
 
     # Restore state from checkpoint
     if checkpoint.transcription:
@@ -668,7 +668,7 @@ def transcribe(
         ),
     ],
     output: Annotated[
-        Path,
+        Path | None,
         typer.Option(
             "--output",
             "-o",

@@ -3,6 +3,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -69,7 +70,7 @@ def save_json_report(
     output_path: Path,
 ) -> Path:
     """Save report as JSON for further processing."""
-    report = {
+    report: dict[str, Any] = {
         "video": str(video_path),
         "generated_at": datetime.now().isoformat(),
         "summary": {
@@ -168,13 +169,13 @@ def save_enhanced_json_report(
     screenshots: list[tuple[Detection, Path]],
     video_path: Path,
     output_path: Path,
-    semantic_analyses: list | None = None,
-    vision_analyses: list | None = None,
+    semantic_analyses: list[Any] | None = None,
+    vision_analyses: list[Any] | None = None,
     executive_summary: str = "",
-    errors: list[dict] | None = None,
+    errors: list[dict[str, str]] | None = None,
 ) -> Path:
     """Save enhanced report with AI analyses as JSON."""
-    report = {
+    report: dict[str, Any] = {
         "video": str(video_path),
         "generated_at": datetime.now().isoformat(),
         "executive_summary": executive_summary,
@@ -248,11 +249,11 @@ def save_enhanced_markdown_report(
     screenshots: list[tuple[Detection, Path]],
     video_path: Path,
     output_path: Path,
-    semantic_analyses: list | None = None,
-    vision_analyses: list | None = None,
+    semantic_analyses: list[Any] | None = None,
+    vision_analyses: list[Any] | None = None,
     executive_summary: str = "",
     visual_summary: str = "",
-    errors: list[dict] | None = None,
+    errors: list[dict[str, str]] | None = None,
 ) -> Path:
     """Save enhanced report with AI analyses as Markdown."""
     lines = [
