@@ -240,6 +240,9 @@ def serialize_semantic_analysis(analysis: SemanticAnalysis) -> dict[str, Any]:
 
 def deserialize_semantic_analysis(data: dict[str, Any]) -> SemanticAnalysis:
     """Deserialize dict to SemanticAnalysis."""
+    # Add defaults for new fields (backwards compatibility with old checkpoints)
+    data.setdefault("is_issue", True)
+    data.setdefault("sentiment", "problem")
     return SemanticAnalysis(**data)
 
 

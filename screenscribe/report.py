@@ -217,6 +217,8 @@ def save_enhanced_json_report(
         if detection.segment.id in semantic_by_id:
             sem = semantic_by_id[detection.segment.id]
             finding["semantic_analysis"] = {
+                "is_issue": sem.is_issue,
+                "sentiment": sem.sentiment,
                 "severity": sem.severity,
                 "summary": sem.summary,
                 "action_items": sem.action_items,
@@ -340,12 +342,17 @@ def save_enhanced_markdown_report(
 
         # Get severity if available
         severity_badge = ""
+        is_non_issue = False
         if detection.segment.id in semantic_by_id:
             sem = semantic_by_id[detection.segment.id]
-            sev_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(
-                sem.severity, ""
-            )
-            severity_badge = f" {sev_emoji} [{sem.severity.upper()}]"
+            if sem.is_issue:
+                sev_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(
+                    sem.severity, ""
+                )
+                severity_badge = f" {sev_emoji} [{sem.severity.upper()}]"
+            else:
+                severity_badge = " ✅ [OK]"
+                is_non_issue = True
 
         lines.extend(
             [
@@ -355,6 +362,9 @@ def save_enhanced_markdown_report(
                 "",
             ]
         )
+
+        if is_non_issue:
+            lines.extend(["*User confirms this is working correctly - not an issue.*", ""])
 
         # Semantic analysis
         if detection.segment.id in semantic_by_id:

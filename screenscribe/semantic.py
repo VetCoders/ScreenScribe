@@ -19,7 +19,9 @@ class SemanticAnalysis:
 
     detection_id: int
     category: str
-    severity: str  # "critical", "high", "medium", "low"
+    is_issue: bool  # True if user reports a problem, False if confirms OK
+    sentiment: str  # "problem", "positive", "neutral"
+    severity: str  # "critical", "high", "medium", "low", "none"
     summary: str
     action_items: list[str]
     affected_components: list[str]
@@ -154,6 +156,8 @@ def analyze_detection_semantically(
         return SemanticAnalysis(
             detection_id=detection.segment.id,
             category=detection.category,
+            is_issue=data.get("is_issue", True),
+            sentiment=data.get("sentiment", "problem"),
             severity=data.get("severity", "medium"),
             summary=data.get("summary", ""),
             action_items=data.get("action_items", []),
@@ -201,11 +205,13 @@ def analyze_detections_semantically(
         else:
             console.print("[yellow]  ✗[/] failed")
 
-    # Summary by severity
-    critical = sum(1 for a in results if a.severity == "critical")
-    high = sum(1 for a in results if a.severity == "high")
-    medium = sum(1 for a in results if a.severity == "medium")
-    low = sum(1 for a in results if a.severity == "low")
+    # Summary by severity and issue status
+    issues = [a for a in results if a.is_issue]
+    non_issues = [a for a in results if not a.is_issue]
+    critical = sum(1 for a in issues if a.severity == "critical")
+    high = sum(1 for a in issues if a.severity == "high")
+    medium = sum(1 for a in issues if a.severity == "medium")
+    low = sum(1 for a in issues if a.severity == "low")
 
     console.print(
         f"[green]Semantic analysis complete:[/] "
@@ -214,6 +220,8 @@ def analyze_detections_semantically(
         f"[blue]{medium} medium[/], "
         f"[dim]{low} low[/]"
     )
+    if non_issues:
+        console.print(f"[dim]  ({len(non_issues)} positive/neutral observations filtered)[/]")
 
     return results
 

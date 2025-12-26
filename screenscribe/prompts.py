@@ -8,7 +8,7 @@ PromptLanguage = Literal["pl", "en"]
 SEMANTIC_ANALYSIS_PROMPTS: dict[str, str] = {
     "pl": """Jesteś ekspertem UX/UI i programistą analizującym feedback z nagrania screencast.
 
-Przeanalizuj poniższy fragment transkrypcji, gdzie użytkownik opisuje problem lub zmianę w aplikacji.
+Przeanalizuj poniższy fragment transkrypcji. UWAGA: Użytkownik może zgłaszać problem, ALE TAKŻE może potwierdzać że coś działa poprawnie.
 
 Fragment:
 {text}
@@ -18,19 +18,31 @@ Kontekst (otaczające wypowiedzi):
 
 Kategoria wykryta automatycznie: {category}
 
+WAŻNE - Przykłady interpretacji:
+- "To nie działa" → is_issue: true (zgłasza problem)
+- "Te białe tła nie przeszkadzają" → is_issue: false (potwierdza że OK)
+- "Powinno być przeźroczyste" → is_issue: true (zgłasza problem)
+- "Działa ładnie" → is_issue: false (potwierdza że OK)
+- "Jest brzydkie" → is_issue: true (zgłasza problem)
+- "Teraz jest ok" → is_issue: false (potwierdza że OK)
+
+Zwróć szczególną uwagę na NEGACJE ("nie przeszkadza", "nie ma problemu", "jest ok").
+
 Odpowiedz w formacie JSON:
 {{
-    "severity": "critical|high|medium|low",
-    "summary": "Krótkie podsumowanie problemu (1-2 zdania)",
-    "action_items": ["Lista konkretnych zadań do wykonania"],
+    "is_issue": true/false,
+    "sentiment": "problem|positive|neutral",
+    "severity": "critical|high|medium|low|none",
+    "summary": "Krótkie podsumowanie - CO użytkownik mówi (1-2 zdania)",
+    "action_items": ["Lista konkretnych zadań do wykonania (pusta jeśli is_issue=false)"],
     "affected_components": ["Lista komponentów UI/funkcji których dotyczy"],
-    "suggested_fix": "Sugerowane rozwiązanie techniczne"
+    "suggested_fix": "Sugerowane rozwiązanie techniczne (lub 'Brak - nie jest to problem' jeśli is_issue=false)"
 }}
 
 Odpowiadaj tylko JSON, bez dodatkowego tekstu.""",
     "en": """You are a UX/UI expert and developer analyzing feedback from a screencast recording.
 
-Analyze the following transcript fragment where the user describes a problem or change in the application.
+Analyze the following transcript fragment. NOTE: The user may be reporting a problem, BUT ALSO may be confirming that something works correctly.
 
 Fragment:
 {text}
@@ -40,13 +52,25 @@ Context (surrounding speech):
 
 Automatically detected category: {category}
 
+IMPORTANT - Interpretation examples:
+- "This doesn't work" → is_issue: true (reports problem)
+- "The white backgrounds don't bother me" → is_issue: false (confirms OK)
+- "Should be transparent" → is_issue: true (reports problem)
+- "Works nicely" → is_issue: false (confirms OK)
+- "It's ugly" → is_issue: true (reports problem)
+- "Now it's fine" → is_issue: false (confirms OK)
+
+Pay special attention to NEGATIONS ("doesn't bother", "no problem", "is ok").
+
 Respond in JSON format:
 {{
-    "severity": "critical|high|medium|low",
-    "summary": "Brief summary of the issue (1-2 sentences)",
-    "action_items": ["List of specific tasks to complete"],
+    "is_issue": true/false,
+    "sentiment": "problem|positive|neutral",
+    "severity": "critical|high|medium|low|none",
+    "summary": "Brief summary - WHAT the user is saying (1-2 sentences)",
+    "action_items": ["List of specific tasks to complete (empty if is_issue=false)"],
     "affected_components": ["List of affected UI components/features"],
-    "suggested_fix": "Suggested technical solution"
+    "suggested_fix": "Suggested technical solution (or 'None - not an issue' if is_issue=false)"
 }}
 
 Respond only with JSON, no additional text.""",
