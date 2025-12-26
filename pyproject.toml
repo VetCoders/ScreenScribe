@@ -83,6 +83,13 @@ disallow_untyped_defs = false
 testpaths = ["tests"]
 python_files = "test_*.py"
 python_functions = "test_*"
+markers = [
+    "integration: marks tests that require external API access (LIBRAXIS_API_KEY)",
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
 
 # Bandit - security linter
 [tool.bandit]

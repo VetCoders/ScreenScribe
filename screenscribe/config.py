@@ -105,7 +105,12 @@ class ScreenScribeConfig:
             # Normalize api_base - remove trailing paths like /v1/responses, /v1, etc.
             normalized = value.rstrip("/")
             # Strip common API path suffixes
-            for suffix in ["/v1/responses", "/v1/audio/transcriptions", "/v1/chat/completions", "/v1"]:
+            for suffix in [
+                "/v1/responses",
+                "/v1/audio/transcriptions",
+                "/v1/chat/completions",
+                "/v1",
+            ]:
                 if normalized.endswith(suffix):
                     normalized = normalized[: -len(suffix)]
                     break

@@ -8,9 +8,10 @@ ScreenScribe extracts actionable insights from screencast recordings by transcri
 
 ## Features
 
+- **Semantic Pre-Filtering**: LLM analyzes the entire transcript before frame extraction, finding issues that keyword matching might miss
 - **Audio Extraction**: Automatically extracts audio from video files (MOV, MP4, etc.) using FFmpeg
 - **Speech-to-Text**: Transcribes audio with word-level timestamps via LibraxisAI STT API
-- **Issue Detection**: Identifies bugs, change requests, and UI issues from Polish and English keywords
+- **Issue Detection**: Identifies bugs, change requests, and UI issues (semantic + keyword-based)
 - **Custom Keywords**: Define your own detection keywords via YAML configuration
 - **Screenshot Capture**: Extracts frames at timestamps where issues are mentioned
 - **Semantic Analysis**: Uses LLM to analyze each finding, assign severity, and suggest fixes
@@ -63,7 +64,10 @@ choco install ffmpeg
 git clone https://github.com/LibraxisAI/screenscribe.git
 cd screenscribe
 
-# Install globally using uv
+# Install globally using uv (recommended)
+make install
+
+# Or manually:
 uv tool install .
 
 # Verify installation
@@ -83,8 +87,11 @@ screenscribe config --set-key YOUR_LIBRAXIS_API_KEY
 ## Quick Start
 
 ```bash
-# Full analysis of a screencast video
+# Full analysis (default: semantic pre-filtering for comprehensive detection)
 screenscribe review path/to/video.mov
+
+# Fast mode: keyword-based detection only (no LLM pre-filter)
+screenscribe review video.mov --keywords-only
 
 # See time estimate before processing
 screenscribe review video.mov --estimate
@@ -117,20 +124,31 @@ screenscribe transcribe video.mov -o transcript.txt
 flowchart TD
     A[Video File] --> B[Audio Extraction]
     B --> C[Transcription]
-    C --> D[Issue Detection]
-    D --> E[Screenshots]
+    C --> D{Detection Mode}
+    D -->|Default| D1[Semantic Pre-Filter]
+    D -->|--keywords-only| D2[Keyword Matching]
+    D1 --> E[Screenshots]
+    D2 --> E
     E --> F[Semantic Analysis]
     F --> G[Vision Analysis]
     G --> H[Report Generation]
 
     B -.- B1[FFmpeg extracts audio track]
     C -.- C1[LibraxisAI STT with timestamps]
-    D -.- D1[Keyword matching - PL/EN]
+    D1 -.- D1a[LLM analyzes full transcript]
+    D2 -.- D2a[Regex keyword matching - PL/EN]
     E -.- E1[FFmpeg frame extraction]
     F -.- F1[LLM severity + action items]
     G -.- G1[VLM screenshot analysis]
     H -.- H1[JSON + Markdown output]
 ```
+
+### Detection Modes
+
+| Mode | Flag | Description |
+|------|------|-------------|
+| **Semantic** (default) | — | LLM analyzes entire transcript before frame extraction. Finds more issues, including those without explicit keywords. |
+| **Keywords** | `--keywords-only` | Fast regex-based detection using predefined keyword patterns. Lower API costs, faster processing. |
 
 ## Output Structure
 
@@ -196,6 +214,7 @@ Options:
   -o, --output PATH         Output directory (default: VIDEO_review/)
   -l, --lang TEXT           Language code for transcription and AI prompts (default: pl)
   -k, --keywords-file PATH  Custom keywords YAML file
+  --keywords-only           Use fast keyword-based detection instead of semantic pre-filter
   --local                   Use local STT server instead of cloud
   --semantic/--no-semantic  Enable/disable LLM analysis (default: enabled)
   --vision/--no-vision      Enable/disable vision analysis (default: enabled)
@@ -295,17 +314,37 @@ Typical processing times for a 15-minute video:
 # Clone and setup
 git clone https://github.com/LibraxisAI/screenscribe.git
 cd screenscribe
-uv sync
+make dev
 
 # Run from source
 uv run screenscribe review video.mov
 
-# Run linters
-uv run ruff check screenscribe/
-uv run mypy screenscribe/
+# Quality checks
+make lint       # ruff check
+make typecheck  # mypy
+make check      # all quality checks
 
-# Run tests
-uv run pytest
+# Testing
+make test              # unit tests (fast, no API needed)
+make test-integration  # integration tests (requires LIBRAXIS_API_KEY)
+make test-all          # all tests
+
+# Formatting
+make format     # ruff format + fix
+```
+
+### Makefile Targets
+
+```
+make install          # uv tool install . (global CLI)
+make dev              # Install dev dependencies
+make test             # Run unit tests
+make test-integration # Run integration tests (requires API key)
+make lint             # Run ruff linter
+make format           # Format code with ruff
+make typecheck        # Run mypy type checker
+make check            # All quality checks
+make clean            # Remove caches and artifacts
 ```
 
 ## Architecture
@@ -318,6 +357,7 @@ screenscribe/
 ├── audio.py               # FFmpeg audio extraction
 ├── transcribe.py          # LibraxisAI STT integration
 ├── detect.py              # Keyword-based issue detection
+├── semantic_filter.py     # Semantic pre-filtering pipeline (NEW)
 ├── keywords.py            # Custom keywords loading (YAML)
 ├── screenshots.py         # Frame extraction
 ├── semantic.py            # LLM semantic analysis
@@ -327,6 +367,11 @@ screenscribe/
 ├── api_utils.py           # Retry logic, API utilities
 ├── checkpoint.py          # Pipeline checkpointing
 └── default_keywords.yaml  # Default detection keywords
+
+tests/
+├── test_detect.py         # Detection unit tests
+├── test_semantic_filter.py # Semantic filter unit tests (54 tests)
+└── test_integration.py    # API integration tests (10 tests)
 ```
 
 ## API Integration
