@@ -41,7 +41,7 @@ from .semantic_filter import (
     pois_to_detections,
     semantic_prefilter,
 )
-from .transcribe import transcribe_audio
+from .transcribe import transcribe_audio, validate_audio_quality
 from .vision import analyze_screenshots, generate_visual_summary
 
 console = Console()
@@ -409,6 +409,17 @@ def review(
 
     if transcription is None:
         console.print("[red]Error: No transcription available[/]")
+        return
+
+    # Validate audio quality before proceeding
+    is_valid, validation_error = validate_audio_quality(transcription)
+    if not is_valid and validation_error:
+        console.print()
+        console.print(Panel(validation_error, title="[bold red]Audio Quality Issue[/]", border_style="red"))
+        console.print()
+        console.print("[yellow]Processing stopped.[/] Please fix the audio issue and try again.")
+        console.print("[dim]If you believe this is a false positive, please report it.[/]")
+        delete_checkpoint(output)
         return
 
     # Step 3: Issue Detection (varies by filter level)

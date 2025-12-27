@@ -172,7 +172,13 @@ def serialize_transcription(transcription: TranscriptionResult) -> dict[str, Any
         "text": transcription.text,
         "language": transcription.language,
         "segments": [
-            {"id": s.id, "start": s.start, "end": s.end, "text": s.text}
+            {
+                "id": s.id,
+                "start": s.start,
+                "end": s.end,
+                "text": s.text,
+                "no_speech_prob": s.no_speech_prob,
+            }
             for s in transcription.segments
         ],
     }
@@ -181,7 +187,13 @@ def serialize_transcription(transcription: TranscriptionResult) -> dict[str, Any
 def deserialize_transcription(data: dict[str, Any]) -> TranscriptionResult:
     """Deserialize dict to TranscriptionResult."""
     segments = [
-        Segment(id=s["id"], start=s["start"], end=s["end"], text=s["text"])
+        Segment(
+            id=s["id"],
+            start=s["start"],
+            end=s["end"],
+            text=s["text"],
+            no_speech_prob=s.get("no_speech_prob", 0.0),  # Default for old checkpoints
+        )
         for s in data["segments"]
     ]
     return TranscriptionResult(text=data["text"], language=data["language"], segments=segments)
@@ -195,6 +207,7 @@ def serialize_detection(detection: Detection) -> dict[str, Any]:
             "start": detection.segment.start,
             "end": detection.segment.end,
             "text": detection.segment.text,
+            "no_speech_prob": detection.segment.no_speech_prob,
         },
         "category": detection.category,
         "keywords_found": detection.keywords_found,
@@ -204,11 +217,13 @@ def serialize_detection(detection: Detection) -> dict[str, Any]:
 
 def deserialize_detection(data: dict[str, Any]) -> Detection:
     """Deserialize dict to Detection."""
+    seg_data = data["segment"]
     segment = Segment(
-        id=data["segment"]["id"],
-        start=data["segment"]["start"],
-        end=data["segment"]["end"],
-        text=data["segment"]["text"],
+        id=seg_data["id"],
+        start=seg_data["start"],
+        end=seg_data["end"],
+        text=seg_data["text"],
+        no_speech_prob=seg_data.get("no_speech_prob", 0.0),
     )
     return Detection(
         segment=segment,
