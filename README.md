@@ -9,7 +9,9 @@ ScreenScribe extracts actionable insights from screencast recordings by transcri
 ## Features
 
 - **Semantic Pre-Filtering**: LLM analyzes the entire transcript before frame extraction, finding issues that keyword matching might miss
+- **Sentiment Detection**: Understands negations and context - distinguishes real issues from confirmations ("doesn't work" vs "doesn't bother me")
 - **Audio Extraction**: Automatically extracts audio from video files (MOV, MP4, etc.) using FFmpeg
+- **Audio Quality Validation**: Detects silent recordings and warns about missing microphone input
 - **Speech-to-Text**: Transcribes audio with word-level timestamps via LibraxisAI STT API
 - **Issue Detection**: Identifies bugs, change requests, and UI issues (semantic + keyword-based)
 - **Custom Keywords**: Define your own detection keywords via YAML configuration
@@ -174,7 +176,9 @@ Each report includes:
   - Original transcript text
   - Context (surrounding dialogue)
   - AI Analysis:
-    - Severity rating (critical/high/medium/low)
+    - **Issue detection** (`is_issue`: true/false) - distinguishes real problems from confirmations
+    - **Sentiment** (problem/positive/neutral) - tone of user's statement
+    - Severity rating (critical/high/medium/low/none)
     - Summary
     - Affected components
     - Action items
