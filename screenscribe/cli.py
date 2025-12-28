@@ -42,6 +42,7 @@ from .semantic_filter import (
     semantic_prefilter,
 )
 from .transcribe import transcribe_audio, validate_audio_quality
+from .validation import APIKeyError, ModelValidationError, validate_models
 from .vision import analyze_screenshots, generate_visual_summary
 
 console = Console()
@@ -264,6 +265,13 @@ def review(
             help="Use fast keyword-based detection instead of semantic pre-filter",
         ),
     ] = False,
+    skip_validation: Annotated[
+        bool,
+        typer.Option(
+            "--skip-validation",
+            help="Skip model availability check (faster start, may fail mid-pipeline)",
+        ),
+    ] = False,
 ) -> None:
     """
     Analyze a screencast video for bugs and change requests.
@@ -299,6 +307,21 @@ def review(
     config.language = language
     config.use_semantic_analysis = semantic
     config.use_vision_analysis = vision
+
+    # Validate model availability (fail fast)
+    if not skip_validation and not local:
+        try:
+            validate_models(config, use_semantic=semantic, use_vision=vision)
+        except APIKeyError as e:
+            console.print(f"[red]API Key Error:[/] {e}")
+            raise typer.Exit(1) from None
+        except ModelValidationError as e:
+            console.print(f"[red]Model Error:[/] {e}")
+            console.print(
+                f"[dim]Tip: Check SCREENSCRIBE_{e.model_type.upper()}_MODEL in "
+                "~/.config/screenscribe/config.env[/]"
+            )
+            raise typer.Exit(1) from None
 
     # Set filter level based on --keywords-only flag
     semantic_filter_level = (
@@ -392,6 +415,7 @@ def review(
             use_local=local,
             api_key=config.api_key,
             stt_endpoint=config.stt_endpoint,
+            stt_model=config.stt_model,
         )
         checkpoint.transcription = serialize_transcription(transcription)
         checkpoint.mark_stage_complete("transcription")
@@ -719,6 +743,7 @@ def transcribe(
         use_local=local,
         api_key=config.api_key,
         stt_endpoint=config.stt_endpoint,
+        stt_model=config.stt_model,
     )
 
     # Output
