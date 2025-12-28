@@ -1,10 +1,15 @@
 # ⌜ ScreenScribe ⌟
 
-**Video review automation for screencast commentary analysis.**
+**AI-powered screenrecordings review automation for screencast commentary analysis.**
+**Transform your voice descriptions on the code issues and extract the actionable findings for AI agents**
 
+## Overview
 ScreenScribe extracts actionable insights from screencast recordings by transcribing audio commentary, detecting mentions of bugs, changes, and UI issues, capturing relevant screenshots, and generating comprehensive reports with AI-powered semantic analysis.
 
-> **Status:** v0.1.0 — Fully functional CLI with AI-powered analysis.
+<img width="726" height="667" alt="image" src="https://github.com/user-attachments/assets/d3abff5f-d511-4a2d-9210-1d22d2f97b1d" />
+
+
+> **Status:** v0.1.1 — Fully functional CLI with AI-powered analysis.
 
 ## Features
 
