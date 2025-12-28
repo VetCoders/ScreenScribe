@@ -359,7 +359,7 @@ def save_enhanced_markdown_report(
 
         def component_score(item: tuple[str, list[tuple[int, str]]]) -> tuple[int, int]:
             _, findings = item
-            max_sev = max(severity_weight.get(sev, 0) for _, sev in findings)
+            max_sev = max((severity_weight.get(sev, 0) for _, sev in findings), default=0)
             return (-len(findings), -max_sev)
 
         sorted_components = sorted(components_index.items(), key=component_score)

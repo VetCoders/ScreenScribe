@@ -246,10 +246,10 @@ ScreenScribe pays special attention to negations:
 
 ### In Reports
 
-**Markdown report** shows non-issues with a checkmark:
+**Markdown report** uses plain-text severity labels (no emojis):
 
 ```markdown
-### 🎨 #3 UI ✅ [OK] @ 00:32
+### [OK] #3 UI @ 00:32
 
 > The white backgrounds don't bother me in dropdowns.
 

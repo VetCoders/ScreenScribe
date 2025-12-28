@@ -107,7 +107,7 @@ def _check_stt_model(config: ScreenScribeConfig) -> bool:
     """
     try:
         with httpx.Client(timeout=VALIDATION_TIMEOUT) as client:
-            # HEAD request to check endpoint exists
+            # POST with empty file to check endpoint responds (400 expected)
             response = client.post(
                 config.stt_endpoint,
                 headers={"Authorization": f"Bearer {config.api_key}"},
