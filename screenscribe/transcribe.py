@@ -24,6 +24,7 @@ class Segment:
     start: float
     end: float
     text: str
+    no_speech_prob: float = 0.0  # Probability that segment contains no speech (0.0-1.0)
 
 
 @dataclass
@@ -119,6 +120,7 @@ def transcribe_audio(
                 start=seg.get("start", 0.0),
                 end=seg.get("end", 0.0),
                 text=seg.get("text", "").strip(),
+                no_speech_prob=seg.get("no_speech_prob", 0.0),
             )
         )
 
@@ -127,3 +129,58 @@ def transcribe_audio(
     return TranscriptionResult(
         text=result.get("text", ""), segments=segments, language=result.get("language", language)
     )
+
+
+def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | None]:
+    """
+    Validate that audio actually contains speech.
+
+    Detects silent/near-silent recordings by analyzing no_speech_prob
+    from Whisper and checking for repetitive hallucinations.
+
+    Args:
+        result: TranscriptionResult from transcribe_audio()
+
+    Returns:
+        Tuple of (is_valid, error_message).
+        If is_valid is False, error_message contains user-friendly feedback.
+    """
+    if not result.segments:
+        return False, (
+            "⚠️  No audio segments detected!\n"
+            "   The audio file appears to be empty or corrupted."
+        )
+
+    # Calculate average no_speech probability
+    avg_no_speech = sum(s.no_speech_prob for s in result.segments) / len(result.segments)
+
+    # Check for high no_speech probability (silent audio)
+    if avg_no_speech > 0.6:
+        return False, (
+            f"⚠️  Audio appears to contain little or no speech!\n"
+            f"   Average no-speech probability: {avg_no_speech:.0%}\n"
+            f"\n"
+            f"   Common causes:\n"
+            f"   • Microphone was not enabled during screen recording\n"
+            f"   • Microphone input volume is too low (check System Settings > Sound > Input)\n"
+            f"   • Wrong audio input device selected\n"
+            f"\n"
+            f"   Tip: When using Cmd+Shift+5, click 'Options' and select your microphone."
+        )
+
+    # Check for repetitive hallucinations (Whisper hallucinates on silence)
+    texts = [s.text.strip().lower() for s in result.segments if s.text.strip()]
+    if texts:
+        unique_ratio = len(set(texts)) / len(texts)
+        if unique_ratio < 0.3 and len(texts) > 3:
+            # More than 70% duplicates with multiple segments = likely hallucination
+            most_common = max(set(texts), key=texts.count)
+            return False, (
+                f"⚠️  Detected repetitive transcription (likely silent audio)!\n"
+                f"   The same phrase '{most_common}' appears repeatedly.\n"
+                f"   This typically happens when Whisper hallucinates on silent input.\n"
+                f"\n"
+                f"   Please check your microphone settings and re-record."
+            )
+
+    return True, None
