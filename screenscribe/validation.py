@@ -40,7 +40,9 @@ def _check_llm_model(config: ScreenScribeConfig, model: str, model_type: str) ->
                 },
                 json={
                     "model": model,
-                    "input": [{"role": "user", "content": [{"type": "input_text", "text": "ping"}]}],
+                    "input": [
+                        {"role": "user", "content": [{"type": "input_text", "text": "ping"}]}
+                    ],
                     "max_tokens": 1,
                 },
             )

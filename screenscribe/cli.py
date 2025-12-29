@@ -439,7 +439,9 @@ def review(
     is_valid, validation_error = validate_audio_quality(transcription)
     if not is_valid and validation_error:
         console.print()
-        console.print(Panel(validation_error, title="[bold red]Audio Quality Issue[/]", border_style="red"))
+        console.print(
+            Panel(validation_error, title="[bold red]Audio Quality Issue[/]", border_style="red")
+        )
         console.print()
         console.print("[yellow]Processing stopped.[/] Please fix the audio issue and try again.")
         console.print("[dim]If you believe this is a false positive, please report it.[/]")

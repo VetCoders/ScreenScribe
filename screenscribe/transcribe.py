@@ -148,8 +148,7 @@ def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | Non
     """
     if not result.segments:
         return False, (
-            "⚠️  No audio segments detected!\n"
-            "   The audio file appears to be empty or corrupted."
+            "⚠️  No audio segments detected!\n   The audio file appears to be empty or corrupted."
         )
 
     # Calculate average no_speech probability
