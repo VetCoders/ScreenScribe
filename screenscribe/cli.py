@@ -616,11 +616,14 @@ def review(
         checkpoint.mark_stage_complete("semantic")
 
     # Step 6: Vision Analysis - best effort
+    # Uses conversation chaining with semantic analysis for context
     if vision and config.api_key:
         if not checkpoint.is_stage_complete("vision"):
             console.rule("[bold]Step 6: Vision Analysis[/]")
             try:
-                vision_analyses = analyze_screenshots(screenshots, config)
+                vision_analyses = analyze_screenshots(
+                    screenshots, config, semantic_analyses=semantic_analyses
+                )
                 if vision_analyses:
                     visual_summary = generate_visual_summary(vision_analyses, config)
                     checkpoint.visual_summary = visual_summary

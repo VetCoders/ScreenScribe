@@ -26,6 +26,7 @@ class SemanticAnalysis:
     action_items: list[str]
     affected_components: list[str]
     suggested_fix: str
+    response_id: str = ""  # API response ID for conversation chaining
 
 
 def analyze_detection_semantically(
@@ -153,6 +154,9 @@ def analyze_detection_semantically(
             console.print(f"[yellow]JSON parse error: {e}. Content: {json_content[:200]}...[/]")
             return None
 
+        # Extract response_id for conversation chaining with vision
+        response_id = result.get("id", "")
+
         return SemanticAnalysis(
             detection_id=detection.segment.id,
             category=detection.category,
@@ -163,6 +167,7 @@ def analyze_detection_semantically(
             action_items=data.get("action_items", []),
             affected_components=data.get("affected_components", []),
             suggested_fix=data.get("suggested_fix", ""),
+            response_id=response_id,
         )
 
     except Exception as e:

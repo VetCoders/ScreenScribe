@@ -243,6 +243,7 @@ def deserialize_semantic_analysis(data: dict[str, Any]) -> SemanticAnalysis:
     # Add defaults for new fields (backwards compatibility with old checkpoints)
     data.setdefault("is_issue", True)
     data.setdefault("sentiment", "problem")
+    data.setdefault("response_id", "")  # For conversation chaining
     return SemanticAnalysis(**data)
 
 

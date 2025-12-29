@@ -224,6 +224,7 @@ def save_enhanced_json_report(
                 "action_items": sem.action_items,
                 "affected_components": sem.affected_components,
                 "suggested_fix": sem.suggested_fix,
+                "response_id": sem.response_id or None,  # For conversation chaining
             }
 
         # Add vision analysis if available
