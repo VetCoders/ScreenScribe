@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -14,6 +13,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from .api_utils import retry_request
 from .config import ScreenScribeConfig
 from .detect import Detection
+from .image_utils import encode_image_base64
 from .prompts import get_vision_analysis_prompt
 
 if TYPE_CHECKING:
@@ -33,12 +33,6 @@ class VisionAnalysis:
     accessibility_notes: list[str]
     design_feedback: str
     technical_observations: str
-
-
-def encode_image_base64(image_path: Path) -> str:
-    """Encode image to base64 for API."""
-    with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
 
 
 def analyze_screenshot(

@@ -12,7 +12,6 @@ Benefits:
 
 from __future__ import annotations
 
-import base64
 import json
 import re
 from dataclasses import dataclass
@@ -26,6 +25,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from .api_utils import retry_request
 from .config import ScreenScribeConfig
 from .detect import Detection
+from .image_utils import encode_image_base64, get_media_type
 from .prompts import get_unified_analysis_prompt
 
 if TYPE_CHECKING:
@@ -66,24 +66,6 @@ class UnifiedFinding:
 
     # API response tracking
     response_id: str = ""  # For conversation chaining between findings
-
-
-def encode_image_base64(image_path: Path) -> str:
-    """Encode image to base64 for API."""
-    with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
-
-def get_media_type(image_path: Path) -> str:
-    """Get MIME type for image file."""
-    suffix = image_path.suffix.lower()
-    return {
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png": "image/png",
-        ".gif": "image/gif",
-        ".webp": "image/webp",
-    }.get(suffix, "image/jpeg")
 
 
 def parse_json_response(content: str) -> dict[str, Any]:
