@@ -1,7 +1,7 @@
 # ScreenScribe Makefile
 # Uses uv as package manager
 
-.PHONY: help install dev lint format test test-unit test-integration test-all typecheck security clean
+.PHONY: help install dev lint format test test-unit test-integration test-all typecheck security clean version version-patch version-minor version-major
 
 # Default target
 help:
@@ -26,6 +26,12 @@ help:
 	@echo "  test-integration Run integration tests (requires LIBRAXIS_API_KEY)"
 	@echo "  test-all         Run all tests including integration"
 	@echo "  test-cov         Run tests with coverage report"
+	@echo ""
+	@echo "Versioning:"
+	@echo "  version          Show current version"
+	@echo "  version-patch    Bump patch version (0.1.2 -> 0.1.3)"
+	@echo "  version-minor    Bump minor version (0.1.2 -> 0.2.0)"
+	@echo "  version-major    Bump major version (0.1.2 -> 1.0.0)"
 	@echo ""
 	@echo "Other:"
 	@echo "  clean            Remove cache and build artifacts"
@@ -119,3 +125,40 @@ ci-test:
 
 ci-test-integration:
 	uv run pytest tests/ -v -m "integration" --tb=short --junitxml=integration-results.xml
+
+# ============================================================================
+# Versioning
+# ============================================================================
+
+# Get current version from pyproject.toml
+CURRENT_VERSION := $(shell grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+
+version:
+	@echo "Current version: $(CURRENT_VERSION)"
+
+# Bump patch version (0.1.2 -> 0.1.3)
+version-patch:
+	@echo "Bumping patch version..."
+	@NEW_VERSION=$$(echo "$(CURRENT_VERSION)" | awk -F. '{print $$1"."$$2"."$$3+1}'); \
+	echo "$(CURRENT_VERSION) -> $$NEW_VERSION"; \
+	sed -i '' "s/version = \"$(CURRENT_VERSION)\"/version = \"$$NEW_VERSION\"/" pyproject.toml; \
+	sed -i '' "s/__version__ = \"$(CURRENT_VERSION)\"/__version__ = \"$$NEW_VERSION\"/" screenscribe/__init__.py; \
+	echo "Updated pyproject.toml and screenscribe/__init__.py"
+
+# Bump minor version (0.1.2 -> 0.2.0)
+version-minor:
+	@echo "Bumping minor version..."
+	@NEW_VERSION=$$(echo "$(CURRENT_VERSION)" | awk -F. '{print $$1"."$$2+1".0"}'); \
+	echo "$(CURRENT_VERSION) -> $$NEW_VERSION"; \
+	sed -i '' "s/version = \"$(CURRENT_VERSION)\"/version = \"$$NEW_VERSION\"/" pyproject.toml; \
+	sed -i '' "s/__version__ = \"$(CURRENT_VERSION)\"/__version__ = \"$$NEW_VERSION\"/" screenscribe/__init__.py; \
+	echo "Updated pyproject.toml and screenscribe/__init__.py"
+
+# Bump major version (0.1.2 -> 1.0.0)
+version-major:
+	@echo "Bumping major version..."
+	@NEW_VERSION=$$(echo "$(CURRENT_VERSION)" | awk -F. '{print $$1+1".0.0"}'); \
+	echo "$(CURRENT_VERSION) -> $$NEW_VERSION"; \
+	sed -i '' "s/version = \"$(CURRENT_VERSION)\"/version = \"$$NEW_VERSION\"/" pyproject.toml; \
+	sed -i '' "s/__version__ = \"$(CURRENT_VERSION)\"/__version__ = \"$$NEW_VERSION\"/" screenscribe/__init__.py; \
+	echo "Updated pyproject.toml and screenscribe/__init__.py"
