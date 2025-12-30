@@ -9,18 +9,41 @@ ScreenScribe extracts actionable insights from screencast recordings by transcri
 <img width="726" height="667" alt="image" src="https://github.com/user-attachments/assets/d3abff5f-d511-4a2d-9210-1d22d2f97b1d" />
 
 
-> **Status:** v0.1.1 — Fully functional CLI with AI-powered analysis.
+> **Status:** v0.1.2 — Fully functional CLI with AI-powered analysis.
+
+## API Provider
+
+ScreenScribe uses **LibraxisAI API** by default, but is **fully compatible with any OpenAI-compatible API provider**. Simply update your config file to use a different provider:
+
+```env
+# ~/.config/screenscribe/config.env
+
+# Default: LibraxisAI
+LIBRAXIS_API_BASE=https://api.libraxis.cloud
+
+# Or use any OpenAI-compatible provider:
+# LIBRAXIS_API_BASE=https://api.openai.com/v1
+# LIBRAXIS_API_BASE=https://api.groq.com/openai/v1
+# LIBRAXIS_API_BASE=https://your-custom-endpoint.com
+```
+
+> **Note:** Ensure your provider supports the required endpoints: STT (`/v1/audio/transcriptions`), LLM (`/v1/responses` or `/v1/chat/completions`), and optionally Vision models.
 
 ## Features
 
 - **Semantic Pre-Filtering**: LLM analyzes the entire transcript before frame extraction, finding issues that keyword matching might miss
+- **Sentiment Detection**: Understands negations and context - distinguishes real issues from confirmations ("doesn't work" vs "doesn't bother me")
 - **Audio Extraction**: Automatically extracts audio from video files (MOV, MP4, etc.) using FFmpeg
+- **Audio Quality Validation**: Detects silent recordings and warns about missing microphone input
 - **Speech-to-Text**: Transcribes audio with word-level timestamps via LibraxisAI STT API
 - **Issue Detection**: Identifies bugs, change requests, and UI issues (semantic + keyword-based)
 - **Custom Keywords**: Define your own detection keywords via YAML configuration
 - **Screenshot Capture**: Extracts frames at timestamps where issues are mentioned
 - **Semantic Analysis**: Uses LLM to analyze each finding, assign severity, and suggest fixes
 - **Vision Analysis**: Optional screenshot analysis using vision-capable models
+- **Response Chaining**: Vision analysis leverages semantic context via Responses API `previous_response_id` — zero token duplication
+- **Model Validation**: Fail-fast validation of STT/LLM/Vision availability before pipeline starts
+- **AI-Optimized Reports**: JSON output designed for efficient AI agent consumption with structured action items
 - **Report Generation**: Creates JSON and Markdown reports with executive summaries
 - **Resumable Pipeline**: Checkpoint system allows resuming interrupted processing
 - **Graceful Degradation**: Best-effort processing - errors don't stop the pipeline
@@ -179,7 +202,9 @@ Each report includes:
   - Original transcript text
   - Context (surrounding dialogue)
   - AI Analysis:
-    - Severity rating (critical/high/medium/low)
+    - **Issue detection** (`is_issue`: true/false) - distinguishes real problems from confirmations
+    - **Sentiment** (problem/positive/neutral) - tone of user's statement
+    - Severity rating (critical/high/medium/low/none)
     - Summary
     - Affected components
     - Action items
@@ -371,6 +396,7 @@ screenscribe/
 ├── prompts.py             # i18n prompt templates (PL/EN)
 ├── api_utils.py           # Retry logic, API utilities
 ├── checkpoint.py          # Pipeline checkpointing
+├── validation.py          # Model availability validation (fail-fast)
 └── default_keywords.yaml  # Default detection keywords
 
 tests/
@@ -419,6 +445,11 @@ All code is fully type-hinted and passes strict mypy checks.
 - [x] Retry logic with exponential backoff
 - [x] i18n prompts (PL/EN)
 - [x] Test suite (pytest)
+- [x] Sentiment detection (is_issue, sentiment fields)
+- [x] Audio quality validation (silent recording detection)
+- [x] Model availability validation (fail-fast)
+- [x] Response API chaining (vision context from semantic)
+- [x] AI-optimized report format
 
 ### Planned
 

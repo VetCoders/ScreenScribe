@@ -42,6 +42,7 @@ from .semantic_filter import (
     semantic_prefilter,
 )
 from .transcribe import transcribe_audio, validate_audio_quality
+from .validation import APIKeyError, ModelValidationError, validate_models
 from .vision import analyze_screenshots, generate_visual_summary
 
 console = Console()
@@ -264,6 +265,13 @@ def review(
             help="Use fast keyword-based detection instead of semantic pre-filter",
         ),
     ] = False,
+    skip_validation: Annotated[
+        bool,
+        typer.Option(
+            "--skip-validation",
+            help="Skip model availability check (faster start, may fail mid-pipeline)",
+        ),
+    ] = False,
 ) -> None:
     """
     Analyze a screencast video for bugs and change requests.
@@ -299,6 +307,21 @@ def review(
     config.language = language
     config.use_semantic_analysis = semantic
     config.use_vision_analysis = vision
+
+    # Validate model availability (fail fast)
+    if not skip_validation and not local:
+        try:
+            validate_models(config, use_semantic=semantic, use_vision=vision)
+        except APIKeyError as e:
+            console.print(f"[red]API Key Error:[/] {e}")
+            raise typer.Exit(1) from None
+        except ModelValidationError as e:
+            console.print(f"[red]Model Error:[/] {e}")
+            console.print(
+                f"[dim]Tip: Check SCREENSCRIBE_{e.model_type.upper()}_MODEL in "
+                "~/.config/screenscribe/config.env[/]"
+            )
+            raise typer.Exit(1) from None
 
     # Set filter level based on --keywords-only flag
     semantic_filter_level = (
@@ -392,6 +415,7 @@ def review(
             use_local=local,
             api_key=config.api_key,
             stt_endpoint=config.stt_endpoint,
+            stt_model=config.stt_model,
         )
         checkpoint.transcription = serialize_transcription(transcription)
         checkpoint.mark_stage_complete("transcription")
@@ -415,7 +439,9 @@ def review(
     is_valid, validation_error = validate_audio_quality(transcription)
     if not is_valid and validation_error:
         console.print()
-        console.print(Panel(validation_error, title="[bold red]Audio Quality Issue[/]", border_style="red"))
+        console.print(
+            Panel(validation_error, title="[bold red]Audio Quality Issue[/]", border_style="red")
+        )
         console.print()
         console.print("[yellow]Processing stopped.[/] Please fix the audio issue and try again.")
         console.print("[dim]If you believe this is a false positive, please report it.[/]")
@@ -592,11 +618,14 @@ def review(
         checkpoint.mark_stage_complete("semantic")
 
     # Step 6: Vision Analysis - best effort
+    # Uses conversation chaining with semantic analysis for context
     if vision and config.api_key:
         if not checkpoint.is_stage_complete("vision"):
             console.rule("[bold]Step 6: Vision Analysis[/]")
             try:
-                vision_analyses = analyze_screenshots(screenshots, config)
+                vision_analyses = analyze_screenshots(
+                    screenshots, config, semantic_analyses=semantic_analyses
+                )
                 if vision_analyses:
                     visual_summary = generate_visual_summary(vision_analyses, config)
                     checkpoint.visual_summary = visual_summary
@@ -719,6 +748,7 @@ def transcribe(
         use_local=local,
         api_key=config.api_key,
         stt_endpoint=config.stt_endpoint,
+        stt_model=config.stt_model,
     )
 
     # Output
