@@ -169,12 +169,24 @@ def save_enhanced_json_report(
     screenshots: list[tuple[Detection, Path]],
     video_path: Path,
     output_path: Path,
-    semantic_analyses: list[Any] | None = None,
-    vision_analyses: list[Any] | None = None,
+    unified_findings: list[Any] | None = None,
     executive_summary: str = "",
     errors: list[dict[str, str]] | None = None,
 ) -> Path:
-    """Save enhanced report with AI analyses as JSON."""
+    """Save enhanced report with unified VLM analysis as JSON.
+
+    Args:
+        detections: List of detections
+        screenshots: List of (detection, screenshot_path) tuples
+        video_path: Path to source video
+        output_path: Path to save JSON report
+        unified_findings: List of UnifiedFinding from unified VLM analysis
+        executive_summary: Executive summary text
+        errors: List of pipeline errors
+
+    Returns:
+        Path to saved report
+    """
     report: dict[str, Any] = {
         "video": str(video_path),
         "generated_at": datetime.now().isoformat(),
@@ -190,15 +202,14 @@ def save_enhanced_json_report(
         "findings": [],
     }
 
-    # Build severity breakdown from semantic analyses
-    if semantic_analyses:
+    # Build severity breakdown from unified findings
+    if unified_findings:
         for severity in ["critical", "high", "medium", "low"]:
-            count = sum(1 for a in semantic_analyses if a.severity == severity)
+            count = sum(1 for f in unified_findings if f.is_issue and f.severity == severity)
             report["severity_breakdown"][severity] = count
 
-    # Build findings with AI enhancements
-    semantic_by_id = {a.detection_id: a for a in (semantic_analyses or [])}
-    vision_by_path = {str(v.screenshot_path): v for v in (vision_analyses or [])}
+    # Build findings lookup from unified analysis
+    findings_by_id = {f.detection_id: f for f in (unified_findings or [])}
 
     for detection, screenshot_path in screenshots:
         finding = {
@@ -213,29 +224,27 @@ def save_enhanced_json_report(
             "screenshot": str(screenshot_path),
         }
 
-        # Add semantic analysis if available
-        if detection.segment.id in semantic_by_id:
-            sem = semantic_by_id[detection.segment.id]
-            finding["semantic_analysis"] = {
-                "is_issue": sem.is_issue,
-                "sentiment": sem.sentiment,
-                "severity": sem.severity,
-                "summary": sem.summary,
-                "action_items": sem.action_items,
-                "affected_components": sem.affected_components,
-                "suggested_fix": sem.suggested_fix,
-                "response_id": sem.response_id or None,  # For conversation chaining
-            }
-
-        # Add vision analysis if available
-        if str(screenshot_path) in vision_by_path:
-            vis = vision_by_path[str(screenshot_path)]
-            finding["vision_analysis"] = {
-                "ui_elements": vis.ui_elements,
-                "issues_detected": vis.issues_detected,
-                "accessibility_notes": vis.accessibility_notes,
-                "design_feedback": vis.design_feedback,
-                "technical_observations": vis.technical_observations,
+        # Add unified analysis if available
+        if detection.segment.id in findings_by_id:
+            uf = findings_by_id[detection.segment.id]
+            # Combined analysis (semantic + vision in one)
+            finding["unified_analysis"] = {
+                # Semantic fields
+                "is_issue": uf.is_issue,
+                "sentiment": uf.sentiment,
+                "severity": uf.severity,
+                "summary": uf.summary,
+                "action_items": uf.action_items,
+                "affected_components": uf.affected_components,
+                "suggested_fix": uf.suggested_fix,
+                # Vision fields
+                "ui_elements": uf.ui_elements,
+                "issues_detected": uf.issues_detected,
+                "accessibility_notes": uf.accessibility_notes,
+                "design_feedback": uf.design_feedback,
+                "technical_observations": uf.technical_observations,
+                # API tracking
+                "response_id": uf.response_id or None,
             }
 
         report["findings"].append(finding)
@@ -252,22 +261,33 @@ def save_enhanced_markdown_report(
     screenshots: list[tuple[Detection, Path]],
     video_path: Path,
     output_path: Path,
-    semantic_analyses: list[Any] | None = None,
-    vision_analyses: list[Any] | None = None,
+    unified_findings: list[Any] | None = None,
     executive_summary: str = "",
     visual_summary: str = "",
     errors: list[dict[str, str]] | None = None,
 ) -> Path:
-    """Save enhanced report with AI analyses as Markdown.
+    """Save enhanced report with unified VLM analysis as Markdown.
 
     Format optimized for AI consumption:
     - Sorted by severity (critical first)
     - Consolidated action items at top
     - No emoji clutter
     - Non-issues separated at end
+
+    Args:
+        detections: List of detections
+        screenshots: List of (detection, screenshot_path) tuples
+        video_path: Path to source video
+        output_path: Path to save Markdown report
+        unified_findings: List of UnifiedFinding from unified VLM analysis
+        executive_summary: Executive summary text
+        visual_summary: Visual summary text
+        errors: List of pipeline errors
+
+    Returns:
+        Path to saved report
     """
-    semantic_by_id = {a.detection_id: a for a in (semantic_analyses or [])}
-    vision_by_path = {str(v.screenshot_path): v for v in (vision_analyses or [])}
+    findings_by_id = {f.detection_id: f for f in (unified_findings or [])}
 
     # Separate issues from non-issues and sort by severity
     severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "none": 4}
@@ -275,8 +295,8 @@ def save_enhanced_markdown_report(
     non_issues: list[tuple[Detection, Path]] = []
 
     for detection, screenshot_path in screenshots:
-        sem = semantic_by_id.get(detection.segment.id)
-        if sem and not sem.is_issue:
+        uf = findings_by_id.get(detection.segment.id)
+        if uf and not uf.is_issue:
             non_issues.append((detection, screenshot_path))
         else:
             issues.append((detection, screenshot_path))
@@ -284,9 +304,9 @@ def save_enhanced_markdown_report(
     # Sort issues by severity
     def get_severity_rank(item: tuple[Detection, Path]) -> int:
         detection, _ = item
-        sem = semantic_by_id.get(detection.segment.id)
-        if sem:
-            return severity_order.get(sem.severity, 4)
+        uf = findings_by_id.get(detection.segment.id)
+        if uf:
+            return severity_order.get(uf.severity, 4)
         return 4
 
     issues.sort(key=get_severity_rank)
@@ -294,17 +314,17 @@ def save_enhanced_markdown_report(
     # Collect all action items upfront
     all_action_items: list[tuple[str, str, list[str]]] = []  # (severity, summary, items)
     for detection, _ in issues:
-        sem = semantic_by_id.get(detection.segment.id)
-        if sem and sem.action_items:
-            all_action_items.append((sem.severity, sem.summary, sem.action_items))
+        uf = findings_by_id.get(detection.segment.id)
+        if uf and uf.action_items:
+            all_action_items.append((uf.severity, uf.summary, uf.action_items))
 
     # Build components index: component -> [(finding_num, severity)]
     components_index: dict[str, list[tuple[int, str]]] = {}
     for i, (detection, _) in enumerate(issues, 1):
-        sem = semantic_by_id.get(detection.segment.id)
-        if sem and sem.affected_components:
-            severity = sem.severity if sem.is_issue else "ok"
-            for component in sem.affected_components:
+        uf = findings_by_id.get(detection.segment.id)
+        if uf and uf.affected_components:
+            severity = uf.severity if uf.is_issue else "ok"
+            for component in uf.affected_components:
                 if component not in components_index:
                     components_index[component] = []
                 components_index[component].append((i, severity))
@@ -323,12 +343,12 @@ def save_enhanced_markdown_report(
     change_count = sum(1 for d in detections if d.category == "change")
     ui_count = sum(1 for d in detections if d.category == "ui")
 
-    if semantic_analyses:
-        issues_only = [a for a in semantic_analyses if a.is_issue]
-        crit = sum(1 for a in issues_only if a.severity == "critical")
-        high = sum(1 for a in issues_only if a.severity == "high")
-        med = sum(1 for a in issues_only if a.severity == "medium")
-        low = sum(1 for a in issues_only if a.severity == "low")
+    if unified_findings:
+        issues_only = [f for f in unified_findings if f.is_issue]
+        crit = sum(1 for f in issues_only if f.severity == "critical")
+        high = sum(1 for f in issues_only if f.severity == "high")
+        med = sum(1 for f in issues_only if f.severity == "medium")
+        low = sum(1 for f in issues_only if f.severity == "low")
         lines.append(
             f"**Stats:** {len(issues)} issues ({crit} critical, {high} high, {med} medium, {low} low) "
             f"| {bug_count} bugs, {change_count} changes, {ui_count} UI "
@@ -397,10 +417,9 @@ def save_enhanced_markdown_report(
     lines.extend(["## Issues", ""])
 
     for i, (detection, screenshot_path) in enumerate(issues, 1):
-        sem = semantic_by_id.get(detection.segment.id)
-        vis = vision_by_path.get(str(screenshot_path))
+        uf = findings_by_id.get(detection.segment.id)
 
-        severity = sem.severity.upper() if sem else "UNKNOWN"
+        severity = uf.severity.upper() if uf else "UNKNOWN"
         category = detection.category.upper()
 
         lines.append(
@@ -410,17 +429,18 @@ def save_enhanced_markdown_report(
         lines.append(f"> {detection.segment.text}")
         lines.append("")
 
-        if sem:
-            lines.append(f"**Summary:** {sem.summary}")
-            if sem.affected_components:
-                lines.append(f"**Components:** {', '.join(sem.affected_components)}")
-            if sem.suggested_fix:
-                lines.append(f"**Fix:** {sem.suggested_fix}")
+        if uf:
+            lines.append(f"**Summary:** {uf.summary}")
+            if uf.affected_components:
+                lines.append(f"**Components:** {', '.join(uf.affected_components)}")
+            if uf.suggested_fix:
+                lines.append(f"**Fix:** {uf.suggested_fix}")
             lines.append("")
 
-        if vis and vis.issues_detected:
-            lines.append("**Visual issues:** " + "; ".join(vis.issues_detected))
-            lines.append("")
+            # Visual issues from unified analysis
+            if uf.issues_detected:
+                lines.append("**Visual issues:** " + "; ".join(uf.issues_detected))
+                lines.append("")
 
         lines.append(f"Screenshot: {screenshot_path.name}")
         lines.extend(["", "---", ""])
@@ -436,8 +456,8 @@ def save_enhanced_markdown_report(
             ]
         )
         for detection, _ in non_issues:
-            sem = semantic_by_id.get(detection.segment.id)
-            summary = sem.summary if sem else detection.segment.text
+            uf = findings_by_id.get(detection.segment.id)
+            summary = uf.summary if uf else detection.segment.text
             lines.append(f"- {format_timestamp(detection.segment.start)}: {summary}")
         lines.append("")
 

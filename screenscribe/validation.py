@@ -163,7 +163,9 @@ def validate_models(
     console.print("[dim]Validating configuration...[/]")
 
     # Check API key presence - at least one key must be configured
-    has_any_key = config.api_key or config.stt_api_key or config.llm_api_key or config.vision_api_key
+    has_any_key = (
+        config.api_key or config.stt_api_key or config.llm_api_key or config.vision_api_key
+    )
     if not has_any_key:
         raise APIKeyError(
             "No API key configured. "

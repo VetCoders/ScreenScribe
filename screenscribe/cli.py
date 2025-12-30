@@ -16,14 +16,14 @@ from .checkpoint import (
     delete_checkpoint,
     deserialize_detection,
     deserialize_screenshot,
-    deserialize_semantic_analysis,
     deserialize_transcription,
+    deserialize_unified_finding,
     load_checkpoint,
     save_checkpoint,
     serialize_detection,
     serialize_screenshot,
-    serialize_semantic_analysis,
     serialize_transcription,
+    serialize_unified_finding,
 )
 from .config import ScreenScribeConfig
 from .detect import detect_issues, format_timestamp
@@ -34,7 +34,9 @@ from .report import (
     save_enhanced_markdown_report,
 )
 from .screenshots import extract_screenshots_for_detections
-from .semantic import analyze_detections_semantically, generate_executive_summary
+
+# Legacy imports kept for backwards compatibility (not used in unified pipeline)
+# from .semantic import analyze_detections_semantically, generate_executive_summary
 from .semantic_filter import (
     SemanticFilterLevel,
     merge_pois_with_detections,
@@ -42,8 +44,16 @@ from .semantic_filter import (
     semantic_prefilter,
 )
 from .transcribe import transcribe_audio, validate_audio_quality
+from .unified_analysis import (
+    UnifiedFinding,
+    analyze_all_findings_unified,
+    generate_unified_summary,
+    generate_visual_summary_unified,
+)
 from .validation import APIKeyError, ModelValidationError, validate_models
-from .vision import analyze_screenshots, generate_visual_summary
+
+# Legacy imports kept for backwards compatibility (not used in unified pipeline)
+# from .vision import analyze_screenshots, generate_visual_summary
 
 console = Console()
 app = typer.Typer(
@@ -54,8 +64,9 @@ app = typer.Typer(
 
 # Time estimates (seconds per unit)
 ESTIMATE_STT_PER_MINUTE = 2.0  # ~2s per minute of video
-ESTIMATE_SEMANTIC_PER_DETECTION = 12.0  # ~12s per detection
-ESTIMATE_VISION_PER_DETECTION = 25.0  # ~25s per screenshot
+ESTIMATE_SEMANTIC_PER_DETECTION = 12.0  # ~12s per detection (legacy)
+ESTIMATE_VISION_PER_DETECTION = 25.0  # ~25s per screenshot (legacy)
+ESTIMATE_UNIFIED_PER_DETECTION = 20.0  # ~20s per finding (unified VLM)
 ESTIMATE_SEMANTIC_PREFILTER_PER_MINUTE = 8.0  # ~8s per minute for semantic pre-filter
 
 
@@ -65,8 +76,18 @@ def _show_estimate(
     vision: bool,
     detection_count: int | None = None,
     filter_level: str = "keywords",
+    use_unified: bool = True,
 ) -> None:
-    """Show estimated processing times."""
+    """Show estimated processing times.
+
+    Args:
+        duration: Video duration in seconds
+        semantic: Whether semantic analysis is enabled
+        vision: Whether vision analysis is enabled
+        detection_count: Known detection count (None for estimate)
+        filter_level: Detection filter level (keywords, base, combined)
+        use_unified: Whether using unified VLM analysis (default True)
+    """
     from rich.table import Table
 
     table = Table(title="Estimated Processing Time")
@@ -99,70 +120,64 @@ def _show_estimate(
     # Screenshot extraction
     table.add_row("Screenshots", "~10s", "FFmpeg frame extraction")
 
-    # Semantic analysis (if enabled)
-    if semantic:
-        if detection_count:
-            sem_time = detection_count * ESTIMATE_SEMANTIC_PER_DETECTION
-            table.add_row(
-                "Semantic analysis",
-                f"~{int(sem_time / 60)}min",
-                f"{detection_count} detections x ~{int(ESTIMATE_SEMANTIC_PER_DETECTION)}s",
-            )
+    # Estimate detections if not provided
+    if detection_count is None:
+        if filter_level in ("base", "combined"):
+            est_detections = int(video_minutes * 6)  # More findings with semantic
         else:
-            # Estimate ~3-5 detections per minute of video
             est_detections = int(video_minutes * 4)
+    else:
+        est_detections = detection_count
+
+    # Analysis step (unified or legacy separate)
+    if use_unified and (semantic or vision):
+        # Unified VLM analysis - single pass
+        unified_time = est_detections * ESTIMATE_UNIFIED_PER_DETECTION
+        table.add_row(
+            "Unified VLM analysis",
+            f"~{int(unified_time / 60)}min",
+            f"{est_detections} findings x ~{int(ESTIMATE_UNIFIED_PER_DETECTION)}s",
+        )
+    else:
+        # Legacy separate analysis
+        if semantic:
             sem_time = est_detections * ESTIMATE_SEMANTIC_PER_DETECTION
             table.add_row(
                 "Semantic analysis",
                 f"~{int(sem_time / 60)}min",
-                f"~{est_detections} detections (estimated)",
-            )
-    else:
-        table.add_row("Semantic analysis", "skipped", "--no-semantic")
-
-    # Vision analysis (if enabled)
-    if vision:
-        if detection_count:
-            vis_time = detection_count * ESTIMATE_VISION_PER_DETECTION
-            table.add_row(
-                "Vision analysis",
-                f"~{int(vis_time / 60)}min",
-                f"{detection_count} screenshots x ~{int(ESTIMATE_VISION_PER_DETECTION)}s",
+                f"{est_detections} detections x ~{int(ESTIMATE_SEMANTIC_PER_DETECTION)}s",
             )
         else:
-            est_detections = int(video_minutes * 4)
+            table.add_row("Semantic analysis", "skipped", "--no-semantic")
+
+        if vision:
             vis_time = est_detections * ESTIMATE_VISION_PER_DETECTION
             table.add_row(
                 "Vision analysis",
                 f"~{int(vis_time / 60)}min",
-                f"~{est_detections} screenshots (estimated)",
+                f"{est_detections} screenshots x ~{int(ESTIMATE_VISION_PER_DETECTION)}s",
             )
-    else:
-        table.add_row("Vision analysis", "skipped", "--no-vision")
+        else:
+            table.add_row("Vision analysis", "skipped", "--no-vision")
 
     console.print(table)
 
     # Total estimate
     total_fixed = 5 + stt_time + 1 + 10 + prefilter_time
-    if detection_count:
-        total_sem = detection_count * ESTIMATE_SEMANTIC_PER_DETECTION if semantic else 0
-        total_vis = detection_count * ESTIMATE_VISION_PER_DETECTION if vision else 0
+    if use_unified and (semantic or vision):
+        total_analysis = est_detections * ESTIMATE_UNIFIED_PER_DETECTION
     else:
-        # Semantic pre-filter typically finds more detections
-        if filter_level in ("base", "combined"):
-            est_detections = int(video_minutes * 6)  # More findings with semantic
-        else:
-            est_detections = int(video_minutes * 4)
         total_sem = est_detections * ESTIMATE_SEMANTIC_PER_DETECTION if semantic else 0
         total_vis = est_detections * ESTIMATE_VISION_PER_DETECTION if vision else 0
+        total_analysis = total_sem + total_vis
 
-    total = total_fixed + total_sem + total_vis
+    total = total_fixed + total_analysis
     console.print(f"\n[bold]Total estimated time:[/] ~{int(total / 60)} minutes")
 
     if not semantic and not vision:
         console.print("[dim]Tip: Without AI analysis, processing is very fast![/]")
-    elif vision:
-        console.print("[dim]Tip: Use --no-vision for faster processing (saves ~60% time)[/]")
+    elif use_unified:
+        console.print("[dim]Using unified VLM pipeline (screenshot + context in single call)[/]")
 
 
 @app.command()
@@ -412,8 +427,6 @@ def review(
         transcription = None
         detections: list[Any] = []
         screenshots: list[Any] = []
-        semantic_analyses: list[Any] = []
-        vision_analyses: list[Any] = []
         executive_summary = ""
         visual_summary = ""
         pipeline_errors: list[dict[str, str]] = []  # Collect errors for best-effort processing
@@ -425,8 +438,6 @@ def review(
             detections = [deserialize_detection(d) for d in checkpoint.detections]
         if checkpoint.screenshots:
             screenshots = [deserialize_screenshot(s) for s in checkpoint.screenshots]
-        if checkpoint.semantic_analyses:
-            semantic_analyses = [deserialize_semantic_analysis(s) for s in checkpoint.semantic_analyses]
         executive_summary = checkpoint.executive_summary
         visual_summary = checkpoint.visual_summary
 
@@ -477,10 +488,14 @@ def review(
         if not is_valid and validation_error:
             console.print()
             console.print(
-                Panel(validation_error, title="[bold red]Audio Quality Issue[/]", border_style="red")
+                Panel(
+                    validation_error, title="[bold red]Audio Quality Issue[/]", border_style="red"
+                )
             )
             console.print()
-            console.print("[yellow]Processing stopped.[/] Please fix the audio issue and try again.")
+            console.print(
+                "[yellow]Processing stopped.[/] Please fix the audio issue and try again."
+            )
             console.print("[dim]If you believe this is a false positive, please report it.[/]")
             delete_checkpoint(video_output)
             continue  # Skip to next video in batch
@@ -597,8 +612,7 @@ def review(
                 screenshots,
                 video,
                 video_output / "report.json",
-                semantic_analyses=[],
-                vision_analyses=[],
+                unified_findings=[],
                 executive_summary="",
                 errors=[],
             )
@@ -608,85 +622,71 @@ def review(
                 screenshots,
                 video,
                 video_output / "report.md",
-                semantic_analyses=[],
-                vision_analyses=[],
+                unified_findings=[],
                 executive_summary="",
                 visual_summary="",
                 errors=[],
             )
         console.print("[dim]Basic report saved (AI analysis pending)[/]")
 
-        # Step 5: Semantic Analysis (LLM) - best effort
-        if semantic and config.get_llm_api_key():
-            if not checkpoint.is_stage_complete("semantic"):
-                console.rule("[bold]Step 5: Semantic Analysis (LLM)[/]")
+        # Step 5: Unified VLM Analysis - replaces separate semantic + vision
+        # VLM analyzes both screenshot AND full transcript context together
+        unified_findings: list[UnifiedFinding] = []
+
+        if (semantic or vision) and config.get_vision_api_key():
+            if not checkpoint.is_stage_complete("unified_analysis"):
+                console.rule("[bold]Step 5: Unified VLM Analysis[/]")
+                console.print("[cyan]Analyzing screenshots + transcript context together...[/]")
                 try:
-                    semantic_analyses = analyze_detections_semantically(
-                        detections, config, previous_response_id=batch_context_response_id
+                    unified_findings = analyze_all_findings_unified(
+                        screenshots, config, previous_response_id=batch_context_response_id
                     )
-                    checkpoint.semantic_analyses = [
-                        serialize_semantic_analysis(s) for s in semantic_analyses
+                    checkpoint.unified_findings = [
+                        serialize_unified_finding(f) for f in unified_findings
                     ]
-                    if semantic_analyses:
+                    if unified_findings:
                         try:
-                            executive_summary = generate_executive_summary(semantic_analyses, config)
+                            executive_summary = generate_unified_summary(unified_findings, config)
                             checkpoint.executive_summary = executive_summary
+                            visual_summary = generate_visual_summary_unified(unified_findings)
+                            checkpoint.visual_summary = visual_summary
                         except Exception as e:
-                            console.print(f"[yellow]Executive summary failed: {e}[/]")
+                            console.print(f"[yellow]Summary generation failed: {e}[/]")
                             pipeline_errors.append(
                                 {
-                                    "stage": "executive_summary",
+                                    "stage": "summary_generation",
                                     "message": str(e),
                                 }
                             )
                 except Exception as e:
-                    console.print(f"[yellow]Semantic analysis failed: {e}[/]")
-                    console.print("[dim]Continuing without semantic analysis...[/]")
+                    console.print(f"[yellow]Unified analysis failed: {e}[/]")
+                    console.print("[dim]Continuing without AI analysis...[/]")
                     pipeline_errors.append(
                         {
-                            "stage": "semantic_analysis",
+                            "stage": "unified_analysis",
                             "message": str(e),
                         }
                     )
+                checkpoint.mark_stage_complete("unified_analysis")
+                # Also mark legacy stages complete for checkpoint compatibility
                 checkpoint.mark_stage_complete("semantic")
-                save_checkpoint(checkpoint, video_output)
-                console.print()
-            else:
-                console.print("[dim]Step 5: Semantic Analysis - skipped (cached)[/]")
-        else:
-            checkpoint.mark_stage_complete("semantic")
-
-        # Step 6: Vision Analysis - best effort
-        # Uses conversation chaining with semantic analysis for context
-        if vision and config.get_vision_api_key():
-            if not checkpoint.is_stage_complete("vision"):
-                console.rule("[bold]Step 6: Vision Analysis[/]")
-                try:
-                    vision_analyses = analyze_screenshots(
-                        screenshots, config, semantic_analyses=semantic_analyses
-                    )
-                    if vision_analyses:
-                        visual_summary = generate_visual_summary(vision_analyses, config)
-                        checkpoint.visual_summary = visual_summary
-                except Exception as e:
-                    console.print(f"[yellow]Vision analysis failed: {e}[/]")
-                    console.print("[dim]Continuing without vision analysis...[/]")
-                    pipeline_errors.append(
-                        {
-                            "stage": "vision_analysis",
-                            "message": str(e),
-                        }
-                    )
                 checkpoint.mark_stage_complete("vision")
                 save_checkpoint(checkpoint, video_output)
                 console.print()
             else:
-                console.print("[dim]Step 6: Vision Analysis - skipped (cached)[/]")
+                console.print("[dim]Step 5: Unified VLM Analysis - skipped (cached)[/]")
+                # Restore from checkpoint if available
+                if checkpoint.unified_findings:
+                    unified_findings = [
+                        deserialize_unified_finding(f) for f in checkpoint.unified_findings
+                    ]
         else:
+            checkpoint.mark_stage_complete("unified_analysis")
+            checkpoint.mark_stage_complete("semantic")
             checkpoint.mark_stage_complete("vision")
 
-        # Step 7: Generate reports
-        console.rule("[bold]Step 7: Report Generation[/]")
+        # Step 6: Generate reports
+        console.rule("[bold]Step 6: Report Generation[/]")
 
         if json_report:
             save_enhanced_json_report(
@@ -694,8 +694,7 @@ def review(
                 screenshots,
                 video,
                 video_output / "report.json",
-                semantic_analyses=semantic_analyses,
-                vision_analyses=vision_analyses,
+                unified_findings=unified_findings,
                 executive_summary=executive_summary,
                 errors=pipeline_errors,
             )
@@ -706,8 +705,7 @@ def review(
                 screenshots,
                 video,
                 video_output / "report.md",
-                semantic_analyses=semantic_analyses,
-                vision_analyses=vision_analyses,
+                unified_findings=unified_findings,
                 executive_summary=executive_summary,
                 visual_summary=visual_summary,
                 errors=pipeline_errors,
@@ -738,10 +736,10 @@ def review(
         console.print(f"\n[bold green]Done![/] Results saved to: {video_output}\n")
 
         # Update context for next video in batch
-        if semantic_analyses:
-            last_analysis = semantic_analyses[-1]
-            if hasattr(last_analysis, "response_id") and last_analysis.response_id:
-                batch_context_response_id = last_analysis.response_id
+        if unified_findings:
+            last_finding = unified_findings[-1]
+            if hasattr(last_finding, "response_id") and last_finding.response_id:
+                batch_context_response_id = last_finding.response_id
 
 
 @app.command()
