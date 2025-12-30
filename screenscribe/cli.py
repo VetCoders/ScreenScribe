@@ -450,7 +450,7 @@ def review(
                 audio_path,
                 language=language,
                 use_local=local,
-                api_key=config.api_key,
+                api_key=config.get_stt_api_key(),
                 stt_endpoint=config.stt_endpoint,
                 stt_model=config.stt_model,
             )
@@ -617,7 +617,7 @@ def review(
         console.print("[dim]Basic report saved (AI analysis pending)[/]")
 
         # Step 5: Semantic Analysis (LLM) - best effort
-        if semantic and config.api_key:
+        if semantic and config.get_llm_api_key():
             if not checkpoint.is_stage_complete("semantic"):
                 console.rule("[bold]Step 5: Semantic Analysis (LLM)[/]")
                 try:
@@ -658,7 +658,7 @@ def review(
 
         # Step 6: Vision Analysis - best effort
         # Uses conversation chaining with semantic analysis for context
-        if vision and config.api_key:
+        if vision and config.get_vision_api_key():
             if not checkpoint.is_stage_complete("vision"):
                 console.rule("[bold]Step 6: Vision Analysis[/]")
                 try:
@@ -793,7 +793,7 @@ def transcribe(
         audio_path,
         language=language,
         use_local=local,
-        api_key=config.api_key,
+        api_key=config.get_stt_api_key(),
         stt_endpoint=config.stt_endpoint,
         stt_model=config.stt_model,
     )

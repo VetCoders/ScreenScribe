@@ -62,7 +62,7 @@ def analyze_screenshot(
     Returns:
         VisionAnalysis result or None if failed
     """
-    if not config.api_key:
+    if not config.get_vision_api_key():
         return None
 
     if not screenshot_path.exists():
@@ -126,7 +126,7 @@ def analyze_screenshot(
                 response = client.post(
                     config.vision_endpoint,
                     headers={
-                        "Authorization": f"Bearer {config.api_key}",
+                        "Authorization": f"Bearer {config.get_vision_api_key()}",
                         "Content-Type": "application/json",
                     },
                     json=payload,
@@ -203,8 +203,8 @@ def analyze_screenshots(
         console.print("[dim]Vision analysis disabled[/]")
         return []
 
-    if not config.api_key:
-        console.print("[yellow]No API key - skipping vision analysis[/]")
+    if not config.get_vision_api_key():
+        console.print("[yellow]No Vision API key - skipping vision analysis[/]")
         return []
 
     # Build lookup for semantic analyses

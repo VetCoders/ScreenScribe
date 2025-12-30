@@ -29,9 +29,14 @@ CONFIG_PATHS = [
 class ScreenScribeConfig:
     """ScreenScribe configuration."""
 
-    # API Configuration
+    # API Configuration (generic fallback)
     api_key: str = ""
     api_base: str = LIBRAXIS_API_BASE
+
+    # Per-endpoint API keys (use these for multi-provider setups)
+    stt_api_key: str = ""  # Falls back to api_key if empty
+    llm_api_key: str = ""  # Falls back to api_key if empty
+    vision_api_key: str = ""  # Falls back to api_key if empty
 
     # Endpoints
     stt_endpoint: str = LIBRAXIS_STT_ENDPOINT
@@ -48,6 +53,18 @@ class ScreenScribeConfig:
     use_semantic_analysis: bool = True
     use_vision_analysis: bool = True
     max_tokens: int = 4096
+
+    def get_stt_api_key(self) -> str:
+        """Get API key for STT endpoint."""
+        return self.stt_api_key or self.api_key
+
+    def get_llm_api_key(self) -> str:
+        """Get API key for LLM endpoint."""
+        return self.llm_api_key or self.api_key
+
+    def get_vision_api_key(self) -> str:
+        """Get API key for Vision endpoint."""
+        return self.vision_api_key or self.api_key
 
     @classmethod
     def load(cls) -> "ScreenScribeConfig":
@@ -79,10 +96,15 @@ class ScreenScribeConfig:
     def _load_from_env(self) -> None:
         """Load configuration from environment variables."""
         env_mapping = {
-            # API Keys (multiple providers supported)
+            # Generic API Key (fallback for all endpoints)
             "SCREENSCRIBE_API_KEY": "api_key",
-            "LIBRAXIS_API_KEY": "api_key",
-            "OPENAI_API_KEY": "api_key",
+            # Per-provider keys (set appropriate per-endpoint key)
+            "LIBRAXIS_API_KEY": "stt_api_key",  # LibraxisAI typically for STT
+            "OPENAI_API_KEY": "llm_api_key",  # OpenAI typically for LLM/Vision
+            # Explicit per-endpoint keys (highest priority)
+            "SCREENSCRIBE_STT_API_KEY": "stt_api_key",
+            "SCREENSCRIBE_LLM_API_KEY": "llm_api_key",
+            "SCREENSCRIBE_VISION_API_KEY": "vision_api_key",
             # Base URL (auto-derives endpoints if explicit not set)
             "SCREENSCRIBE_API_BASE": "api_base",
             "LIBRAXIS_API_BASE": "api_base",
@@ -109,7 +131,24 @@ class ScreenScribeConfig:
         """Set attribute from key-value pair."""
         key_lower = key.lower()
 
-        if "api_key" in key_lower:
+        # Per-endpoint API keys (explicit)
+        if "stt_api_key" in key_lower:
+            self.stt_api_key = value
+        elif "llm_api_key" in key_lower:
+            self.llm_api_key = value
+        elif "vision_api_key" in key_lower:
+            self.vision_api_key = value
+        # Provider-specific keys
+        elif "openai_api_key" in key_lower:
+            # OpenAI key → LLM + Vision
+            self.llm_api_key = value
+            self.vision_api_key = value
+        elif "libraxis_api_key" in key_lower:
+            # LibraxisAI key → STT (and fallback)
+            self.stt_api_key = value
+            if not self.api_key:
+                self.api_key = value
+        elif "api_key" in key_lower:
             self.api_key = value
         # Explicit endpoints (full URLs - use as-is, no normalization)
         elif "stt_endpoint" in key_lower:

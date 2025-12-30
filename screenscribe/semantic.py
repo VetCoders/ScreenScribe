@@ -42,7 +42,7 @@ def analyze_detection_semantically(
     Returns:
         SemanticAnalysis result or None if failed
     """
-    if not config.api_key:
+    if not config.get_llm_api_key():
         return None
 
     # Get localized prompt template
@@ -58,7 +58,7 @@ def analyze_detection_semantically(
                 response = client.post(
                     config.llm_endpoint,
                     headers={
-                        "Authorization": f"Bearer {config.api_key}",
+                        "Authorization": f"Bearer {config.get_llm_api_key()}",
                         "Content-Type": "application/json",
                     },
                     json={
@@ -199,7 +199,7 @@ def analyze_detections_semantically(
         console.print("[dim]Semantic analysis disabled[/]")
         return []
 
-    if not config.api_key:
+    if not config.get_llm_api_key():
         console.print("[yellow]No API key - skipping semantic analysis[/]")
         return []
 
@@ -249,7 +249,7 @@ def generate_executive_summary(analyses: list[SemanticAnalysis], config: ScreenS
     Returns:
         Executive summary text
     """
-    if not analyses or not config.api_key:
+    if not analyses or not config.get_llm_api_key():
         return ""
 
     # Prepare findings summary
@@ -268,7 +268,7 @@ def generate_executive_summary(analyses: list[SemanticAnalysis], config: ScreenS
                 response = client.post(
                     config.llm_endpoint,
                     headers={
-                        "Authorization": f"Bearer {config.api_key}",
+                        "Authorization": f"Bearer {config.get_llm_api_key()}",
                         "Content-Type": "application/json",
                     },
                     json={

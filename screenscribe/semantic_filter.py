@@ -161,7 +161,7 @@ def semantic_prefilter(
     Returns:
         List of PointOfInterest objects for frame extraction
     """
-    if not config.api_key:
+    if not config.get_llm_api_key():
         console.print("[yellow]No API key - skipping semantic pre-filter[/]")
         return []
 
@@ -182,7 +182,7 @@ def semantic_prefilter(
                 response = client.post(
                     config.llm_endpoint,
                     headers={
-                        "Authorization": f"Bearer {config.api_key}",
+                        "Authorization": f"Bearer {config.get_llm_api_key()}",
                         "Content-Type": "application/json",
                     },
                     json={
