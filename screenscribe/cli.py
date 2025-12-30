@@ -56,11 +56,37 @@ from .validation import APIKeyError, ModelValidationError, validate_models
 # from .vision import analyze_screenshots, generate_visual_summary
 
 console = Console()
+
+
+def version_callback(value: bool) -> None:
+    """Show version and exit."""
+    if value:
+        console.print(f"[bold]ScreenScribe[/] v{__version__}")
+        raise typer.Exit()
+
+
 app = typer.Typer(
     name="screenscribe",
     help="Video review automation - extract bugs and changes from screencast commentary.",
     add_completion=False,
 )
+
+
+@app.callback()
+def main(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            "-V",
+            callback=version_callback,
+            is_eager=True,
+            help="Show version and exit.",
+        ),
+    ] = False,
+) -> None:
+    """ScreenScribe - Video review automation."""
+    pass
 
 # Time estimates (seconds per unit)
 ESTIMATE_STT_PER_MINUTE = 2.0  # ~2s per minute of video

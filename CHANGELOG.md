@@ -5,6 +5,39 @@ All notable changes to ScreenScribe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2025-12-30
+
+### Added
+
+- **Unified VLM Pipeline**: CRITICAL REFACTOR — Single VLM call replaces separate LLM + VLM analysis. VLM now analyzes screenshot AND full transcript context together in one API call. ~45% faster (~20s vs ~37s per finding).
+
+- **Multi-Provider API Support**: Per-endpoint API keys for hybrid setups:
+  - `LIBRAXIS_API_KEY` → STT (cheaper transcription)
+  - `OPENAI_API_KEY` → LLM + Vision
+  - Getter methods: `get_stt_api_key()`, `get_llm_api_key()`, `get_vision_api_key()`
+
+- **Batch Mode**: Process multiple videos with shared context. Response chaining via `previous_response_id` persists across videos — VLM remembers findings from video 1 when analyzing video 2.
+
+- **Explicit Endpoint Configuration**: Full URL configuration instead of path guessing:
+  - `SCREENSCRIBE_STT_ENDPOINT=https://api.libraxis.cloud/v1/audio/transcriptions`
+  - `SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses`
+  - `SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses`
+
+- **UnifiedFinding Dataclass**: Combines all semantic + vision fields in single result:
+  - Semantic: `is_issue`, `sentiment`, `severity`, `summary`, `action_items`, `suggested_fix`
+  - Vision: `ui_elements`, `issues_detected`, `accessibility_notes`, `design_feedback`
+
+### Changed
+
+- VLM receives full transcript context (not just 200 chars)
+- Unified auth header: `Authorization: Bearer` (removed `x-api-key`)
+- Report structure: `unified_analysis` block replaces separate `semantic_analysis` + `vision_analysis`
+- Shared `image_utils.py` module for image encoding (deduplicated)
+
+### Deprecated
+
+- `semantic.py` and `vision.py` kept as legacy reference but no longer used in main pipeline
+
 ## [0.1.2] - 2025-12-29
 
 ### Added

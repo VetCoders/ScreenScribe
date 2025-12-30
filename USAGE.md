@@ -5,15 +5,17 @@ This guide covers practical examples and workflows for using ScreenScribe to ana
 ## Table of Contents
 
 1. [Basic Usage](#basic-usage)
-2. [Common Workflows](#common-workflows)
-3. [Understanding Output](#understanding-output)
-4. [Sentiment Detection](#sentiment-detection)
-5. [Detection Modes](#detection-modes)
-6. [Advanced Options](#advanced-options)
-7. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
-8. [Custom Keywords](#custom-keywords)
-9. [Resuming Interrupted Processing](#resuming-interrupted-processing)
-10. [Troubleshooting](#troubleshooting)
+2. [Batch Mode](#batch-mode)
+3. [Common Workflows](#common-workflows)
+4. [Understanding Output](#understanding-output)
+5. [Sentiment Detection](#sentiment-detection)
+6. [Detection Modes](#detection-modes)
+7. [Multi-Provider Setup](#multi-provider-setup)
+8. [Advanced Options](#advanced-options)
+9. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
+10. [Custom Keywords](#custom-keywords)
+11. [Resuming Interrupted Processing](#resuming-interrupted-processing)
+12. [Troubleshooting](#troubleshooting)
 
 ## Basic Usage
 
@@ -43,6 +45,70 @@ screenscribe review ~/Videos/app-review.mov
 
 # Specify custom output directory
 screenscribe review ~/Videos/app-review.mov -o ~/Desktop/review-results
+```
+
+## Batch Mode
+
+Process multiple videos in one command with **shared context** — the AI remembers findings from previous videos via Responses API chaining.
+
+### Analyzing Multiple Videos
+
+```bash
+# Process all videos sequentially with context chaining
+screenscribe review video1.mov video2.mov video3.mov
+
+# With glob patterns
+screenscribe review ~/Videos/sprint-review/*.mov
+
+# With custom output directory
+screenscribe review *.mov -o ./all-reviews
+```
+
+### How Context Chaining Works
+
+When processing multiple videos, ScreenScribe uses the Responses API `previous_response_id` to maintain context:
+
+```
+Video 1, Finding 5 → response_id: "abc123"
+Video 2, Finding 1 → previous_response_id: "abc123"  ← VLM knows Video 1 findings!
+Video 2, Finding 3 → response_id: "def456"
+Video 3, Finding 1 → previous_response_id: "def456"  ← VLM knows Video 1+2!
+```
+
+This means:
+- Later videos benefit from earlier context
+- VLM can identify patterns across videos
+- Duplicate findings are better understood
+
+### Output Structure in Batch Mode
+
+Each video gets its own subdirectory:
+
+```
+all-reviews/
+├── video1_review/
+│   ├── transcript.txt
+│   ├── report.json
+│   ├── report.md
+│   └── screenshots/
+├── video2_review/
+│   └── ...
+└── video3_review/
+    └── ...
+```
+
+### Example: Sprint Review Analysis
+
+```bash
+# Analyze all recordings from a sprint review session
+screenscribe review \
+  ~/Videos/sprint-review/day1.mov \
+  ~/Videos/sprint-review/day2.mov \
+  ~/Videos/sprint-review/day3.mov \
+  -o ~/Reports/sprint-42-review
+
+# VLM will remember issues from day1 when analyzing day2,
+# and can say "this is similar to the button issue from earlier"
 ```
 
 ## Common Workflows
@@ -79,21 +145,26 @@ This includes:
 
 Processing time: ~10 minutes for a 15-minute video with 40+ issues.
 
-### Full Analysis
+### Full Analysis (Unified VLM Pipeline)
 
-Enable all features including vision-based screenshot analysis:
+Enable all features with the unified VLM pipeline — a single VLM call analyzes both screenshot AND transcript together:
 
 ```bash
 screenscribe review video.mov
 ```
 
-This adds:
-- UI element identification in screenshots
-- Visual issue detection
-- Accessibility observations
-- Design feedback
+This includes:
+- Full transcript with timestamps
+- Screenshots at issue moments
+- **Unified VLM analysis** (semantic + visual in one call):
+  - Severity ratings and action items
+  - UI element identification
+  - Visual issue detection
+  - Accessibility observations
+  - Design feedback
+- Executive summary
 
-Processing time: ~30+ minutes for a 15-minute video.
+Processing time: ~15-20 minutes for a 15-minute video with 40 issues (~20s per finding).
 
 ### Transcription Only
 
@@ -347,6 +418,65 @@ For a 15-minute video with ~40 issues:
 |------|----------------|-----------|--------------|
 | Semantic | ~2 min | 1 (pre-filter) | ~40 |
 | Keywords | <1s | 0 | ~30-35 |
+
+## Multi-Provider Setup
+
+ScreenScribe supports using different API providers for different tasks. This is useful for cost optimization — e.g., cheaper STT with LibraxisAI, powerful VLM with OpenAI.
+
+### Per-Endpoint API Keys
+
+```env
+# ~/.config/screenscribe/config.env
+
+# LibraxisAI for STT (cheaper transcription)
+LIBRAXIS_API_KEY=vista-xxx
+
+# OpenAI for VLM (unified analysis)
+OPENAI_API_KEY=sk-proj-xxx
+
+# Explicit endpoints (full URLs)
+SCREENSCRIBE_STT_ENDPOINT=https://api.libraxis.cloud/v1/audio/transcriptions
+SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
+SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
+
+# Models
+SCREENSCRIBE_STT_MODEL=whisper-1
+SCREENSCRIBE_LLM_MODEL=gpt-4o
+SCREENSCRIBE_VISION_MODEL=gpt-4o
+```
+
+### How Keys Are Resolved
+
+| Key Variable | Used For |
+|--------------|----------|
+| `LIBRAXIS_API_KEY` | STT endpoint |
+| `OPENAI_API_KEY` | LLM + Vision endpoints |
+| `SCREENSCRIBE_API_KEY` | Fallback for all endpoints |
+
+### Example Configurations
+
+**All OpenAI:**
+```env
+OPENAI_API_KEY=sk-proj-xxx
+SCREENSCRIBE_STT_ENDPOINT=https://api.openai.com/v1/audio/transcriptions
+SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
+SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
+```
+
+**All LibraxisAI:**
+```env
+LIBRAXIS_API_KEY=vista-xxx
+# Endpoints default to LibraxisAI, no need to specify
+```
+
+**Hybrid (recommended for cost):**
+```env
+LIBRAXIS_API_KEY=vista-xxx              # STT
+OPENAI_API_KEY=sk-proj-xxx              # VLM
+SCREENSCRIBE_STT_ENDPOINT=https://api.libraxis.cloud/v1/audio/transcriptions
+SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
+SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
+```
 
 ## Advanced Options
 

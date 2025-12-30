@@ -9,43 +9,50 @@ ScreenScribe extracts actionable insights from screencast recordings by transcri
 <img width="726" height="667" alt="image" src="https://github.com/user-attachments/assets/d3abff5f-d511-4a2d-9210-1d22d2f97b1d" />
 
 
-> **Status:** v0.1.2 — Fully functional CLI with AI-powered analysis.
+> **Status:** v0.1.3 — Unified VLM pipeline + Multi-provider support + Batch mode.
 
 ## API Provider
 
-ScreenScribe uses **LibraxisAI API** by default, but is **fully compatible with any provider supporting the Responses API** (OpenAI, Anthropic, etc.). You can configure explicit endpoints for full control:
+ScreenScribe uses **LibraxisAI API** by default, but is **fully compatible with any provider supporting the Responses API** (OpenAI, Anthropic, etc.).
+
+### Multi-Provider Setup (Recommended)
+
+Use different providers for different tasks — e.g., LibraxisAI for cheaper STT, OpenAI for VLM:
 
 ```env
 # ~/.config/screenscribe/config.env
 
-# API Key (supports multiple providers)
-SCREENSCRIBE_API_KEY=sk-proj-xxx        # or OPENAI_API_KEY, LIBRAXIS_API_KEY
+# Per-endpoint API keys (hybrid setup)
+LIBRAXIS_API_KEY=vista-xxx              # → STT (cheaper transcription)
+OPENAI_API_KEY=sk-proj-xxx              # → VLM (unified analysis)
 
-# Explicit endpoints (recommended - full URLs, no guessing)
-SCREENSCRIBE_STT_ENDPOINT=https://api.openai.com/v1/audio/transcriptions
+# Explicit endpoints (full URLs - recommended)
+SCREENSCRIBE_STT_ENDPOINT=https://api.libraxis.cloud/v1/audio/transcriptions
 SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
 SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
 
 # Models
+SCREENSCRIBE_STT_MODEL=whisper-1
 SCREENSCRIBE_LLM_MODEL=gpt-4o
 SCREENSCRIBE_VISION_MODEL=gpt-4o
 ```
 
-> **Note:** All LLM calls use the Responses API format with `previous_response_id` for conversation chaining between semantic and vision analysis.
+> **Note:** All analysis uses the Responses API with `previous_response_id` for conversation chaining. Context persists across findings AND across videos in batch mode.
 
 ## Features
 
-- **Semantic Pre-Filtering**: LLM analyzes the entire transcript before frame extraction, finding issues that keyword matching might miss
-- **Sentiment Detection**: Understands negations and context - distinguishes real issues from confirmations ("doesn't work" vs "doesn't bother me")
+- **Unified VLM Pipeline**: Single VLM call analyzes screenshot + full transcript together (~45% faster than separate LLM+VLM)
+- **Batch Mode**: Process multiple videos with shared context — VLM remembers findings across videos
+- **Multi-Provider Support**: Per-endpoint API keys (e.g., LibraxisAI for STT, OpenAI for VLM)
+- **Semantic Pre-Filtering**: LLM analyzes the entire transcript before frame extraction
+- **Sentiment Detection**: Understands negations and context - distinguishes real issues from confirmations
 - **Audio Extraction**: Automatically extracts audio from video files (MOV, MP4, etc.) using FFmpeg
 - **Audio Quality Validation**: Detects silent recordings and warns about missing microphone input
 - **Speech-to-Text**: Transcribes audio with word-level timestamps via LibraxisAI STT API
 - **Issue Detection**: Identifies bugs, change requests, and UI issues (semantic + keyword-based)
 - **Custom Keywords**: Define your own detection keywords via YAML configuration
 - **Screenshot Capture**: Extracts frames at timestamps where issues are mentioned
-- **Semantic Analysis**: Uses LLM to analyze each finding, assign severity, and suggest fixes
-- **Vision Analysis**: Optional screenshot analysis using vision-capable models
-- **Response Chaining**: Vision analysis leverages semantic context via Responses API `previous_response_id` — zero token duplication
+- **Response Chaining**: Context persists via Responses API `previous_response_id` — across findings AND videos
 - **Model Validation**: Fail-fast validation of STT/LLM/Vision availability before pipeline starts
 - **AI-Optimized Reports**: JSON output designed for efficient AI agent consumption with structured action items
 - **Report Generation**: Creates JSON and Markdown reports with executive summaries
@@ -396,15 +403,17 @@ make clean            # Remove caches and artifacts
 screenscribe/
 ├── __init__.py            # Version info
 ├── cli.py                 # Typer CLI interface
-├── config.py              # Configuration management
+├── config.py              # Configuration management (per-endpoint keys)
 ├── audio.py               # FFmpeg audio extraction
 ├── transcribe.py          # LibraxisAI STT integration
 ├── detect.py              # Keyword-based issue detection
-├── semantic_filter.py     # Semantic pre-filtering pipeline (NEW)
+├── semantic_filter.py     # Semantic pre-filtering pipeline
 ├── keywords.py            # Custom keywords loading (YAML)
 ├── screenshots.py         # Frame extraction
-├── semantic.py            # LLM semantic analysis
-├── vision.py              # Vision model analysis
+├── unified_analysis.py    # Unified VLM pipeline (replaces semantic+vision)
+├── image_utils.py         # Shared image encoding utilities
+├── semantic.py            # LLM semantic analysis (legacy)
+├── vision.py              # Vision model analysis (legacy)
 ├── report.py              # Report generation (JSON/Markdown)
 ├── prompts.py             # i18n prompt templates (PL/EN)
 ├── api_utils.py           # Retry logic, API utilities
@@ -415,7 +424,8 @@ screenscribe/
 tests/
 ├── test_detect.py         # Detection unit tests
 ├── test_semantic_filter.py # Semantic filter unit tests (54 tests)
-└── test_integration.py    # API integration tests (10 tests)
+├── test_validation.py     # Validation unit tests
+└── test_integration.py    # API integration tests
 ```
 
 ## API Integration
