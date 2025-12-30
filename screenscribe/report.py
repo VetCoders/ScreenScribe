@@ -217,11 +217,14 @@ def save_enhanced_json_report(
         if detection.segment.id in semantic_by_id:
             sem = semantic_by_id[detection.segment.id]
             finding["semantic_analysis"] = {
+                "is_issue": sem.is_issue,
+                "sentiment": sem.sentiment,
                 "severity": sem.severity,
                 "summary": sem.summary,
                 "action_items": sem.action_items,
                 "affected_components": sem.affected_components,
                 "suggested_fix": sem.suggested_fix,
+                "response_id": sem.response_id or None,  # For conversation chaining
             }
 
         # Add vision analysis if available
@@ -255,155 +258,193 @@ def save_enhanced_markdown_report(
     visual_summary: str = "",
     errors: list[dict[str, str]] | None = None,
 ) -> Path:
-    """Save enhanced report with AI analyses as Markdown."""
+    """Save enhanced report with AI analyses as Markdown.
+
+    Format optimized for AI consumption:
+    - Sorted by severity (critical first)
+    - Consolidated action items at top
+    - No emoji clutter
+    - Non-issues separated at end
+    """
+    semantic_by_id = {a.detection_id: a for a in (semantic_analyses or [])}
+    vision_by_path = {str(v.screenshot_path): v for v in (vision_analyses or [])}
+
+    # Separate issues from non-issues and sort by severity
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "none": 4}
+    issues: list[tuple[Detection, Path]] = []
+    non_issues: list[tuple[Detection, Path]] = []
+
+    for detection, screenshot_path in screenshots:
+        sem = semantic_by_id.get(detection.segment.id)
+        if sem and not sem.is_issue:
+            non_issues.append((detection, screenshot_path))
+        else:
+            issues.append((detection, screenshot_path))
+
+    # Sort issues by severity
+    def get_severity_rank(item: tuple[Detection, Path]) -> int:
+        detection, _ = item
+        sem = semantic_by_id.get(detection.segment.id)
+        if sem:
+            return severity_order.get(sem.severity, 4)
+        return 4
+
+    issues.sort(key=get_severity_rank)
+
+    # Collect all action items upfront
+    all_action_items: list[tuple[str, str, list[str]]] = []  # (severity, summary, items)
+    for detection, _ in issues:
+        sem = semantic_by_id.get(detection.segment.id)
+        if sem and sem.action_items:
+            all_action_items.append((sem.severity, sem.summary, sem.action_items))
+
+    # Build components index: component -> [(finding_num, severity)]
+    components_index: dict[str, list[tuple[int, str]]] = {}
+    for i, (detection, _) in enumerate(issues, 1):
+        sem = semantic_by_id.get(detection.segment.id)
+        if sem and sem.affected_components:
+            severity = sem.severity if sem.is_issue else "ok"
+            for component in sem.affected_components:
+                if component not in components_index:
+                    components_index[component] = []
+                components_index[component].append((i, severity))
+
+    # Build report
     lines = [
         "# Video Review Report",
         "",
-        f"**Video:** `{video_path.name}`",
-        f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        "**Powered by:** LibraxisAI",
+        f"Video: `{video_path.name}`",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         "",
     ]
 
+    # Quick stats - one line
+    bug_count = sum(1 for d in detections if d.category == "bug")
+    change_count = sum(1 for d in detections if d.category == "change")
+    ui_count = sum(1 for d in detections if d.category == "ui")
+
+    if semantic_analyses:
+        issues_only = [a for a in semantic_analyses if a.is_issue]
+        crit = sum(1 for a in issues_only if a.severity == "critical")
+        high = sum(1 for a in issues_only if a.severity == "high")
+        med = sum(1 for a in issues_only if a.severity == "medium")
+        low = sum(1 for a in issues_only if a.severity == "low")
+        lines.append(
+            f"**Stats:** {len(issues)} issues ({crit} critical, {high} high, {med} medium, {low} low) "
+            f"| {bug_count} bugs, {change_count} changes, {ui_count} UI "
+            f"| {len(non_issues)} non-issues filtered"
+        )
+    else:
+        lines.append(
+            f"**Stats:** {len(detections)} findings | {bug_count} bugs, {change_count} changes, {ui_count} UI"
+        )
+    lines.append("")
+
     # Executive Summary
     if executive_summary:
-        lines.extend(
-            [
-                "## Executive Summary",
-                "",
-                executive_summary,
-                "",
-            ]
-        )
+        lines.extend(["## Summary", "", executive_summary, ""])
 
-    # Summary table
-    lines.extend(
-        [
-            "## Summary",
-            "",
-            "| Category | Count |",
-            "|----------|-------|",
-            f"| Bugs | {sum(1 for d in detections if d.category == 'bug')} |",
-            f"| Change Requests | {sum(1 for d in detections if d.category == 'change')} |",
-            f"| UI Issues | {sum(1 for d in detections if d.category == 'ui')} |",
-            f"| **Total** | **{len(detections)}** |",
-            "",
+    # Consolidated Action Items (critical and high only for quick scan)
+    if all_action_items:
+        critical_high = [
+            (s, summ, items) for s, summ, items in all_action_items if s in ("critical", "high")
         ]
-    )
+        if critical_high:
+            lines.extend(["## Action Items (Critical/High)", ""])
+            for severity, summary, items in critical_high:
+                lines.append(f"**[{severity.upper()}]** {summary}")
+                for item in items:
+                    lines.append(f"- [ ] {item}")
+                lines.append("")
 
-    # Severity breakdown
-    if semantic_analyses:
-        lines.extend(
-            [
-                "### By Severity",
-                "",
-                "| Severity | Count |",
-                "|----------|-------|",
-            ]
-        )
-        for severity in ["critical", "high", "medium", "low"]:
-            count = sum(1 for a in semantic_analyses if a.severity == severity)
-            emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(
-                severity, "⚪"
-            )
-            lines.append(f"| {emoji} {severity.capitalize()} | {count} |")
+    # Components Index - shows which components have issues
+    if components_index:
+        # Sort by number of issues (most affected first), then by max severity
+        severity_weight = {"critical": 4, "high": 3, "medium": 2, "low": 1, "ok": 0, "none": 0}
+
+        def component_score(item: tuple[str, list[tuple[int, str]]]) -> tuple[int, int]:
+            _, findings = item
+            max_sev = max((severity_weight.get(sev, 0) for _, sev in findings), default=0)
+            return (-len(findings), -max_sev)
+
+        sorted_components = sorted(components_index.items(), key=component_score)
+
+        lines.extend(["## Components Affected", ""])
+        for component, findings in sorted_components:
+            finding_nums = [f"#{num}" for num, _ in findings]
+            severities = [sev for _, sev in findings]
+            sev_counts = []
+            for sev in ["critical", "high", "medium", "low"]:
+                count = severities.count(sev)
+                if count:
+                    sev_counts.append(f"{count} {sev}")
+            sev_summary = f" ({', '.join(sev_counts)})" if sev_counts else ""
+            lines.append(f"- **{component}**: {', '.join(finding_nums)}{sev_summary}")
+        lines.append("")
+
+    # Errors section
+    if errors:
+        lines.extend(["## Errors", ""])
+        for error in errors:
+            lines.append(f"- {error.get('stage', 'unknown')}: {error.get('message', '')}")
         lines.append("")
 
     # Visual summary
     if visual_summary:
-        lines.extend([visual_summary, ""])
+        lines.extend(["## Visual Summary", "", visual_summary, ""])
 
-    # Errors section (if any)
-    if errors:
-        lines.extend(
-            [
-                "## ⚠️ Processing Errors",
-                "",
-                "Some analysis steps encountered errors but processing continued:",
-                "",
-            ]
+    # Issues (sorted by severity)
+    lines.extend(["## Issues", ""])
+
+    for i, (detection, screenshot_path) in enumerate(issues, 1):
+        sem = semantic_by_id.get(detection.segment.id)
+        vis = vision_by_path.get(str(screenshot_path))
+
+        severity = sem.severity.upper() if sem else "UNKNOWN"
+        category = detection.category.upper()
+
+        lines.append(
+            f"### [{severity}] #{i} {category} @ {format_timestamp(detection.segment.start)}"
         )
-        for error in errors:
-            stage = error.get("stage", "unknown")
-            message = error.get("message", "Unknown error")
-            lines.append(f"- **{stage}:** {message}")
+        lines.append("")
+        lines.append(f"> {detection.segment.text}")
+        lines.append("")
+
+        if sem:
+            lines.append(f"**Summary:** {sem.summary}")
+            if sem.affected_components:
+                lines.append(f"**Components:** {', '.join(sem.affected_components)}")
+            if sem.suggested_fix:
+                lines.append(f"**Fix:** {sem.suggested_fix}")
+            lines.append("")
+
+        if vis and vis.issues_detected:
+            lines.append("**Visual issues:** " + "; ".join(vis.issues_detected))
+            lines.append("")
+
+        lines.append(f"Screenshot: {screenshot_path.name}")
         lines.extend(["", "---", ""])
 
-    # Detailed findings
-    lines.extend(["## Findings", ""])
-
-    semantic_by_id = {a.detection_id: a for a in (semantic_analyses or [])}
-    vision_by_path = {str(v.screenshot_path): v for v in (vision_analyses or [])}
-
-    for i, (detection, screenshot_path) in enumerate(screenshots, 1):
-        emoji = {"bug": "🐛", "change": "🔄", "ui": "🎨"}.get(detection.category, "📝")
-
-        # Get severity if available
-        severity_badge = ""
-        if detection.segment.id in semantic_by_id:
-            sem = semantic_by_id[detection.segment.id]
-            sev_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(
-                sem.severity, ""
-            )
-            severity_badge = f" {sev_emoji} [{sem.severity.upper()}]"
-
+    # Non-issues (at the end, collapsed)
+    if non_issues:
         lines.extend(
             [
-                f"### {emoji} #{i} {detection.category.upper()}{severity_badge} @ {format_timestamp(detection.segment.start)}",
+                "## Non-Issues (Confirmed OK)",
                 "",
-                f"> {detection.segment.text}",
+                "These were flagged by detection but user confirmed they work correctly:",
                 "",
             ]
         )
-
-        # Semantic analysis
-        if detection.segment.id in semantic_by_id:
-            sem = semantic_by_id[detection.segment.id]
-            lines.extend(
-                [
-                    "**AI Analysis:**",
-                    f"- **Summary:** {sem.summary}",
-                    f"- **Affected:** {', '.join(sem.affected_components) if sem.affected_components else 'N/A'}",
-                    f"- **Fix:** {sem.suggested_fix}",
-                    "",
-                ]
-            )
-            if sem.action_items:
-                lines.append("**Action Items:**")
-                for item in sem.action_items:
-                    lines.append(f"- [ ] {item}")
-                lines.append("")
-
-        # Vision analysis
-        if str(screenshot_path) in vision_by_path:
-            vis = vision_by_path[str(screenshot_path)]
-            if vis.issues_detected:
-                lines.extend(
-                    [
-                        "**Visual Issues:**",
-                    ]
-                )
-                for issue in vis.issues_detected:
-                    lines.append(f"- {issue}")
-                lines.append("")
-            if vis.design_feedback:
-                lines.append(f"**Design Feedback:** {vis.design_feedback}")
-                lines.append("")
-
-        lines.extend(
-            [
-                f"![Screenshot]({screenshot_path.name})",
-                "",
-                "---",
-                "",
-            ]
-        )
+        for detection, _ in non_issues:
+            sem = semantic_by_id.get(detection.segment.id)
+            summary = sem.summary if sem else detection.segment.text
+            lines.append(f"- {format_timestamp(detection.segment.start)}: {summary}")
+        lines.append("")
 
     lines.extend(
         [
-            "",
             "---",
-            "*Made with (งಠ_ಠ)ง by ⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)*",
+            "*Generated by ScreenScribe*",
         ]
     )
 

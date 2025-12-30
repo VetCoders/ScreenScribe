@@ -7,11 +7,13 @@ This guide covers practical examples and workflows for using ScreenScribe to ana
 1. [Basic Usage](#basic-usage)
 2. [Common Workflows](#common-workflows)
 3. [Understanding Output](#understanding-output)
-4. [Advanced Options](#advanced-options)
-5. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
-6. [Custom Keywords](#custom-keywords)
-7. [Resuming Interrupted Processing](#resuming-interrupted-processing)
-8. [Troubleshooting](#troubleshooting)
+4. [Sentiment Detection](#sentiment-detection)
+5. [Detection Modes](#detection-modes)
+6. [Advanced Options](#advanced-options)
+7. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
+8. [Custom Keywords](#custom-keywords)
+9. [Resuming Interrupted Processing](#resuming-interrupted-processing)
+10. [Troubleshooting](#troubleshooting)
 
 ## Basic Usage
 
@@ -194,6 +196,8 @@ The Markdown report contains:
       "keywords": ["nie działa", "bug"],
       "screenshot": "screenshots/01_bug_01-23.jpg",
       "semantic_analysis": {
+        "is_issue": true,
+        "sentiment": "problem",
         "severity": "critical",
         "summary": "...",
         "action_items": ["..."],
@@ -204,6 +208,145 @@ The Markdown report contains:
   ]
 }
 ```
+
+See [Sentiment Detection](#sentiment-detection) for details on `is_issue` and `sentiment` fields.
+
+## Sentiment Detection
+
+ScreenScribe understands context and **negations**. Not every detected transcript fragment is a problem - sometimes users confirm that something works correctly.
+
+### Understanding `is_issue` and `sentiment`
+
+Each finding in the report includes:
+
+| Field | Values | Description |
+|-------|--------|-------------|
+| `is_issue` | `true` / `false` | Whether user reports a problem or confirms OK |
+| `sentiment` | `problem` / `positive` / `neutral` | Tone of the user's statement |
+
+### Examples
+
+| User says... | is_issue | sentiment | Interpretation |
+|--------------|----------|-----------|----------------|
+| "This button doesn't work" | `true` | `problem` | Reports a bug |
+| "The white backgrounds don't bother me" | `false` | `positive` | Confirms it's OK |
+| "Should be transparent" | `true` | `problem` | Requests a change |
+| "Works nicely now" | `false` | `positive` | Confirms fix worked |
+| "It's ugly" | `true` | `problem` | Reports UI issue |
+| "Let me check this section" | `false` | `neutral` | Neutral observation |
+
+### Negation Handling
+
+ScreenScribe pays special attention to negations:
+
+- "nie działa" (doesn't work) → **problem**
+- "nie przeszkadza" (doesn't bother) → **OK**
+- "no problem here" → **OK**
+- "not an issue" → **OK**
+
+### In Reports
+
+**Markdown report** uses plain-text severity labels (no emojis):
+
+```markdown
+### [OK] #3 UI @ 00:32
+
+> The white backgrounds don't bother me in dropdowns.
+
+*User confirms this is working correctly - not an issue.*
+```
+
+**JSON report** includes full sentiment data for filtering:
+
+```json
+{
+  "semantic_analysis": {
+    "is_issue": false,
+    "sentiment": "positive",
+    "severity": "none",
+    "summary": "User confirms white backgrounds are acceptable in dropdowns"
+  }
+}
+```
+
+### Filtering in Post-Processing
+
+Use `is_issue` to filter real problems from confirmations:
+
+```bash
+# Extract only actual issues
+jq '.findings | map(select(.semantic_analysis.is_issue == true))' report.json
+
+# Count real issues vs confirmations
+jq '{
+  issues: [.findings[] | select(.semantic_analysis.is_issue == true)] | length,
+  confirmations: [.findings[] | select(.semantic_analysis.is_issue == false)] | length
+}' report.json
+```
+
+## Detection Modes
+
+ScreenScribe offers two detection modes with different speed/accuracy tradeoffs.
+
+### Semantic Pre-Filter (Default)
+
+```bash
+screenscribe review video.mov
+```
+
+**How it works:**
+1. LLM analyzes the **entire transcript** before frame extraction
+2. Identifies "points of interest" based on context and meaning
+3. Extracts screenshots only at flagged moments
+
+**Pros:**
+- Finds issues that keyword matching would miss
+- Understands implicit problems: "navigation feels slow"
+- Contextual awareness: "this works here but not there"
+
+**Cons:**
+- Slower (~8s per minute of video for pre-filter)
+- Requires API calls
+
+### Keywords Only (Fast Mode)
+
+```bash
+screenscribe review video.mov --keywords-only
+```
+
+**How it works:**
+1. Scans transcript for predefined keywords (bug, błąd, nie działa, etc.)
+2. Extracts screenshots at keyword matches
+3. No LLM pre-analysis
+
+**Pros:**
+- Very fast (<1s for detection)
+- No API costs for detection phase
+- Predictable results
+
+**Cons:**
+- Misses issues without explicit keywords
+- No contextual understanding
+- ~70-80% recall compared to semantic mode
+
+### When to Use Which
+
+| Scenario | Recommended Mode |
+|----------|------------------|
+| Full review with budget | Default (semantic) |
+| Quick triage | `--keywords-only` |
+| API rate limited | `--keywords-only` |
+| Non-technical reviewer | Default (semantic) |
+| Clear bug mentions | `--keywords-only` |
+
+### Performance Comparison
+
+For a 15-minute video with ~40 issues:
+
+| Mode | Detection Time | API Calls | Issues Found |
+|------|----------------|-----------|--------------|
+| Semantic | ~2 min | 1 (pre-filter) | ~40 |
+| Keywords | <1s | 0 | ~30-35 |
 
 ## Advanced Options
 
@@ -513,6 +656,37 @@ Even with errors, you get:
 This means you never lose work due to a temporary API issue.
 
 ## Troubleshooting
+
+### Audio Contains No Speech
+
+If you see this warning:
+```
+⚠️ Audio appears to contain little or no speech!
+The recording may have been made without microphone input.
+```
+
+**Common causes:**
+
+1. **Microphone not enabled during recording**
+   - macOS: Press `Cmd+Shift+5` → Click "Options" → Select your microphone
+   - Windows: Settings → Sound → Input device
+
+2. **Wrong audio input selected**
+   - Check System Preferences/Settings for correct microphone
+   - Some apps default to "No Audio" or system sounds only
+
+3. **Microphone volume too low**
+   - Check input level in System Preferences → Sound → Input
+   - Ensure microphone isn't muted
+
+4. **Screen recording without audio permission**
+   - macOS: System Preferences → Privacy & Security → Microphone
+   - Grant permission to your recording app
+
+**To verify your recording has audio:**
+```bash
+ffprobe -v quiet -show_streams video.mov | grep -E "codec_type|sample_rate"
+```
 
 ### "No API key" Error
 

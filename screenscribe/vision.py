@@ -1,8 +1,11 @@
 """Vision analysis using LibraxisAI Vision models."""
 
+from __future__ import annotations
+
 import base64
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 from rich.console import Console
@@ -12,6 +15,9 @@ from .api_utils import retry_request
 from .config import ScreenScribeConfig
 from .detect import Detection
 from .prompts import get_vision_analysis_prompt
+
+if TYPE_CHECKING:
+    from .semantic import SemanticAnalysis
 
 console = Console()
 
@@ -36,15 +42,22 @@ def encode_image_base64(image_path: Path) -> str:
 
 
 def analyze_screenshot(
-    screenshot_path: Path, detection: Detection, config: ScreenScribeConfig
+    screenshot_path: Path,
+    detection: Detection,
+    config: ScreenScribeConfig,
+    previous_response_id: str | None = None,
 ) -> VisionAnalysis | None:
     """
     Analyze a screenshot using Vision model.
+
+    Uses conversation chaining via previous_response_id to leverage
+    context from semantic analysis, avoiding duplicate work.
 
     Args:
         screenshot_path: Path to screenshot
         detection: Associated detection for context
         config: ScreenScribe configuration
+        previous_response_id: Response ID from semantic analysis for context chaining
 
     Returns:
         VisionAnalysis result or None if failed
@@ -71,34 +84,52 @@ def analyze_screenshot(
 
     # Get localized prompt template
     prompt_template = get_vision_analysis_prompt(config.language)
-    prompt = prompt_template.format(transcript_context=detection.segment.text[:200])
+
+    # Use shorter prompt when chaining (model already has context)
+    if previous_response_id:
+        prompt = (
+            "Przeanalizuj ten screenshot w kontekście mojej poprzedniej analizy. "
+            "Zidentyfikuj dodatkowe problemy wizualne widoczne na obrazie."
+            if config.language.lower().startswith("pl")
+            else "Analyze this screenshot in context of my previous analysis. "
+            "Identify additional visual issues visible in the image."
+        )
+    else:
+        prompt = prompt_template.format(transcript_context=detection.segment.text[:200])
 
     try:
 
         def do_vision_request() -> httpx.Response:
             with httpx.Client(timeout=120.0) as client:
+                # Build request payload
+                payload: dict[str, object] = {
+                    "model": config.vision_model,
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": prompt},
+                                {
+                                    "type": "input_image",
+                                    "image_url": f"data:{media_type};base64,{image_base64}",
+                                    "detail": "high",
+                                },
+                            ],
+                        }
+                    ],
+                }
+
+                # Add conversation chaining if we have semantic analysis context
+                if previous_response_id:
+                    payload["previous_response_id"] = previous_response_id
+
                 response = client.post(
                     config.vision_endpoint,
                     headers={
                         "Authorization": f"Bearer {config.api_key}",
                         "Content-Type": "application/json",
                     },
-                    json={
-                        "model": config.vision_model,
-                        "input": [
-                            {
-                                "role": "user",
-                                "content": [
-                                    {"type": "input_text", "text": prompt},
-                                    {
-                                        "type": "input_image",
-                                        "image_url": f"data:{media_type};base64,{image_base64}",
-                                        "detail": "high",
-                                    },
-                                ],
-                            }
-                        ],
-                    },
+                    json=payload,
                 )
                 response.raise_for_status()
                 return response
@@ -150,14 +181,20 @@ def analyze_screenshot(
 
 
 def analyze_screenshots(
-    screenshots: list[tuple[Detection, Path]], config: ScreenScribeConfig
+    screenshots: list[tuple[Detection, Path]],
+    config: ScreenScribeConfig,
+    semantic_analyses: list[SemanticAnalysis] | None = None,
 ) -> list[VisionAnalysis]:
     """
     Analyze all screenshots using Vision model.
 
+    Uses conversation chaining to leverage semantic analysis context,
+    and skips non-issues to save API calls.
+
     Args:
         screenshots: List of (detection, screenshot_path) tuples
         config: ScreenScribe configuration
+        semantic_analyses: Optional list of SemanticAnalysis for chaining and filtering
 
     Returns:
         List of vision analyses
@@ -170,22 +207,50 @@ def analyze_screenshots(
         console.print("[yellow]No API key - skipping vision analysis[/]")
         return []
 
+    # Build lookup for semantic analyses
+    semantic_by_id: dict[int, SemanticAnalysis] = {}
+    if semantic_analyses:
+        semantic_by_id = {a.detection_id: a for a in semantic_analyses}
+
+    # Filter out non-issues (optimization: skip vision for confirmed OK items)
+    filtered_screenshots = []
+    skipped_count = 0
+    for detection, screenshot_path in screenshots:
+        sem = semantic_by_id.get(detection.segment.id)
+        if sem and not sem.is_issue:
+            skipped_count += 1
+            continue
+        filtered_screenshots.append((detection, screenshot_path))
+
+    if skipped_count > 0:
+        console.print(f"[dim]Skipping {skipped_count} non-issues (is_issue=False)[/]")
+
     results = []
-    console.print(f"[blue]Running vision analysis on {len(screenshots)} screenshots...[/]")
+    console.print(f"[blue]Running vision analysis on {len(filtered_screenshots)} screenshots...[/]")
 
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        task = progress.add_task("Analyzing screenshots...", total=len(screenshots))
+        task = progress.add_task("Analyzing screenshots...", total=len(filtered_screenshots))
 
-        for i, (detection, screenshot_path) in enumerate(screenshots, 1):
-            console.print(f"[dim]  [{i}/{len(screenshots)}] {screenshot_path.name}...[/]")
-            analysis = analyze_screenshot(screenshot_path, detection, config)
+        for i, (detection, screenshot_path) in enumerate(filtered_screenshots, 1):
+            console.print(f"[dim]  [{i}/{len(filtered_screenshots)}] {screenshot_path.name}...[/]")
+
+            # Get response_id from semantic analysis for chaining
+            sem = semantic_by_id.get(detection.segment.id)
+            previous_response_id = None
+            if sem and sem.response_id:
+                previous_response_id = sem.response_id
+
+            analysis = analyze_screenshot(
+                screenshot_path, detection, config, previous_response_id=previous_response_id
+            )
             if analysis:
                 results.append(analysis)
-                console.print(f"[green]  ✓[/] {screenshot_path.name}")
+                chained = " [chained]" if previous_response_id else ""
+                console.print(f"[green]  ✓[/] {screenshot_path.name}{chained}")
             else:
                 console.print(f"[yellow]  ✗[/] {screenshot_path.name} - failed")
             progress.advance(task)
