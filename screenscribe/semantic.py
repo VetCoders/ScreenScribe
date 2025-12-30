@@ -176,7 +176,9 @@ def analyze_detection_semantically(
 
 
 def analyze_detections_semantically(
-    detections: list[Detection], config: ScreenScribeConfig
+    detections: list[Detection],
+    config: ScreenScribeConfig,
+    previous_response_id: str = "",
 ) -> list[SemanticAnalysis]:
     """
     Analyze all detections using LLM.
@@ -184,10 +186,15 @@ def analyze_detections_semantically(
     Args:
         detections: List of detections
         config: ScreenScribe configuration
+        previous_response_id: Optional response ID from previous batch for context chaining
+            (reserved for future use - enables cross-video context in batch mode)
 
     Returns:
         List of semantic analyses
     """
+    # Note: previous_response_id is currently reserved for future conversation chaining
+    # across videos in batch mode. Individual detections chain via response_id field.
+    _ = previous_response_id  # Acknowledge parameter for future use
     if not config.use_semantic_analysis:
         console.print("[dim]Semantic analysis disabled[/]")
         return []
