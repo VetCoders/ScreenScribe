@@ -79,12 +79,22 @@ class ScreenScribeConfig:
     def _load_from_env(self) -> None:
         """Load configuration from environment variables."""
         env_mapping = {
-            "LIBRAXIS_API_KEY": "api_key",
+            # API Keys (multiple providers supported)
             "SCREENSCRIBE_API_KEY": "api_key",
+            "LIBRAXIS_API_KEY": "api_key",
+            "OPENAI_API_KEY": "api_key",
+            # Base URL (auto-derives endpoints if explicit not set)
+            "SCREENSCRIBE_API_BASE": "api_base",
             "LIBRAXIS_API_BASE": "api_base",
+            # Explicit endpoints (full URLs, no normalization)
+            "SCREENSCRIBE_STT_ENDPOINT": "stt_endpoint",
+            "SCREENSCRIBE_LLM_ENDPOINT": "llm_endpoint",
+            "SCREENSCRIBE_VISION_ENDPOINT": "vision_endpoint",
+            # Models
             "SCREENSCRIBE_STT_MODEL": "stt_model",
             "SCREENSCRIBE_LLM_MODEL": "llm_model",
             "SCREENSCRIBE_VISION_MODEL": "vision_model",
+            # Processing
             "SCREENSCRIBE_LANGUAGE": "language",
             "SCREENSCRIBE_SEMANTIC": "use_semantic_analysis",
             "SCREENSCRIBE_VISION": "use_vision_analysis",
@@ -101,10 +111,17 @@ class ScreenScribeConfig:
 
         if "api_key" in key_lower:
             self.api_key = value
+        # Explicit endpoints (full URLs - use as-is, no normalization)
+        elif "stt_endpoint" in key_lower:
+            self.stt_endpoint = value.rstrip("/")
+        elif "llm_endpoint" in key_lower:
+            self.llm_endpoint = value.rstrip("/")
+        elif "vision_endpoint" in key_lower:
+            self.vision_endpoint = value.rstrip("/")
+        # Base URL (derives endpoints if explicit not set)
         elif "api_base" in key_lower:
-            # Normalize api_base - remove trailing paths like /v1/responses, /v1, etc.
+            # Normalize api_base - remove trailing paths
             normalized = value.rstrip("/")
-            # Strip common API path suffixes
             for suffix in [
                 "/v1/responses",
                 "/v1/audio/transcriptions",
@@ -115,10 +132,13 @@ class ScreenScribeConfig:
                     normalized = normalized[: -len(suffix)]
                     break
             self.api_base = normalized
-            # Update endpoints with normalized base
-            self.stt_endpoint = f"{normalized}/v1/audio/transcriptions"
-            self.llm_endpoint = f"{normalized}/v1/responses"
-            self.vision_endpoint = f"{normalized}/v1/responses"
+            # Only update endpoints if still at defaults (not explicitly set)
+            if self.stt_endpoint == LIBRAXIS_STT_ENDPOINT:
+                self.stt_endpoint = f"{normalized}/v1/audio/transcriptions"
+            if self.llm_endpoint == LIBRAXIS_LLM_ENDPOINT:
+                self.llm_endpoint = f"{normalized}/v1/responses"
+            if self.vision_endpoint == LIBRAXIS_VISION_ENDPOINT:
+                self.vision_endpoint = f"{normalized}/v1/responses"
         elif "stt_model" in key_lower:
             self.stt_model = value
         elif "llm_model" in key_lower:
@@ -129,7 +149,7 @@ class ScreenScribeConfig:
             self.language = value
         elif "semantic" in key_lower:
             self.use_semantic_analysis = value.lower() in ("true", "1", "yes")
-        elif "vision" in key_lower and "model" not in key_lower:
+        elif "vision" in key_lower and "model" not in key_lower and "endpoint" not in key_lower:
             self.use_vision_analysis = value.lower() in ("true", "1", "yes")
 
     def save_default_config(self) -> Path:
@@ -141,18 +161,42 @@ class ScreenScribeConfig:
         content = f"""# ScreenScribe Configuration
 # Made with (งಠ_ಠ)ง by ⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Klaudiusz (AI) + Mikserka (AI)
 
-# API Key (required)
-LIBRAXIS_API_KEY={self.api_key}
+# =============================================================================
+# API KEY (required - pick one)
+# =============================================================================
+# Use any of these - first non-empty wins:
+SCREENSCRIBE_API_KEY={self.api_key}
+# OPENAI_API_KEY=sk-proj-xxx
+# LIBRAXIS_API_KEY=xxx
 
-# API Base URL
-LIBRAXIS_API_BASE={self.api_base}
+# =============================================================================
+# ENDPOINTS (explicit full URLs - recommended for clarity)
+# =============================================================================
+# STT: Speech-to-Text (OpenAI Whisper compatible)
+SCREENSCRIBE_STT_ENDPOINT={self.stt_endpoint}
 
-# Models
+# LLM: Language Model (Responses API - supports previous_response_id chaining)
+SCREENSCRIBE_LLM_ENDPOINT={self.llm_endpoint}
+
+# Vision: Vision Model (same as LLM for unified APIs)
+SCREENSCRIBE_VISION_ENDPOINT={self.vision_endpoint}
+
+# =============================================================================
+# ALTERNATIVE: Base URL (auto-derives endpoints with /v1/... paths)
+# =============================================================================
+# SCREENSCRIBE_API_BASE=https://api.openai.com
+# SCREENSCRIBE_API_BASE=https://api.libraxis.cloud
+
+# =============================================================================
+# MODELS
+# =============================================================================
 SCREENSCRIBE_STT_MODEL={self.stt_model}
 SCREENSCRIBE_LLM_MODEL={self.llm_model}
 SCREENSCRIBE_VISION_MODEL={self.vision_model}
 
-# Processing
+# =============================================================================
+# PROCESSING OPTIONS
+# =============================================================================
 SCREENSCRIBE_LANGUAGE={self.language}
 SCREENSCRIBE_SEMANTIC={str(self.use_semantic_analysis).lower()}
 SCREENSCRIBE_VISION={str(self.use_vision_analysis).lower()}

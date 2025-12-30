@@ -35,7 +35,7 @@ def _check_llm_model(config: ScreenScribeConfig, model: str, model_type: str) ->
             response = client.post(
                 config.llm_endpoint,
                 headers={
-                    "x-api-key": config.api_key,
+                    "Authorization": f"Bearer {config.api_key}",
                     "Content-Type": "application/json",
                 },
                 json={

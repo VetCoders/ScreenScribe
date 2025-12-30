@@ -58,7 +58,7 @@ def analyze_detection_semantically(
                 response = client.post(
                     config.llm_endpoint,
                     headers={
-                        "x-api-key": config.api_key,
+                        "Authorization": f"Bearer {config.api_key}",
                         "Content-Type": "application/json",
                     },
                     json={
@@ -261,7 +261,7 @@ def generate_executive_summary(analyses: list[SemanticAnalysis], config: ScreenS
                 response = client.post(
                     config.llm_endpoint,
                     headers={
-                        "x-api-key": config.api_key,
+                        "Authorization": f"Bearer {config.api_key}",
                         "Content-Type": "application/json",
                     },
                     json={

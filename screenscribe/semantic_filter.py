@@ -182,7 +182,7 @@ def semantic_prefilter(
                 response = client.post(
                     config.llm_endpoint,
                     headers={
-                        "x-api-key": config.api_key,
+                        "Authorization": f"Bearer {config.api_key}",
                         "Content-Type": "application/json",
                     },
                     json={

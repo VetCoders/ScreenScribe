@@ -13,21 +13,25 @@ ScreenScribe extracts actionable insights from screencast recordings by transcri
 
 ## API Provider
 
-ScreenScribe uses **LibraxisAI API** by default, but is **fully compatible with any OpenAI-compatible API provider**. Simply update your config file to use a different provider:
+ScreenScribe uses **LibraxisAI API** by default, but is **fully compatible with any provider supporting the Responses API** (OpenAI, Anthropic, etc.). You can configure explicit endpoints for full control:
 
 ```env
 # ~/.config/screenscribe/config.env
 
-# Default: LibraxisAI
-LIBRAXIS_API_BASE=https://api.libraxis.cloud
+# API Key (supports multiple providers)
+SCREENSCRIBE_API_KEY=sk-proj-xxx        # or OPENAI_API_KEY, LIBRAXIS_API_KEY
 
-# Or use any OpenAI-compatible provider:
-# LIBRAXIS_API_BASE=https://api.openai.com/v1
-# LIBRAXIS_API_BASE=https://api.groq.com/openai/v1
-# LIBRAXIS_API_BASE=https://your-custom-endpoint.com
+# Explicit endpoints (recommended - full URLs, no guessing)
+SCREENSCRIBE_STT_ENDPOINT=https://api.openai.com/v1/audio/transcriptions
+SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
+SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
+
+# Models
+SCREENSCRIBE_LLM_MODEL=gpt-4o
+SCREENSCRIBE_VISION_MODEL=gpt-4o
 ```
 
-> **Note:** Ensure your provider supports the required endpoints: STT (`/v1/audio/transcriptions`), LLM (`/v1/responses` or `/v1/chat/completions`), and optionally Vision models.
+> **Note:** All LLM calls use the Responses API format with `previous_response_id` for conversation chaining between semantic and vision analysis.
 
 ## Features
 
@@ -216,14 +220,23 @@ Each report includes:
 Config file location: `~/.config/screenscribe/config.env`
 
 ```env
-# API Configuration
-LIBRAXIS_API_KEY=your-api-key-here
-LIBRAXIS_API_BASE=https://api.libraxis.cloud
+# API Key (pick one)
+SCREENSCRIBE_API_KEY=your-api-key
+# OPENAI_API_KEY=sk-proj-xxx
+# LIBRAXIS_API_KEY=xxx
+
+# Explicit Endpoints (full URLs - recommended)
+SCREENSCRIBE_STT_ENDPOINT=https://api.openai.com/v1/audio/transcriptions
+SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
+SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
+
+# Alternative: Base URL (auto-derives /v1/... paths)
+# SCREENSCRIBE_API_BASE=https://api.libraxis.cloud
 
 # Models
 SCREENSCRIBE_STT_MODEL=whisper-1
-SCREENSCRIBE_LLM_MODEL=ai-suggestions
-SCREENSCRIBE_VISION_MODEL=ai-suggestions
+SCREENSCRIBE_LLM_MODEL=gpt-4o
+SCREENSCRIBE_VISION_MODEL=gpt-4o
 
 # Processing Options
 SCREENSCRIBE_LANGUAGE=pl
