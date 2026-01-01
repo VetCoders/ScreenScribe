@@ -109,10 +109,14 @@ def _check_stt_model(config: ScreenScribeConfig) -> bool:
     """
     try:
         with httpx.Client(timeout=VALIDATION_TIMEOUT) as client:
+            # Don't send auth to localhost endpoints
+            is_local = config.stt_endpoint.startswith("http://127.0.0.1") or config.stt_endpoint.startswith("http://localhost")
+            headers = {} if is_local else {"Authorization": f"Bearer {config.get_stt_api_key()}"}
+
             # POST with empty file to check endpoint responds (400 expected)
             response = client.post(
                 config.stt_endpoint,
-                headers={"Authorization": f"Bearer {config.get_stt_api_key()}"},
+                headers=headers,
                 data={"model": config.stt_model},
                 files={"file": ("test.mp3", b"", "audio/mpeg")},
             )

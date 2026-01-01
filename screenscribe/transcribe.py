@@ -94,7 +94,9 @@ def transcribe_audio(
             "response_format": "verbose_json",
         }
         headers = {}
-        if api_key and not use_local:
+        # Don't send auth to localhost endpoints (they don't need it)
+        is_local_endpoint = url.startswith("http://127.0.0.1") or url.startswith("http://localhost")
+        if api_key and not use_local and not is_local_endpoint:
             headers["Authorization"] = f"Bearer {api_key}"
 
         def do_transcribe() -> httpx.Response:
