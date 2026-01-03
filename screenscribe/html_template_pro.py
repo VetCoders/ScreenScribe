@@ -340,6 +340,8 @@ body::after {
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
+    contain: layout;
+    overflow: hidden;
 }
 
 .video-container {
@@ -444,9 +446,11 @@ body::after {
 .sidebar-scroll {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: var(--space-md);
     scrollbar-width: thin;
     scrollbar-color: var(--border-default) transparent;
+    contain: layout;
 }
 
 .sidebar-scroll::-webkit-scrollbar {
@@ -1257,11 +1261,6 @@ function handleInputEvent(e) {
         reportState.findings[findingId].notes = target.value;
         reportState.modified = true;
     }
-
-    if (target.matches('.action-items-input')) {
-        reportState.findings[findingId].actionItems = target.value;
-        reportState.modified = true;
-    }
 }
 
 function handleChangeEvent(e) {
@@ -1330,14 +1329,13 @@ function restoreUIFromState() {
             if (select) select.value = state.severity;
         }
 
-        if (state.notes) {
+        if (state.notes || state.actionItems) {
             const textarea = article.querySelector('.notes textarea');
-            if (textarea) textarea.value = state.notes;
-        }
-
-        if (state.actionItems) {
-            const input = article.querySelector('.action-items-input');
-            if (input) input.value = state.actionItems;
+            if (textarea) {
+                // Merge notes and actionItems for backwards compatibility
+                const combined = [state.notes, state.actionItems].filter(Boolean).join('\\n');
+                textarea.value = combined;
+            }
         }
     });
 }
@@ -1368,7 +1366,6 @@ function exportReviewedJSON() {
                 confirmed: review.confirmed,
                 severity_override: review.severity || null,
                 notes: review.notes || '',
-                action_items: review.actionItems ? review.actionItems.split(',').map(s => s.trim()).filter(Boolean) : [],
                 reviewer: reportState.reviewer,
                 reviewed_at: new Date().toISOString()
             }
@@ -1387,21 +1384,29 @@ function exportReviewedJSON() {
         findings: reviewedFindings
     };
 
+    const filename = 'reviewed_' + (document.body.dataset.videoName || 'report') + '.json';
     const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'reviewed_' + (document.body.dataset.videoName || 'report') + '.json';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
+    // Copy assumed download path to clipboard
+    const downloadPath = '~/Downloads/' + filename;
+    navigator.clipboard.writeText(downloadPath).then(() => {
+        showNotification('Eksport ukonczony. Sciezka skopiowana: ' + downloadPath);
+    }).catch(() => {
+        showNotification('Eksport ukonczony: ' + filename);
+    });
+
     try {
         localStorage.removeItem('screenscribe_draft_' + reportState.reportId);
     } catch (e) {}
     reportState.modified = false;
-    showNotification('Eksport ukonczony');
 }
 
 function seekToTimestamp(seconds) {
@@ -1452,6 +1457,10 @@ function toggleDrawer() {
     const drawer = document.getElementById('transcriptDrawer');
     if (drawer) {
         drawer.classList.toggle('open');
+        const arrow = drawer.querySelector('.drawer-toggle');
+        if (arrow) {
+            arrow.textContent = drawer.classList.contains('open') ? '▲' : '▼';
+        }
     }
 }
 
@@ -1613,17 +1622,9 @@ def _render_finding(f: dict[str, Any], index: int) -> str:
                     </select>
                 </div>
             </div>
-            <div class="review-row">
-                <div class="review-field">
-                    <label>Dodatkowe akcje (po przecinku)</label>
-                    <input type="text" class="action-items-input"
-                           placeholder="np. sprawdzic fix, dodac test"
-                           value="{html.escape(action_items_display)}">
-                </div>
-            </div>
             <div class="review-field notes">
-                <label>Notatki</label>
-                <textarea placeholder="Twoje uwagi..."></textarea>
+                <label>Notatki / Akcje</label>
+                <textarea placeholder="Twoje uwagi, akcje do podjęcia...">{html.escape(action_items_display)}</textarea>
             </div>
         </div>
     </article>
@@ -1687,13 +1688,14 @@ def render_html_report_pro(
     vtt_data_url = ""
     if segments:
         from .vtt_generator import generate_vtt_data_url
+
         vtt_data_url = generate_vtt_data_url(segments)
 
     # Segments as JSON for JavaScript
-    segments_json = json.dumps([
-        {"id": s.id, "start": s.start, "end": s.end, "text": s.text}
-        for s in segments
-    ], ensure_ascii=False)
+    segments_json = json.dumps(
+        [{"id": s.id, "start": s.start, "end": s.end, "text": s.text} for s in segments],
+        ensure_ascii=False,
+    )
 
     # Build findings HTML
     findings_html = "\n".join(_render_finding(f, i + 1) for i, f in enumerate(findings))
@@ -1734,10 +1736,10 @@ def render_html_report_pro(
                 <div id="currentSubtitle" class="current-text empty">Brak napisu</div>
             </div>
 
-            <div class="transcript-drawer" id="transcriptDrawer">
+            <div class="transcript-drawer open" id="transcriptDrawer">
                 <div class="drawer-header" onclick="toggleDrawer()">
                     <h3>Transkrypcja</h3>
-                    <span class="drawer-toggle">▼</span>
+                    <span class="drawer-toggle">▲</span>
                 </div>
                 <div class="drawer-content">
                     <div class="drawer-search">

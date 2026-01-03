@@ -2,7 +2,7 @@
 
 import time
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import httpx
 from rich.console import Console
@@ -117,7 +117,7 @@ def make_api_request(
     *,
     max_retries: int = 3,
     operation_name: str = "API request",
-    **kwargs: object,
+    **kwargs: Any,
 ) -> httpx.Response:
     """
     Make an HTTP request with automatic retry on transient failures.
