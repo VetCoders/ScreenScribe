@@ -11,7 +11,6 @@ from typing import Any
 from rich.console import Console
 
 from .detect import Detection
-from .semantic import SemanticAnalysis
 from .transcribe import Segment, TranscriptionResult
 
 console = Console()
@@ -36,6 +35,9 @@ class PipelineCheckpoint:
     transcription: dict[str, Any] | None = None
     detections: list[dict[str, Any]] = field(default_factory=list)
     screenshots: list[dict[str, Any]] = field(default_factory=list)
+    # Unified findings (new pipeline)
+    unified_findings: list[dict[str, Any]] = field(default_factory=list)
+    # Legacy fields (kept for backwards compatibility with old checkpoints)
     semantic_analyses: list[dict[str, Any]] = field(default_factory=list)
     vision_analyses: list[dict[str, Any]] = field(default_factory=list)
     executive_summary: str = ""
@@ -57,8 +59,7 @@ class PipelineCheckpoint:
             "transcription",
             "detection",
             "screenshots",
-            "semantic",
-            "vision",
+            "unified_analysis",  # New unified stage (replaces semantic + vision)
             "report",
         ]
         for stage in all_stages:
@@ -233,13 +234,26 @@ def deserialize_detection(data: dict[str, Any]) -> Detection:
     )
 
 
-def serialize_semantic_analysis(analysis: SemanticAnalysis) -> dict[str, Any]:
-    """Serialize SemanticAnalysis to dict."""
+# Legacy SemanticAnalysis serialization (kept for backwards compatibility with old checkpoints)
+# New code should use unified_finding serialization instead
+
+
+def serialize_semantic_analysis(analysis: Any) -> dict[str, Any]:
+    """Serialize SemanticAnalysis to dict (legacy).
+
+    Deprecated: Use serialize_unified_finding for new code.
+    """
     return asdict(analysis)
 
 
-def deserialize_semantic_analysis(data: dict[str, Any]) -> SemanticAnalysis:
-    """Deserialize dict to SemanticAnalysis."""
+def deserialize_semantic_analysis(data: dict[str, Any]) -> Any:
+    """Deserialize dict to SemanticAnalysis (legacy).
+
+    Deprecated: Use deserialize_unified_finding for new code.
+    """
+    # Import here to avoid circular imports
+    from .semantic import SemanticAnalysis
+
     # Add defaults for new fields (backwards compatibility with old checkpoints)
     data.setdefault("is_issue", True)
     data.setdefault("sentiment", "problem")
@@ -260,3 +274,75 @@ def deserialize_screenshot(data: dict[str, Any]) -> tuple[Detection, Path]:
     detection = deserialize_detection(data["detection"])
     path = Path(data["path"])
     return (detection, path)
+
+
+# --- UnifiedFinding serialization (new unified pipeline) ---
+
+
+def serialize_unified_finding(finding: Any) -> dict[str, Any]:
+    """Serialize UnifiedFinding to dict.
+
+    Args:
+        finding: UnifiedFinding instance
+
+    Returns:
+        Serialized dict
+    """
+    return {
+        "detection_id": finding.detection_id,
+        "screenshot_path": str(finding.screenshot_path) if finding.screenshot_path else None,
+        "timestamp": finding.timestamp,
+        # Semantic fields
+        "category": finding.category,
+        "is_issue": finding.is_issue,
+        "sentiment": finding.sentiment,
+        "severity": finding.severity,
+        "summary": finding.summary,
+        "action_items": finding.action_items,
+        "affected_components": finding.affected_components,
+        "suggested_fix": finding.suggested_fix,
+        # Vision fields
+        "ui_elements": finding.ui_elements,
+        "issues_detected": finding.issues_detected,
+        "accessibility_notes": finding.accessibility_notes,
+        "design_feedback": finding.design_feedback,
+        "technical_observations": finding.technical_observations,
+        # API tracking
+        "response_id": finding.response_id,
+    }
+
+
+def deserialize_unified_finding(data: dict[str, Any]) -> Any:
+    """Deserialize dict to UnifiedFinding.
+
+    Args:
+        data: Serialized dict
+
+    Returns:
+        UnifiedFinding instance
+    """
+    # Import here to avoid circular imports
+    from .unified_analysis import UnifiedFinding
+
+    return UnifiedFinding(
+        detection_id=data["detection_id"],
+        screenshot_path=Path(data["screenshot_path"]) if data.get("screenshot_path") else None,
+        timestamp=data["timestamp"],
+        # Semantic fields
+        category=data.get("category", "unknown"),
+        is_issue=data.get("is_issue", True),
+        sentiment=data.get("sentiment", "problem"),
+        severity=data.get("severity", "medium"),
+        summary=data.get("summary", ""),
+        action_items=data.get("action_items", []),
+        affected_components=data.get("affected_components", []),
+        suggested_fix=data.get("suggested_fix", ""),
+        # Vision fields
+        ui_elements=data.get("ui_elements", []),
+        issues_detected=data.get("issues_detected", []),
+        accessibility_notes=data.get("accessibility_notes", []),
+        design_feedback=data.get("design_feedback", ""),
+        technical_observations=data.get("technical_observations", ""),
+        # API tracking
+        response_id=data.get("response_id", ""),
+    )

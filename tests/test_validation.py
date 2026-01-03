@@ -46,7 +46,7 @@ class TestAPIKeyValidation:
         """Missing API key should raise APIKeyError."""
         with pytest.raises(APIKeyError) as exc_info:
             validate_models(config_no_key, use_semantic=True, use_vision=True)
-        assert "API key not configured" in str(exc_info.value)
+        assert "No API key configured" in str(exc_info.value)
 
     def test_api_key_present_passes(self, config: ScreenScribeConfig) -> None:
         """Present API key should not raise on key check."""

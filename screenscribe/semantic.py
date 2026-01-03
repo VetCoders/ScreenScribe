@@ -42,7 +42,7 @@ def analyze_detection_semantically(
     Returns:
         SemanticAnalysis result or None if failed
     """
-    if not config.api_key:
+    if not config.get_llm_api_key():
         return None
 
     # Get localized prompt template
@@ -58,7 +58,7 @@ def analyze_detection_semantically(
                 response = client.post(
                     config.llm_endpoint,
                     headers={
-                        "x-api-key": config.api_key,
+                        "Authorization": f"Bearer {config.get_llm_api_key()}",
                         "Content-Type": "application/json",
                     },
                     json={
@@ -176,7 +176,9 @@ def analyze_detection_semantically(
 
 
 def analyze_detections_semantically(
-    detections: list[Detection], config: ScreenScribeConfig
+    detections: list[Detection],
+    config: ScreenScribeConfig,
+    previous_response_id: str = "",
 ) -> list[SemanticAnalysis]:
     """
     Analyze all detections using LLM.
@@ -184,15 +186,20 @@ def analyze_detections_semantically(
     Args:
         detections: List of detections
         config: ScreenScribe configuration
+        previous_response_id: Optional response ID from previous batch for context chaining
+            (reserved for future use - enables cross-video context in batch mode)
 
     Returns:
         List of semantic analyses
     """
+    # Note: previous_response_id is currently reserved for future conversation chaining
+    # across videos in batch mode. Individual detections chain via response_id field.
+    _ = previous_response_id  # Acknowledge parameter for future use
     if not config.use_semantic_analysis:
         console.print("[dim]Semantic analysis disabled[/]")
         return []
 
-    if not config.api_key:
+    if not config.get_llm_api_key():
         console.print("[yellow]No API key - skipping semantic analysis[/]")
         return []
 
@@ -242,7 +249,7 @@ def generate_executive_summary(analyses: list[SemanticAnalysis], config: ScreenS
     Returns:
         Executive summary text
     """
-    if not analyses or not config.api_key:
+    if not analyses or not config.get_llm_api_key():
         return ""
 
     # Prepare findings summary
@@ -261,7 +268,7 @@ def generate_executive_summary(analyses: list[SemanticAnalysis], config: ScreenS
                 response = client.post(
                     config.llm_endpoint,
                     headers={
-                        "x-api-key": config.api_key,
+                        "Authorization": f"Bearer {config.get_llm_api_key()}",
                         "Content-Type": "application/json",
                     },
                     json={

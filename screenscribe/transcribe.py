@@ -13,7 +13,7 @@ console = Console()
 
 # Default LibraxisAI STT endpoint (used if not configured otherwise)
 DEFAULT_STT_URL = "https://api.libraxis.cloud/v1/audio/transcriptions"
-LOCAL_STT_URL = "http://localhost:8237/transcribe"
+LOCAL_STT_URL = "http://localhost:7237/transcribe"
 
 
 @dataclass
@@ -87,14 +87,27 @@ def transcribe_audio(
         with open(audio_path, "rb") as f:
             audio_content = f.read()
 
-        files = {"file": (audio_path.name, audio_content, "audio/mpeg")}
+        # Detect MIME type from file extension
+        mime_types = {
+            ".mp3": "audio/mpeg",
+            ".wav": "audio/wav",
+            ".m4a": "audio/mp4",
+            ".ogg": "audio/ogg",
+            ".flac": "audio/flac",
+            ".webm": "audio/webm",
+        }
+        mime_type = mime_types.get(audio_path.suffix.lower(), "audio/mpeg")
+        # Local endpoints use 'audio' field, OpenAI-compatible use 'file'
+        is_local_endpoint = url.startswith("http://127.0.0.1") or url.startswith("http://localhost")
+        field_name = "audio" if is_local_endpoint else "file"
+        files = {field_name: (audio_path.name, audio_content, mime_type)}
         data = {
             "model": stt_model,
             "language": language,
             "response_format": "verbose_json",
         }
         headers = {}
-        if api_key and not use_local:
+        if api_key and not use_local and not is_local_endpoint:
             headers["Authorization"] = f"Bearer {api_key}"
 
         def do_transcribe() -> httpx.Response:
@@ -122,6 +135,24 @@ def transcribe_audio(
                 end=seg.get("end", 0.0),
                 text=seg.get("text", "").strip(),
                 no_speech_prob=seg.get("no_speech_prob", 0.0),
+            )
+        )
+
+    # Fallback: if API returns text but no segments, create a single segment
+    # This handles APIs that don't support verbose segment output
+    full_text = result.get("text", "").strip()
+    if not segments and full_text:
+        console.print("[yellow]API returned text without segments, creating synthetic segment[/]")
+        # Estimate duration from text length (~150 words/min in Polish)
+        word_count = len(full_text.split())
+        estimated_duration = (word_count / 150) * 60  # seconds
+        segments.append(
+            Segment(
+                id=0,
+                start=0.0,
+                end=estimated_duration,
+                text=full_text,
+                no_speech_prob=0.0,
             )
         )
 

@@ -1,12 +1,12 @@
 [project]
 name = "screenscribe"
-version = "0.1.2"
+version = "0.1.3"
 description = "Video review automation - extract bugs and changes from screencast commentary"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
     { name = "Maciej Gad", email = "void@div0.space" },
-    { name = "Monika Gad", email = "monika@libraxis.cloud" },
+    { name = "Monika Szymańska", email = "hello@vetcoders.io" },
 ]
 dependencies = [
     "black==25.12.0",
