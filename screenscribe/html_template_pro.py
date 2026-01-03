@@ -1,0 +1,1818 @@
+"""HTML Pro report template with video player and synchronized subtitles.
+
+This module generates standalone HTML reports with:
+- Hybrid Quantum/DOS + Vista design system
+- Embedded video player with VTT subtitles
+- Timestamp anchoring (click subtitle -> jump to video)
+- CRT retro effects with professional accessibility
+- Interactive human review functionality
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import html
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .transcribe import Segment
+
+# =============================================================================
+# HYBRID QUANTUM + VISTA CSS DESIGN SYSTEM
+# =============================================================================
+
+CSS_QUANTUM_VISTA = """
+/* ==========================================================================
+   QUANTUM/VISTA HYBRID DESIGN SYSTEM
+   CRT retro aesthetics + Vista professional accessibility
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+    /* Quantum CRT Palette */
+    --crt-black: #0a0a0a;
+    --crt-dark: #121212;
+    --phosphor-gray: #a8a8a8;
+    --phosphor-green: #00ff64;
+    --quantum-green: #00ff9d;
+    --quantum-cyan: #00ffff;
+    --quantum-purple: #c084fc;
+    --quantum-amber: #f59e0b;
+
+    /* Vista Brand Colors */
+    --vista-mint: #a6c5bc;
+    --vista-mint-light: #b7d6ce;
+    --vista-mint-dark: #7da396;
+
+    /* Semantic Colors (Vista) */
+    --color-critical: #dc2626;
+    --color-high: #ea580c;
+    --color-medium: #ca8a04;
+    --color-low: #16a34a;
+    --color-success: #059669;
+    --color-error: rgb(220 65 38 / 72%);
+
+    /* Surface Colors */
+    --surface-primary: #0d1117;
+    --surface-elevated: #161b22;
+    --surface-card: #1c2128;
+    --surface-hover: #21262d;
+
+    /* Text Hierarchy */
+    --text-primary: #f0f6fc;
+    --text-secondary: #8b949e;
+    --text-muted: #6e7681;
+    --text-accent: var(--quantum-green);
+
+    /* Border Colors */
+    --border-default: #30363d;
+    --border-accent: var(--vista-mint);
+    --border-glow: color-mix(in srgb, var(--quantum-green) 40%, transparent);
+
+    /* Typography */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+    /* Spacing */
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 1rem;
+    --space-lg: 1.5rem;
+    --space-xl: 2rem;
+
+    /* Radius */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-full: 9999px;
+
+    /* Shadows with glow */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.5);
+    --shadow-glow: 0 0 20px color-mix(in srgb, var(--quantum-green) 25%, transparent);
+
+    /* Motion */
+    --motion-fast: 150ms;
+    --motion-medium: 250ms;
+    --motion-slow: 400ms;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Reset */
+*, *::before, *::after { box-sizing: border-box; }
+* { margin: 0; }
+
+/* Base */
+html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+    font-family: var(--font-sans);
+    background: var(--surface-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+/* CRT Scanlines overlay */
+body::before {
+    content: "";
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: linear-gradient(rgba(18,16,16,0) 50%, rgba(0,0,0,0.08) 50%);
+    background-size: 100% 3px;
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.4;
+}
+
+/* Subtle CRT flicker */
+body::after {
+    content: "";
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(18,16,16,0.03);
+    pointer-events: none;
+    z-index: 9998;
+    animation: crtFlicker 0.15s infinite;
+}
+
+@keyframes crtFlicker {
+    0%, 100% { opacity: 0.02; }
+    50% { opacity: 0.04; }
+}
+
+/* ==========================================================================
+   LAYOUT - Video left, Findings right (sticky with tabs)
+   ========================================================================== */
+
+.app-container {
+    display: grid;
+    grid-template-columns: minmax(400px, 1fr) 480px;
+    grid-template-rows: auto 1fr auto;
+    gap: var(--space-lg);
+    max-width: 1800px;
+    margin: 0 auto;
+    padding: var(--space-lg);
+    min-height: 100vh;
+}
+
+@media (max-width: 1200px) {
+    .app-container {
+        grid-template-columns: 1fr;
+    }
+    .sidebar {
+        position: static !important;
+        max-height: none !important;
+    }
+}
+
+/* ==========================================================================
+   TAB SYSTEM
+   ========================================================================== */
+
+.tabs {
+    display: flex;
+    gap: 2px;
+    background: var(--surface-primary);
+    padding: var(--space-xs);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-md);
+}
+
+.tab-btn {
+    flex: 1;
+    padding: var(--space-sm) var(--space-md);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--motion-fast) var(--ease-out);
+}
+
+.tab-btn:hover {
+    color: var(--text-secondary);
+    background: var(--surface-hover);
+}
+
+.tab-btn.active {
+    background: var(--surface-card);
+    color: var(--quantum-green);
+    box-shadow: var(--shadow-sm);
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* ==========================================================================
+   TRANSCRIPT DRAWER (collapsible under video)
+   ========================================================================== */
+
+.transcript-drawer {
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    margin-top: var(--space-md);
+}
+
+.drawer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--surface-card);
+    cursor: pointer;
+    user-select: none;
+    transition: background var(--motion-fast);
+}
+
+.drawer-header:hover {
+    background: var(--surface-hover);
+}
+
+.drawer-header h3 {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.drawer-toggle {
+    color: var(--text-muted);
+    transition: transform var(--motion-fast);
+}
+
+.transcript-drawer.open .drawer-toggle {
+    transform: rotate(180deg);
+}
+
+.drawer-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height var(--motion-medium) var(--ease-out);
+}
+
+.transcript-drawer.open .drawer-content {
+    max-height: 400px;
+}
+
+.drawer-search {
+    padding: var(--space-sm) var(--space-md);
+    border-bottom: 1px solid var(--border-default);
+}
+
+.drawer-list {
+    max-height: 350px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-default) transparent;
+}
+
+/* ==========================================================================
+   HEADER
+   ========================================================================== */
+
+.app-header {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-md) var(--space-lg);
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+}
+
+.app-header h1 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.app-header h1::before {
+    content: ">";
+    color: var(--quantum-green);
+    font-family: var(--font-mono);
+    animation: blink 1.2s step-end infinite;
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+
+.app-header .meta {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+}
+
+/* ==========================================================================
+   VIDEO PLAYER SECTION
+   ========================================================================== */
+
+.video-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.video-container {
+    position: relative;
+    background: var(--crt-black);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    border: 1px solid var(--border-default);
+    box-shadow: var(--shadow-lg), var(--shadow-glow);
+}
+
+.video-container video {
+    width: 100%;
+    display: block;
+    aspect-ratio: 16 / 9;
+    object-fit: contain;
+}
+
+/* Current subtitle display below video */
+.subtitle-display {
+    padding: var(--space-md) var(--space-lg);
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-default);
+    border-top: none;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    min-height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.subtitle-display .current-text {
+    font-size: 1rem;
+    color: var(--text-primary);
+    text-align: center;
+    max-width: 80%;
+    line-height: 1.4;
+}
+
+.subtitle-display .current-text.empty {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* ==========================================================================
+   FINDINGS SECTION (Below video on main column)
+   ========================================================================== */
+
+.findings-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.findings-section h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--border-default);
+}
+
+/* ==========================================================================
+   SIDEBAR - STICKY FINDINGS PANEL WITH TABS
+   ========================================================================== */
+
+.sidebar {
+    position: sticky;
+    top: var(--space-lg);
+    max-height: calc(100vh - 2 * var(--space-lg));
+    display: flex;
+    flex-direction: column;
+    grid-row: 2 / 4;
+}
+
+.sidebar-panel {
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    max-height: 100%;
+}
+
+.sidebar-header {
+    padding: var(--space-md);
+    border-bottom: 1px solid var(--border-default);
+    flex-shrink: 0;
+}
+
+.sidebar-header h3 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-sm);
+}
+
+.sidebar-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-md);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-default) transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+    background: var(--border-default);
+    border-radius: 3px;
+}
+
+.search-box {
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--surface-card);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    transition: border-color var(--motion-fast) var(--ease-out);
+}
+
+.search-box:focus {
+    outline: none;
+    border-color: var(--vista-mint);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--vista-mint) 25%, transparent);
+}
+
+.search-box::placeholder {
+    color: var(--text-muted);
+}
+
+/* Subtitle list */
+.subtitle-list {
+    max-height: 500px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-default) transparent;
+}
+
+.subtitle-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.subtitle-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.subtitle-list::-webkit-scrollbar-thumb {
+    background: var(--border-default);
+    border-radius: 3px;
+}
+
+.subtitle-item {
+    padding: var(--space-sm) var(--space-md);
+    border-left: 3px solid transparent;
+    cursor: pointer;
+    transition: all var(--motion-fast) var(--ease-out);
+    border-bottom: 1px solid color-mix(in srgb, var(--border-default) 50%, transparent);
+}
+
+.subtitle-item:hover {
+    background: var(--surface-hover);
+    border-left-color: var(--vista-mint);
+}
+
+.subtitle-item.active {
+    background: color-mix(in srgb, var(--quantum-green) 10%, var(--surface-card));
+    border-left-color: var(--quantum-green);
+}
+
+.subtitle-item .timestamp {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--quantum-green);
+    margin-bottom: 2px;
+}
+
+.subtitle-item .text {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.3;
+}
+
+.subtitle-item.active .text {
+    color: var(--text-primary);
+}
+
+/* ==========================================================================
+   FINDING CARD
+   ========================================================================== */
+
+.finding {
+    background: var(--surface-card);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    border-left: 4px solid var(--border-default);
+    transition: all var(--motion-fast) var(--ease-out);
+}
+
+.finding:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.finding[data-confirmed="true"] {
+    border-left-color: var(--color-success);
+}
+
+.finding[data-confirmed="false"] {
+    opacity: 0.6;
+    border-left-color: var(--text-muted);
+}
+
+.finding-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: var(--space-md);
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+
+.finding-title {
+    font-weight: 600;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.finding-title .index {
+    font-family: var(--font-mono);
+    color: var(--quantum-green);
+}
+
+.finding-meta {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    cursor: pointer;
+    transition: color var(--motion-fast);
+}
+
+.finding-meta:hover {
+    color: var(--quantum-cyan);
+    text-decoration: underline;
+}
+
+/* Severity Badge */
+.severity-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-full);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.severity-critical {
+    background: color-mix(in srgb, var(--color-critical) 20%, transparent);
+    color: #fca5a5;
+    border: 1px solid color-mix(in srgb, var(--color-critical) 40%, transparent);
+}
+
+.severity-high {
+    background: color-mix(in srgb, var(--color-high) 20%, transparent);
+    color: #fdba74;
+    border: 1px solid color-mix(in srgb, var(--color-high) 40%, transparent);
+}
+
+.severity-medium {
+    background: color-mix(in srgb, var(--color-medium) 20%, transparent);
+    color: #fde047;
+    border: 1px solid color-mix(in srgb, var(--color-medium) 40%, transparent);
+}
+
+.severity-low {
+    background: color-mix(in srgb, var(--color-low) 20%, transparent);
+    color: #86efac;
+    border: 1px solid color-mix(in srgb, var(--color-low) 40%, transparent);
+}
+
+.severity-none {
+    background: var(--surface-hover);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-default);
+}
+
+/* Finding content */
+.finding-transcript {
+    background: var(--surface-primary);
+    border-radius: var(--radius-sm);
+    padding: var(--space-md);
+    margin-bottom: var(--space-md);
+    font-style: italic;
+    color: var(--text-secondary);
+    border-left: 3px solid var(--border-accent);
+    font-size: 0.9375rem;
+}
+
+.finding-summary {
+    margin-bottom: var(--space-md);
+    color: var(--text-primary);
+}
+
+.finding-details {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.finding-details dt {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-top: var(--space-sm);
+}
+
+.finding-details dd {
+    margin: var(--space-xs) 0 0 0;
+}
+
+/* Screenshot thumbnail */
+.finding-screenshot {
+    margin-top: var(--space-md);
+}
+
+.thumbnail {
+    max-width: 280px;
+    border-radius: var(--radius-md);
+    cursor: zoom-in;
+    transition: all var(--motion-fast) var(--ease-out);
+    border: 1px solid var(--border-default);
+}
+
+.thumbnail:hover {
+    transform: scale(1.03);
+    box-shadow: var(--shadow-lg), var(--shadow-glow);
+    border-color: var(--vista-mint);
+}
+
+/* ==========================================================================
+   HUMAN REVIEW SECTION
+   ========================================================================== */
+
+.human-review {
+    border-top: 1px dashed var(--border-default);
+    margin-top: var(--space-lg);
+    padding-top: var(--space-lg);
+}
+
+.human-review h4 {
+    margin: 0 0 var(--space-md) 0;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+}
+
+.review-row {
+    display: flex;
+    gap: var(--space-lg);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-md);
+}
+
+.review-field {
+    flex: 1;
+    min-width: 200px;
+}
+
+.review-field label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-bottom: var(--space-xs);
+    color: var(--text-secondary);
+}
+
+.review-field select,
+.review-field input[type="text"],
+.review-field textarea {
+    width: 100%;
+    padding: var(--space-sm);
+    background: var(--surface-primary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    transition: border-color var(--motion-fast);
+}
+
+.review-field select:focus,
+.review-field input[type="text"]:focus,
+.review-field textarea:focus {
+    outline: none;
+    border-color: var(--vista-mint);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--vista-mint) 20%, transparent);
+}
+
+.review-field textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+
+.radio-group {
+    display: flex;
+    gap: var(--space-md);
+    padding-top: var(--space-xs);
+}
+
+.radio-group label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.radio-group input[type="radio"] {
+    accent-color: var(--vista-mint);
+}
+
+/* ==========================================================================
+   LIGHTBOX
+   ========================================================================== */
+
+.lightbox {
+    display: none;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.95);
+    z-index: 10000;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+}
+
+.lightbox.active {
+    display: flex;
+}
+
+.lightbox img {
+    max-width: 95%;
+    max-height: 95%;
+    object-fit: contain;
+    border-radius: var(--radius-md);
+}
+
+/* ==========================================================================
+   STATS CARDS
+   ========================================================================== */
+
+.stats {
+    display: flex;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-lg);
+}
+
+.stat-card {
+    background: var(--surface-card);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: var(--space-md) var(--space-lg);
+    flex: 1;
+    min-width: 120px;
+}
+
+.stat-card .label {
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-bottom: var(--space-xs);
+}
+
+.stat-card .value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+}
+
+.stat-card.critical .value { color: var(--color-critical); }
+.stat-card.high .value { color: var(--color-high); }
+.stat-card.medium .value { color: var(--color-medium); }
+.stat-card.low .value { color: var(--color-low); }
+
+/* ==========================================================================
+   EXPORT BAR
+   ========================================================================== */
+
+.export-bar {
+    grid-column: 1 / -1;
+    position: sticky;
+    bottom: 0;
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    padding: var(--space-md) var(--space-lg);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-md);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+    z-index: 100;
+}
+
+.export-options {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    flex-wrap: wrap;
+}
+
+.export-bar input[type="text"] {
+    padding: var(--space-sm) var(--space-md);
+    background: var(--surface-card);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    width: 200px;
+}
+
+.export-bar input[type="text"]:focus {
+    outline: none;
+    border-color: var(--vista-mint);
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+    accent-color: var(--vista-mint);
+    width: 16px;
+    height: 16px;
+}
+
+.export-bar button {
+    padding: var(--space-sm) var(--space-lg);
+    background: var(--vista-mint);
+    color: var(--crt-black);
+    border: none;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--motion-fast) var(--ease-out);
+}
+
+.export-bar button:hover {
+    background: var(--vista-mint-light);
+    box-shadow: var(--shadow-glow);
+}
+
+/* ==========================================================================
+   TOAST NOTIFICATIONS
+   ========================================================================== */
+
+.toast {
+    position: fixed;
+    bottom: 6rem;
+    right: var(--space-lg);
+    background: var(--surface-card);
+    color: var(--text-primary);
+    padding: var(--space-sm) var(--space-lg);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--quantum-green);
+    box-shadow: var(--shadow-lg), var(--shadow-glow);
+    animation: toastSlide 3s ease forwards;
+    z-index: 10001;
+    font-size: 0.875rem;
+}
+
+@keyframes toastSlide {
+    0% { opacity: 0; transform: translateX(100%); }
+    10% { opacity: 1; transform: translateX(0); }
+    90% { opacity: 1; transform: translateX(0); }
+    100% { opacity: 0; transform: translateX(100%); }
+}
+
+/* ==========================================================================
+   EXECUTIVE SUMMARY
+   ========================================================================== */
+
+.executive-summary {
+    background: var(--surface-card);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    margin-bottom: var(--space-lg);
+    border-left: 4px solid var(--vista-mint);
+}
+
+.executive-summary h3 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-md);
+}
+
+.executive-summary p {
+    color: var(--text-secondary);
+    line-height: 1.7;
+}
+
+/* ==========================================================================
+   ERRORS SECTION
+   ========================================================================== */
+
+.errors-section {
+    background: color-mix(in srgb, var(--color-critical) 10%, var(--surface-card));
+    border: 1px solid color-mix(in srgb, var(--color-critical) 30%, transparent);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    margin-bottom: var(--space-lg);
+}
+
+.errors-section h3 {
+    color: #fca5a5;
+    margin-bottom: var(--space-md);
+    font-size: 1rem;
+}
+
+.errors-section ul {
+    margin: 0;
+    padding-left: var(--space-lg);
+    color: var(--text-secondary);
+}
+
+/* ==========================================================================
+   FOOTER
+   ========================================================================== */
+
+footer {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: var(--space-lg) 0;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    font-family: var(--font-mono);
+}
+
+footer::before {
+    content: "// ";
+    color: var(--quantum-green);
+}
+"""
+
+# =============================================================================
+# JAVASCRIPT FOR VIDEO PLAYER WITH SUBTITLE SYNC
+# =============================================================================
+
+JS_VIDEO_PLAYER = """
+class ScreenScribePlayer {
+    constructor() {
+        this.video = document.getElementById('videoPlayer');
+        this.subtitleDisplay = document.getElementById('currentSubtitle');
+        this.subtitleList = document.getElementById('subtitleList');
+        this.searchBox = document.getElementById('subtitleSearch');
+
+        this.segments = window.TRANSCRIPT_SEGMENTS || [];
+        this.currentSegmentId = null;
+
+        this.init();
+    }
+
+    init() {
+        if (!this.video) return;
+
+        // Video time update handler
+        this.video.addEventListener('timeupdate', () => this.onTimeUpdate());
+        this.video.addEventListener('loadedmetadata', () => this.onMetadataLoaded());
+
+        // Render subtitle list
+        this.renderSubtitleList(this.segments);
+
+        // Search functionality
+        if (this.searchBox) {
+            this.searchBox.addEventListener('input', (e) => {
+                const query = e.target.value.toLowerCase();
+                const filtered = this.segments.filter(s =>
+                    s.text.toLowerCase().includes(query)
+                );
+                this.renderSubtitleList(filtered);
+            });
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            if (e.code === 'Space') {
+                e.preventDefault();
+                this.video.paused ? this.video.play() : this.video.pause();
+            }
+            if (e.code === 'ArrowLeft') {
+                e.preventDefault();
+                this.video.currentTime -= 5;
+            }
+            if (e.code === 'ArrowRight') {
+                e.preventDefault();
+                this.video.currentTime += 5;
+            }
+        });
+    }
+
+    onMetadataLoaded() {
+        console.log('Video loaded, duration:', this.video.duration);
+    }
+
+    onTimeUpdate() {
+        const currentTime = this.video.currentTime;
+        let activeSegment = null;
+
+        for (const segment of this.segments) {
+            if (currentTime >= segment.start && currentTime < segment.end) {
+                activeSegment = segment;
+                break;
+            }
+        }
+
+        if (activeSegment && activeSegment.id !== this.currentSegmentId) {
+            this.currentSegmentId = activeSegment.id;
+            this.updateActiveHighlight(activeSegment.id);
+            this.updateSubtitleDisplay(activeSegment.text);
+        } else if (!activeSegment && this.currentSegmentId !== null) {
+            this.currentSegmentId = null;
+            this.clearActiveHighlight();
+            this.updateSubtitleDisplay(null);
+        }
+    }
+
+    updateSubtitleDisplay(text) {
+        if (!this.subtitleDisplay) return;
+
+        if (text) {
+            this.subtitleDisplay.textContent = text;
+            this.subtitleDisplay.classList.remove('empty');
+        } else {
+            this.subtitleDisplay.textContent = 'Brak napisu';
+            this.subtitleDisplay.classList.add('empty');
+        }
+    }
+
+    updateActiveHighlight(segmentId) {
+        document.querySelectorAll('.subtitle-item').forEach(item => {
+            item.classList.remove('active');
+        });
+
+        const activeItem = document.querySelector(`[data-segment-id="${segmentId}"]`);
+        if (activeItem) {
+            activeItem.classList.add('active');
+            activeItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+
+    clearActiveHighlight() {
+        document.querySelectorAll('.subtitle-item').forEach(item => {
+            item.classList.remove('active');
+        });
+    }
+
+    renderSubtitleList(segments) {
+        if (!this.subtitleList) return;
+
+        this.subtitleList.innerHTML = segments.map(s => `
+            <div class="subtitle-item" data-segment-id="${s.id}" onclick="player.seekTo(${s.start})">
+                <div class="timestamp">${this.formatTime(s.start)} - ${this.formatTime(s.end)}</div>
+                <div class="text">${this.escapeHtml(s.text)}</div>
+            </div>
+        `).join('');
+    }
+
+    seekTo(time) {
+        if (!this.video) return;
+        this.video.currentTime = time;
+        this.video.play();
+    }
+
+    formatTime(seconds) {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        return h > 0
+            ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+            : `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+}
+
+// Global player instance
+let player;
+document.addEventListener('DOMContentLoaded', () => {
+    player = new ScreenScribePlayer();
+});
+"""
+
+JS_REVIEW_SCRIPT = """
+const reportState = {
+    findings: {},
+    reviewer: '',
+    modified: false,
+    reportId: ''
+};
+
+function initReviewState() {
+    reportState.reportId = document.body.dataset.reportId || '';
+
+    try {
+        const savedDraft = localStorage.getItem('screenscribe_draft_' + reportState.reportId);
+        if (savedDraft) {
+            const parsed = JSON.parse(savedDraft);
+            reportState.findings = parsed.findings || {};
+            reportState.reviewer = parsed.reviewer || '';
+            restoreUIFromState();
+            showNotification('Draft restored');
+        }
+    } catch (e) {
+        console.warn('localStorage not available:', e);
+    }
+
+    document.addEventListener('input', handleInputEvent);
+    document.addEventListener('change', handleChangeEvent);
+
+    document.querySelectorAll('.finding').forEach(article => {
+        const findingId = article.dataset.findingId;
+        if (!reportState.findings[findingId]) {
+            reportState.findings[findingId] = {
+                confirmed: null,
+                severity: null,
+                notes: '',
+                actionItems: ''
+            };
+        }
+    });
+
+    const reviewerInput = document.getElementById('reviewer-name');
+    if (reviewerInput) {
+        reviewerInput.value = reportState.reviewer;
+    }
+
+    setInterval(saveDraft, 30000);
+
+    window.addEventListener('beforeunload', (e) => {
+        if (reportState.modified) {
+            e.preventDefault();
+            e.returnValue = 'Masz niezapisane zmiany.';
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeLightbox();
+    });
+
+    document.querySelectorAll('.thumbnail').forEach(img => {
+        img.addEventListener('click', () => openLightbox(img));
+    });
+
+    const lightbox = document.getElementById('lightbox');
+    if (lightbox) {
+        lightbox.addEventListener('click', closeLightbox);
+    }
+}
+
+function handleInputEvent(e) {
+    const target = e.target;
+    const article = target.closest('.finding');
+
+    if (target.id === 'reviewer-name') {
+        reportState.reviewer = target.value;
+        reportState.modified = true;
+        return;
+    }
+
+    if (!article) return;
+    const findingId = article.dataset.findingId;
+    if (!reportState.findings[findingId]) {
+        reportState.findings[findingId] = { confirmed: null, severity: null, notes: '', actionItems: '' };
+    }
+
+    if (target.matches('.notes textarea')) {
+        reportState.findings[findingId].notes = target.value;
+        reportState.modified = true;
+    }
+
+    if (target.matches('.action-items-input')) {
+        reportState.findings[findingId].actionItems = target.value;
+        reportState.modified = true;
+    }
+}
+
+function handleChangeEvent(e) {
+    const target = e.target;
+    const article = target.closest('.finding');
+
+    if (!article) return;
+    const findingId = article.dataset.findingId;
+    if (!reportState.findings[findingId]) {
+        reportState.findings[findingId] = { confirmed: null, severity: null, notes: '', actionItems: '' };
+    }
+
+    if (target.matches('input[type="radio"]') && target.name.startsWith('confirmed-')) {
+        const value = target.value === 'true';
+        reportState.findings[findingId].confirmed = value;
+        article.dataset.confirmed = value.toString();
+        reportState.modified = true;
+    }
+
+    if (target.matches('.severity-select')) {
+        reportState.findings[findingId].severity = target.value;
+        reportState.modified = true;
+    }
+}
+
+function openLightbox(img) {
+    const lightbox = document.getElementById('lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
+    lightboxImg.src = img.dataset.full || img.src;
+    lightbox.classList.add('active');
+}
+
+function closeLightbox() {
+    document.getElementById('lightbox').classList.remove('active');
+}
+
+function saveDraft() {
+    if (!reportState.modified) return;
+    try {
+        const data = {
+            findings: reportState.findings,
+            reviewer: reportState.reviewer,
+            savedAt: new Date().toISOString()
+        };
+        localStorage.setItem('screenscribe_draft_' + reportState.reportId, JSON.stringify(data));
+        showNotification('Draft saved');
+        reportState.modified = false;
+    } catch (e) {
+        console.warn('Could not save draft:', e);
+    }
+}
+
+function restoreUIFromState() {
+    Object.entries(reportState.findings).forEach(([findingId, state]) => {
+        const article = document.querySelector(`[data-finding-id="${findingId}"]`);
+        if (!article) return;
+
+        if (state.confirmed !== null) {
+            article.dataset.confirmed = state.confirmed.toString();
+            const radio = article.querySelector(`input[value="${state.confirmed}"]`);
+            if (radio) radio.checked = true;
+        }
+
+        if (state.severity) {
+            const select = article.querySelector('.severity-select');
+            if (select) select.value = state.severity;
+        }
+
+        if (state.notes) {
+            const textarea = article.querySelector('.notes textarea');
+            if (textarea) textarea.value = state.notes;
+        }
+
+        if (state.actionItems) {
+            const input = article.querySelector('.action-items-input');
+            if (input) input.value = state.actionItems;
+        }
+    });
+}
+
+function exportReviewedJSON() {
+    if (!reportState.reviewer.trim()) {
+        showNotification('Podaj swoje imie przed eksportem');
+        document.getElementById('reviewer-name').focus();
+        return;
+    }
+
+    const reviewedCount = Object.values(reportState.findings).filter(f => f.confirmed !== null).length;
+    if (reviewedCount === 0) {
+        if (!confirm('Nie przejrzano zadnych znalezisk. Eksportowac mimo to?')) {
+            return;
+        }
+    }
+
+    const embedScreenshots = document.getElementById('embed-screenshots')?.checked || false;
+    const originalFindings = JSON.parse(document.getElementById('original-findings').textContent);
+    const reviewedFindings = originalFindings.map(f => {
+        const review = reportState.findings[f.id] || {};
+        // Remove base64 screenshot from export unless checkbox is checked
+        const { screenshot, ...findingWithoutBase64 } = f;
+        const result = {
+            ...findingWithoutBase64,
+            human_review: {
+                confirmed: review.confirmed,
+                severity_override: review.severity || null,
+                notes: review.notes || '',
+                action_items: review.actionItems ? review.actionItems.split(',').map(s => s.trim()).filter(Boolean) : [],
+                reviewer: reportState.reviewer,
+                reviewed_at: new Date().toISOString()
+            }
+        };
+        // Only include base64 screenshot if embed option is checked
+        if (embedScreenshots && screenshot) {
+            result.screenshot = screenshot;
+        }
+        return result;
+    });
+
+    const output = {
+        video: document.body.dataset.videoName,
+        reviewed_at: new Date().toISOString(),
+        reviewer: reportState.reviewer,
+        findings: reviewedFindings
+    };
+
+    const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'reviewed_' + (document.body.dataset.videoName || 'report') + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    try {
+        localStorage.removeItem('screenscribe_draft_' + reportState.reportId);
+    } catch (e) {}
+    reportState.modified = false;
+    showNotification('Eksport ukonczony');
+}
+
+function seekToTimestamp(seconds) {
+    if (window.player) {
+        window.player.seekTo(seconds);
+    }
+}
+
+function showNotification(msg) {
+    const existing = document.querySelector('.toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+        if (toast.parentNode) toast.remove();
+    }, 3000);
+}
+
+// Tab switching
+function initTabs() {
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tabId = btn.dataset.tab;
+
+            // Update buttons
+            tabBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            // Update content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            const targetContent = document.getElementById('tab-' + tabId);
+            if (targetContent) {
+                targetContent.classList.add('active');
+            }
+        });
+    });
+}
+
+// Transcript drawer toggle
+function toggleDrawer() {
+    const drawer = document.getElementById('transcriptDrawer');
+    if (drawer) {
+        drawer.classList.toggle('open');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    initReviewState();
+    initTabs();
+});
+"""
+
+
+# =============================================================================
+# RENDERING FUNCTIONS
+# =============================================================================
+
+
+def _render_stats(findings: list[dict[str, Any]]) -> str:
+    """Render severity statistics cards."""
+    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+
+    for f in findings:
+        unified = f.get("unified_analysis", {})
+        if unified.get("is_issue", True):
+            severity = unified.get("severity", "medium")
+            if severity in severity_counts:
+                severity_counts[severity] += 1
+
+    total = sum(severity_counts.values())
+
+    return f"""
+    <div class="stats">
+        <div class="stat-card">
+            <div class="label">Razem</div>
+            <div class="value">{total}</div>
+        </div>
+        <div class="stat-card critical">
+            <div class="label">Krytyczne</div>
+            <div class="value">{severity_counts["critical"]}</div>
+        </div>
+        <div class="stat-card high">
+            <div class="label">Wysokie</div>
+            <div class="value">{severity_counts["high"]}</div>
+        </div>
+        <div class="stat-card medium">
+            <div class="label">Srednie</div>
+            <div class="value">{severity_counts["medium"]}</div>
+        </div>
+        <div class="stat-card low">
+            <div class="label">Niskie</div>
+            <div class="value">{severity_counts["low"]}</div>
+        </div>
+    </div>
+    """
+
+
+def _render_errors(errors: list[dict[str, str]]) -> str:
+    """Render pipeline errors section."""
+    if not errors:
+        return ""
+
+    lines = ['<div class="errors-section">', "<h3>Bledy Pipeline</h3>", "<ul>"]
+
+    for error in errors:
+        stage = html.escape(error.get("stage", "unknown"))
+        message = html.escape(error.get("message", ""))
+        lines.append(f"<li><strong>{stage}:</strong> {message}</li>")
+
+    lines.extend(["</ul>", "</div>"])
+    return "\n".join(lines)
+
+
+def _render_finding(f: dict[str, Any], index: int) -> str:
+    """Render a single finding as an article element."""
+    finding_id = f.get("id", index)
+    category = f.get("category", "unknown")
+    timestamp = f.get("timestamp_formatted", "00:00")
+    timestamp_seconds = f.get("timestamp", 0)
+    text = html.escape(f.get("text", ""))
+    screenshot = f.get("screenshot", "")
+
+    unified = f.get("unified_analysis", {})
+    severity = unified.get("severity", "medium")
+    summary = html.escape(unified.get("summary", ""))
+    suggested_fix = html.escape(unified.get("suggested_fix", ""))
+    affected_components = unified.get("affected_components", [])
+    issues_detected = unified.get("issues_detected", [])
+    action_items = unified.get("action_items", [])
+
+    severity_class = f"severity-{severity}" if severity else "severity-none"
+
+    details_html = ""
+    if affected_components:
+        components = ", ".join(html.escape(c) for c in affected_components)
+        details_html += f"<dt>Dotknięte komponenty</dt><dd>{components}</dd>"
+    if suggested_fix:
+        details_html += f"<dt>Sugerowana poprawka</dt><dd>{suggested_fix}</dd>"
+    if issues_detected:
+        issues = "; ".join(html.escape(i) for i in issues_detected)
+        details_html += f"<dt>Wizualne problemy</dt><dd>{issues}</dd>"
+
+    screenshot_html = ""
+    if screenshot:
+        escaped_src = html.escape(screenshot)
+        screenshot_html = f"""
+        <div class="finding-screenshot">
+            <img class="thumbnail" src="{escaped_src}" data-full="{escaped_src}"
+                 alt="Screenshot @ {timestamp}">
+        </div>
+        """
+
+    action_items_display = ", ".join(action_items) if action_items else ""
+
+    return f"""
+    <article class="finding" data-finding-id="{finding_id}" data-confirmed="">
+        <div class="finding-header">
+            <div>
+                <span class="finding-title">
+                    <span class="index">#{index}</span>
+                    {html.escape(category.upper())}
+                </span>
+                <span class="finding-meta" onclick="seekToTimestamp({timestamp_seconds})"
+                      title="Kliknij aby przejsc do tego momentu">@ {html.escape(timestamp)}</span>
+            </div>
+            <span class="severity-badge {severity_class}">{html.escape(severity)}</span>
+        </div>
+
+        <div class="finding-content">
+            <div class="finding-transcript">{text}</div>
+            {f'<div class="finding-summary"><strong>Podsumowanie:</strong> {summary}</div>' if summary else ""}
+            <dl class="finding-details">
+                {details_html}
+            </dl>
+            {screenshot_html}
+        </div>
+
+        <div class="human-review">
+            <h4>Recenzja</h4>
+            <div class="review-row">
+                <div class="review-field">
+                    <label>Potwierdzone?</label>
+                    <div class="radio-group">
+                        <label>
+                            <input type="radio" name="confirmed-{finding_id}" value="true">
+                            Tak
+                        </label>
+                        <label>
+                            <input type="radio" name="confirmed-{finding_id}" value="false">
+                            Nie / Falszy alarm
+                        </label>
+                    </div>
+                </div>
+                <div class="review-field">
+                    <label>Zmien priorytet</label>
+                    <select class="severity-select">
+                        <option value="">-- Bez zmian --</option>
+                        <option value="critical">Krytyczny</option>
+                        <option value="high">Wysoki</option>
+                        <option value="medium">Sredni</option>
+                        <option value="low">Niski</option>
+                    </select>
+                </div>
+            </div>
+            <div class="review-row">
+                <div class="review-field">
+                    <label>Dodatkowe akcje (po przecinku)</label>
+                    <input type="text" class="action-items-input"
+                           placeholder="np. sprawdzic fix, dodac test"
+                           value="{html.escape(action_items_display)}">
+                </div>
+            </div>
+            <div class="review-field notes">
+                <label>Notatki</label>
+                <textarea placeholder="Twoje uwagi..."></textarea>
+            </div>
+        </div>
+    </article>
+    """
+
+
+def render_html_report_pro(
+    video_name: str,
+    video_path: str | None,
+    generated_at: str,
+    executive_summary: str,
+    findings: list[dict[str, Any]],
+    segments: list[Segment] | None = None,
+    errors: list[dict[str, str]] | None = None,
+    embed_video: bool = False,
+) -> str:
+    """Render complete HTML Pro report with video player and synchronized subtitles.
+
+    Args:
+        video_name: Name of the source video file
+        video_path: Path to the video file (for embedding or reference)
+        generated_at: ISO timestamp of report generation
+        executive_summary: Executive summary text
+        findings: List of finding dictionaries
+        segments: Optional list of transcript segments for subtitle sync
+        errors: Optional list of pipeline error dictionaries
+        embed_video: Whether to embed video as base64 (for smaller files)
+
+    Returns:
+        Complete HTML document as string
+    """
+    errors = errors or []
+    segments = segments or []
+
+    # Generate unique report ID
+    report_id = hashlib.sha256(f"{video_name}:{generated_at}".encode()).hexdigest()[:12]
+
+    # Format timestamp
+    try:
+        dt = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        display_time = dt.strftime("%Y-%m-%d %H:%M")
+    except (ValueError, AttributeError):
+        display_time = generated_at
+
+    # Video source handling
+    video_src = ""
+    if video_path:
+        video_path_obj = Path(video_path)
+        if embed_video and video_path_obj.exists():
+            size_mb = video_path_obj.stat().st_size / (1024 * 1024)
+            if size_mb < 50:  # Only embed if < 50MB
+                with open(video_path_obj, "rb") as vf:
+                    video_b64 = base64.b64encode(vf.read()).decode("ascii")
+                video_src = f"data:video/mp4;base64,{video_b64}"
+            else:
+                video_src = video_path_obj.name
+        else:
+            video_src = video_path_obj.name if video_path_obj.exists() else video_path
+
+    # Generate VTT data URL for subtitles
+    vtt_data_url = ""
+    if segments:
+        from .vtt_generator import generate_vtt_data_url
+        vtt_data_url = generate_vtt_data_url(segments)
+
+    # Segments as JSON for JavaScript
+    segments_json = json.dumps([
+        {"id": s.id, "start": s.start, "end": s.end, "text": s.text}
+        for s in segments
+    ], ensure_ascii=False)
+
+    # Build findings HTML
+    findings_html = "\n".join(_render_finding(f, i + 1) for i, f in enumerate(findings))
+
+    # Embed findings as JSON for export
+    findings_json = json.dumps(findings, ensure_ascii=False)
+
+    return f"""<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScreenScribe Pro - {html.escape(video_name)}</title>
+    <style>
+{CSS_QUANTUM_VISTA}
+    </style>
+</head>
+<body data-report-id="{report_id}" data-video-name="{html.escape(video_name)}">
+
+    <div class="app-container">
+
+        <header class="app-header">
+            <h1>ScreenScribe Pro</h1>
+            <div class="meta">
+                {html.escape(video_name)} | {html.escape(display_time)}
+            </div>
+        </header>
+
+        <main class="video-section">
+            <div class="video-container">
+                <video id="videoPlayer" controls preload="metadata"
+                       {f'src="{html.escape(video_src)}"' if video_src else ''}>
+                    {f'<track kind="subtitles" src="{vtt_data_url}" srclang="pl" label="Polski" default>' if vtt_data_url else ''}
+                    Twoja przegladarka nie obsluguje wideo HTML5.
+                </video>
+            </div>
+            <div class="subtitle-display">
+                <div id="currentSubtitle" class="current-text empty">Brak napisu</div>
+            </div>
+
+            <div class="transcript-drawer" id="transcriptDrawer">
+                <div class="drawer-header" onclick="toggleDrawer()">
+                    <h3>Transkrypcja</h3>
+                    <span class="drawer-toggle">▼</span>
+                </div>
+                <div class="drawer-content">
+                    <div class="drawer-search">
+                        <input type="text" id="subtitleSearch" class="search-box" placeholder="Szukaj w transkrypcji...">
+                    </div>
+                    <div id="subtitleList" class="drawer-list"></div>
+                </div>
+            </div>
+        </main>
+
+        <aside class="sidebar">
+            <div class="sidebar-panel">
+                <div class="sidebar-header">
+                    <div class="tabs">
+                        <button class="tab-btn active" data-tab="summary">Podsumowanie</button>
+                        <button class="tab-btn" data-tab="findings">Znaleziska ({len(findings)})</button>
+                        <button class="tab-btn" data-tab="stats">Statystyki</button>
+                    </div>
+                </div>
+                <div class="sidebar-scroll">
+                    <div id="tab-summary" class="tab-content active">
+                        {_render_errors(errors)}
+                        {f'<div class="executive-summary"><h3>Streszczenie</h3><p>{html.escape(executive_summary)}</p></div>' if executive_summary else '<p class="text-muted">Brak podsumowania AI</p>'}
+                    </div>
+                    <div id="tab-findings" class="tab-content">
+                        <section class="findings-section">
+                            {findings_html}
+                        </section>
+                    </div>
+                    <div id="tab-stats" class="tab-content">
+                        {_render_stats(findings)}
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <div class="export-bar">
+            <div class="export-options">
+                <label>Recenzent:
+                    <input type="text" id="reviewer-name" placeholder="Twoje imie">
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="embed-screenshots">
+                    Embeduj screenshoty (audyt zewn.)
+                </label>
+            </div>
+            <button onclick="exportReviewedJSON()">Eksportuj JSON</button>
+        </div>
+
+    </div>
+
+    <div id="lightbox" class="lightbox">
+        <img id="lightbox-img" src="" alt="Pelny rozmiar">
+    </div>
+
+    <script id="original-findings" type="application/json">
+{findings_json}
+    </script>
+
+    <script>
+        window.TRANSCRIPT_SEGMENTS = {segments_json};
+    </script>
+
+    <script>
+{JS_VIDEO_PLAYER}
+    </script>
+
+    <script>
+{JS_REVIEW_SCRIPT}
+    </script>
+
+    <footer>
+        Generated by ScreenScribe Pro | VetCoders 2025
+    </footer>
+
+</body>
+</html>
+"""

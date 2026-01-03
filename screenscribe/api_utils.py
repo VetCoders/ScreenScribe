@@ -139,7 +139,7 @@ def make_api_request(
     """
 
     def do_request() -> httpx.Response:
-        response = client.request(method, url, **kwargs)  # type: ignore[arg-type]
+        response = client.request(method, url, **kwargs)
         response.raise_for_status()
         return response
 

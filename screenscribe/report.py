@@ -11,7 +11,9 @@ from rich.table import Table
 
 from .detect import Detection, format_timestamp
 from .html_template import render_html_report
+from .html_template_pro import render_html_report_pro
 from .image_utils import encode_image_base64
+from .transcribe import Segment
 
 console = Console()
 
@@ -577,4 +579,114 @@ def save_html_report(
         f.write(html_content)
 
     console.print(f"[green]HTML report saved:[/] {output_path}")
+    return output_path
+
+
+def save_html_report_pro(
+    detections: list[Detection],
+    screenshots: list[tuple[Detection, Path]],
+    video_path: Path,
+    output_path: Path,
+    segments: list[Segment] | None = None,
+    unified_findings: list[Any] | None = None,
+    executive_summary: str = "",
+    errors: list[dict[str, str]] | None = None,
+    embed_video: bool = False,
+) -> Path:
+    """Save report as Pro HTML with video player and synchronized subtitles.
+
+    Args:
+        detections: List of detections
+        screenshots: List of (detection, screenshot_path) tuples
+        video_path: Path to source video
+        output_path: Path to save HTML report
+        segments: List of transcript segments for subtitle sync
+        unified_findings: List of UnifiedFinding from unified VLM analysis
+        executive_summary: Executive summary text
+        errors: List of pipeline errors
+        embed_video: Whether to embed video as base64 (for smaller files)
+
+    Returns:
+        Path to saved report
+    """
+    # Build findings lookup from unified analysis
+    findings_by_id = {f.detection_id: f for f in (unified_findings or [])}
+
+    # Build findings data for template
+    findings_data: list[dict[str, Any]] = []
+    for detection, screenshot_path in screenshots:
+        uf = findings_by_id.get(detection.segment.id)
+
+        # Encode screenshot as base64 if exists
+        screenshot_b64 = ""
+        if screenshot_path.exists():
+            screenshot_b64 = encode_image_base64(screenshot_path)
+
+        finding: dict[str, Any] = {
+            "id": detection.segment.id,
+            "category": detection.category,
+            "timestamp_formatted": format_timestamp(detection.segment.start),
+            "timestamp": detection.segment.start,
+            "text": detection.segment.text,
+            "context": detection.context,
+            "keywords": detection.keywords_found,
+            # Base64 for HTML display, file path for JSON export
+            "screenshot": f"data:image/png;base64,{screenshot_b64}" if screenshot_b64 else "",
+            "screenshot_path": str(screenshot_path) if screenshot_path.exists() else "",
+        }
+
+        # Add unified analysis fields if available
+        if uf:
+            finding["unified_analysis"] = {
+                "is_issue": uf.is_issue,
+                "severity": uf.severity,
+                "summary": uf.summary,
+                "action_items": uf.action_items,
+                "affected_components": uf.affected_components,
+                "suggested_fix": uf.suggested_fix,
+                "ui_elements": uf.ui_elements,
+                "issues_detected": uf.issues_detected,
+                "accessibility_notes": uf.accessibility_notes,
+                "design_feedback": uf.design_feedback,
+            }
+        else:
+            # Fallback values if no UnifiedFinding
+            finding["unified_analysis"] = {
+                "is_issue": True,
+                "severity": "medium",
+                "summary": detection.segment.text,
+                "action_items": [],
+                "affected_components": [],
+                "suggested_fix": "",
+                "ui_elements": [],
+                "issues_detected": [],
+                "accessibility_notes": [],
+                "design_feedback": "",
+            }
+
+        findings_data.append(finding)
+
+    # Sort findings by severity (critical=0, high=1, medium=2, low=3)
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "none": 4}
+    findings_data.sort(
+        key=lambda f: severity_order.get(f.get("unified_analysis", {}).get("severity", "medium"), 4)
+    )
+
+    # Render HTML using Pro template
+    html_content = render_html_report_pro(
+        video_name=video_path.name,
+        video_path=str(video_path),
+        generated_at=datetime.now().isoformat(),
+        executive_summary=executive_summary,
+        findings=findings_data,
+        segments=segments,
+        errors=errors or [],
+        embed_video=embed_video,
+    )
+
+    # Write HTML file
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    console.print(f"[green]HTML Pro report saved:[/] {output_path}")
     return output_path

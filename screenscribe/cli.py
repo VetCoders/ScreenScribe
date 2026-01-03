@@ -33,6 +33,7 @@ from .report import (
     save_enhanced_json_report,
     save_enhanced_markdown_report,
     save_html_report,
+    save_html_report_pro,
 )
 from .screenshots import extract_screenshots_for_detections
 
@@ -88,6 +89,7 @@ def main(
 ) -> None:
     """ScreenScribe - Video review automation."""
     pass
+
 
 # Time estimates (seconds per unit)
 ESTIMATE_STT_PER_MINUTE = 2.0  # ~2s per minute of video
@@ -274,6 +276,20 @@ def review(
             help="Save interactive HTML report with human review workflow",
         ),
     ] = True,
+    pro_report: Annotated[
+        bool,
+        typer.Option(
+            "--pro/--no-pro",
+            help="Use Pro HTML template with video player and subtitle sync",
+        ),
+    ] = True,
+    embed_video: Annotated[
+        bool,
+        typer.Option(
+            "--embed-video",
+            help="Embed video as base64 in Pro HTML report (only for files <50MB)",
+        ),
+    ] = False,
     keywords_file: Annotated[
         Path | None,
         typer.Option(
@@ -662,15 +678,28 @@ def review(
                 errors=[],
             )
         if html_report:
-            save_html_report(
-                detections,
-                screenshots,
-                video,
-                video_output / "report.html",
-                unified_findings=[],
-                executive_summary="",
-                errors=[],
-            )
+            if pro_report:
+                save_html_report_pro(
+                    detections,
+                    screenshots,
+                    video,
+                    video_output / "report.html",
+                    segments=transcription.segments if transcription else None,
+                    unified_findings=[],
+                    executive_summary="",
+                    errors=[],
+                    embed_video=embed_video,
+                )
+            else:
+                save_html_report(
+                    detections,
+                    screenshots,
+                    video,
+                    video_output / "report.html",
+                    unified_findings=[],
+                    executive_summary="",
+                    errors=[],
+                )
         console.print("[dim]Basic report saved (AI analysis pending)[/]")
 
         # Step 5: Unified VLM Analysis - replaces separate semantic + vision
@@ -756,15 +785,28 @@ def review(
             )
 
         if html_report:
-            save_html_report(
-                detections,
-                screenshots,
-                video,
-                video_output / "report.html",
-                unified_findings=unified_findings,
-                executive_summary=executive_summary,
-                errors=pipeline_errors,
-            )
+            if pro_report:
+                save_html_report_pro(
+                    detections,
+                    screenshots,
+                    video,
+                    video_output / "report.html",
+                    segments=transcription.segments if transcription else None,
+                    unified_findings=unified_findings,
+                    executive_summary=executive_summary,
+                    errors=pipeline_errors,
+                    embed_video=embed_video,
+                )
+            else:
+                save_html_report(
+                    detections,
+                    screenshots,
+                    video,
+                    video_output / "report.html",
+                    unified_findings=unified_findings,
+                    executive_summary=executive_summary,
+                    errors=pipeline_errors,
+                )
 
         # Show errors summary if any
         if pipeline_errors:
@@ -906,6 +948,13 @@ def config(
         return
 
     if init:
+        config_path = Path.home() / ".config" / "screenscribe" / "config.env"
+        if config_path.exists():
+            console.print(f"[yellow]Config already exists:[/] {config_path}")
+            console.print("[dim]Use --show to view current config[/]")
+            if not typer.confirm("Overwrite existing config?", default=False):
+                console.print("[dim]Aborted. Existing config preserved.[/]")
+                return
         path = cfg.save_default_config()
         console.print(f"[green]Config created:[/] {path}")
         console.print("[dim]Edit this file to customize settings[/]")
