@@ -10,6 +10,8 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .detect import Detection, format_timestamp
+from .html_template import render_html_report
+from .image_utils import encode_image_base64
 
 console = Console()
 
@@ -472,4 +474,108 @@ def save_enhanced_markdown_report(
         f.write("\n".join(lines))
 
     console.print(f"[green]Enhanced Markdown report saved:[/] {output_path}")
+    return output_path
+
+
+def save_html_report(
+    detections: list[Detection],
+    screenshots: list[tuple[Detection, Path]],
+    video_path: Path,
+    output_path: Path,
+    unified_findings: list[Any] | None = None,
+    executive_summary: str = "",
+    errors: list[dict[str, str]] | None = None,
+) -> Path:
+    """Save report as interactive HTML with embedded screenshots.
+
+    Args:
+        detections: List of detections
+        screenshots: List of (detection, screenshot_path) tuples
+        video_path: Path to source video
+        output_path: Path to save HTML report
+        unified_findings: List of UnifiedFinding from unified VLM analysis
+        executive_summary: Executive summary text
+        errors: List of pipeline errors
+
+    Returns:
+        Path to saved report
+    """
+    # Build findings lookup from unified analysis
+    findings_by_id = {f.detection_id: f for f in (unified_findings or [])}
+
+    # Build findings data for template
+    findings_data: list[dict[str, Any]] = []
+    for detection, screenshot_path in screenshots:
+        uf = findings_by_id.get(detection.segment.id)
+
+        # Encode screenshot as base64 if exists
+        screenshot_b64 = ""
+        if screenshot_path.exists():
+            screenshot_b64 = encode_image_base64(screenshot_path)
+
+        finding: dict[str, Any] = {
+            "id": detection.segment.id,
+            "category": detection.category,
+            "timestamp": format_timestamp(detection.segment.start),
+            "timestamp_seconds": detection.segment.start,
+            "text": detection.segment.text,
+            "context": detection.context,
+            "keywords": detection.keywords_found,
+            "screenshot_b64": screenshot_b64,
+            "thumbnail_b64": screenshot_b64,  # Use same image for thumbnail
+        }
+
+        # Add unified analysis fields if available
+        if uf:
+            finding.update(
+                {
+                    "is_issue": uf.is_issue,
+                    "severity": uf.severity,
+                    "summary": uf.summary,
+                    "action_items": uf.action_items,
+                    "affected_components": uf.affected_components,
+                    "suggested_fix": uf.suggested_fix,
+                    "ui_elements": uf.ui_elements,
+                    "issues_detected": uf.issues_detected,
+                    "accessibility_notes": uf.accessibility_notes,
+                    "design_feedback": uf.design_feedback,
+                }
+            )
+        else:
+            # Fallback values if no UnifiedFinding
+            finding.update(
+                {
+                    "is_issue": True,
+                    "severity": "medium",
+                    "summary": detection.segment.text,
+                    "action_items": [],
+                    "affected_components": [],
+                    "suggested_fix": "",
+                    "ui_elements": [],
+                    "issues_detected": [],
+                    "accessibility_notes": [],
+                    "design_feedback": "",
+                }
+            )
+
+        findings_data.append(finding)
+
+    # Sort findings by severity (critical=0, high=1, medium=2, low=3)
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "none": 4}
+    findings_data.sort(key=lambda f: severity_order.get(f.get("severity", "medium"), 4))
+
+    # Render HTML using template
+    html_content = render_html_report(
+        video_name=video_path.name,
+        generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+        findings=findings_data,
+        executive_summary=executive_summary,
+        errors=errors or [],
+    )
+
+    # Write HTML file
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    console.print(f"[green]HTML report saved:[/] {output_path}")
     return output_path

@@ -32,6 +32,7 @@ from .report import (
     print_report,
     save_enhanced_json_report,
     save_enhanced_markdown_report,
+    save_html_report,
 )
 from .screenshots import extract_screenshots_for_detections
 
@@ -264,6 +265,13 @@ def review(
             "--markdown/--no-markdown",
             "--md",
             help="Save Markdown report",
+        ),
+    ] = True,
+    html_report: Annotated[
+        bool,
+        typer.Option(
+            "--html/--no-html",
+            help="Save interactive HTML report with human review workflow",
         ),
     ] = True,
     keywords_file: Annotated[
@@ -653,6 +661,16 @@ def review(
                 visual_summary="",
                 errors=[],
             )
+        if html_report:
+            save_html_report(
+                detections,
+                screenshots,
+                video,
+                video_output / "report.html",
+                unified_findings=[],
+                executive_summary="",
+                errors=[],
+            )
         console.print("[dim]Basic report saved (AI analysis pending)[/]")
 
         # Step 5: Unified VLM Analysis - replaces separate semantic + vision
@@ -734,6 +752,17 @@ def review(
                 unified_findings=unified_findings,
                 executive_summary=executive_summary,
                 visual_summary=visual_summary,
+                errors=pipeline_errors,
+            )
+
+        if html_report:
+            save_html_report(
+                detections,
+                screenshots,
+                video,
+                video_output / "report.html",
+                unified_findings=unified_findings,
+                executive_summary=executive_summary,
                 errors=pipeline_errors,
             )
 
