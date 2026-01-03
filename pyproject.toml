@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 authors = [
     { name = "Maciej Gad", email = "void@div0.space" },
-    { name = "Monika szymanska", email = "hello@vetcoders.io" },
+    { name = "Monika Szymańska", email = "hello@vetcoders.io" },
 ]
 dependencies = [
     "black==25.12.0",

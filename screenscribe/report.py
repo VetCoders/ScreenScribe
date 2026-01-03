@@ -133,10 +133,9 @@ def save_markdown_report(
     ]
 
     for i, (detection, screenshot_path) in enumerate(screenshots, 1):
-        emoji = {"bug": "🐛", "change": "🔄", "ui": "🎨"}.get(detection.category, "📝")
         lines.extend(
             [
-                f"### {emoji} #{i} {detection.category.upper()} @ {format_timestamp(detection.segment.start)}",
+                f"### #{i} [{detection.category.upper()}] @ {format_timestamp(detection.segment.start)}",
                 "",
                 f"> {detection.segment.text}",
                 "",

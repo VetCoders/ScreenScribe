@@ -271,28 +271,41 @@ const reportState = {
 
 function initState() {
     reportState.reportId = document.body.dataset.reportId || '';
-    const savedDraft = localStorage.getItem('screenscribe_draft_' + reportState.reportId);
-    if (savedDraft) {
-        try {
+
+    // Try to restore draft from localStorage (with error handling for private mode)
+    try {
+        const savedDraft = localStorage.getItem('screenscribe_draft_' + reportState.reportId);
+        if (savedDraft) {
             const parsed = JSON.parse(savedDraft);
             reportState.findings = parsed.findings || {};
             reportState.reviewer = parsed.reviewer || '';
             restoreUIFromState();
             showNotification('Draft restored from local storage');
-        } catch (e) {
-            console.error('Failed to restore draft:', e);
         }
+    } catch (e) {
+        console.warn('localStorage not available:', e);
     }
 
-    document.querySelectorAll('.finding').forEach(bindFindingListeners);
+    // Use event delegation for better input handling
+    document.addEventListener('input', handleInputEvent);
+    document.addEventListener('change', handleChangeEvent);
+
+    // Initialize finding states
+    document.querySelectorAll('.finding').forEach(article => {
+        const findingId = article.dataset.findingId;
+        if (!reportState.findings[findingId]) {
+            reportState.findings[findingId] = {
+                confirmed: null,
+                severity: null,
+                notes: '',
+                actionItems: ''
+            };
+        }
+    });
 
     const reviewerInput = document.getElementById('reviewer-name');
     if (reviewerInput) {
         reviewerInput.value = reportState.reviewer;
-        reviewerInput.addEventListener('input', (e) => {
-            reportState.reviewer = e.target.value;
-            reportState.modified = true;
-        });
     }
 
     setInterval(saveDraft, 30000);
@@ -301,6 +314,13 @@ function initState() {
         if (reportState.modified) {
             e.preventDefault();
             e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+        }
+    });
+
+    // ESC key to close lightbox
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeLightbox();
         }
     });
 
@@ -314,51 +334,61 @@ function initState() {
     }
 }
 
-function bindFindingListeners(article) {
+function handleInputEvent(e) {
+    const target = e.target;
+    const article = target.closest('.finding');
+
+    // Reviewer name input
+    if (target.id === 'reviewer-name') {
+        reportState.reviewer = target.value;
+        reportState.modified = true;
+        return;
+    }
+
+    if (!article) return;
     const findingId = article.dataset.findingId;
     if (!reportState.findings[findingId]) {
-        reportState.findings[findingId] = {
-            confirmed: null,
-            severity: null,
-            notes: '',
-            actionItems: ''
-        };
+        reportState.findings[findingId] = { confirmed: null, severity: null, notes: '', actionItems: '' };
     }
 
-    const radios = article.querySelectorAll('input[type="radio"]');
-    radios.forEach(radio => {
-        radio.addEventListener('change', (e) => {
-            const value = e.target.value === 'true';
-            reportState.findings[findingId].confirmed = value;
-            article.dataset.confirmed = value.toString();
-            reportState.modified = true;
-        });
-    });
-
-    const severitySelect = article.querySelector('.severity-select');
-    if (severitySelect) {
-        severitySelect.addEventListener('change', (e) => {
-            reportState.findings[findingId].severity = e.target.value;
-            reportState.modified = true;
-        });
+    // Notes textarea
+    if (target.matches('.notes textarea')) {
+        reportState.findings[findingId].notes = target.value;
+        reportState.modified = true;
     }
 
-    const notesTextarea = article.querySelector('.notes textarea');
-    if (notesTextarea) {
-        notesTextarea.addEventListener('input', (e) => {
-            reportState.findings[findingId].notes = e.target.value;
-            reportState.modified = true;
-        });
-    }
-
-    const actionItemsInput = article.querySelector('.action-items-input');
-    if (actionItemsInput) {
-        actionItemsInput.addEventListener('input', (e) => {
-            reportState.findings[findingId].actionItems = e.target.value;
-            reportState.modified = true;
-        });
+    // Action items input
+    if (target.matches('.action-items-input')) {
+        reportState.findings[findingId].actionItems = target.value;
+        reportState.modified = true;
     }
 }
+
+function handleChangeEvent(e) {
+    const target = e.target;
+    const article = target.closest('.finding');
+
+    if (!article) return;
+    const findingId = article.dataset.findingId;
+    if (!reportState.findings[findingId]) {
+        reportState.findings[findingId] = { confirmed: null, severity: null, notes: '', actionItems: '' };
+    }
+
+    // Radio buttons for confirmed
+    if (target.matches('input[type="radio"]') && target.name.startsWith('confirmed-')) {
+        const value = target.value === 'true';
+        reportState.findings[findingId].confirmed = value;
+        article.dataset.confirmed = value.toString();
+        reportState.modified = true;
+    }
+
+    // Severity select
+    if (target.matches('.severity-select')) {
+        reportState.findings[findingId].severity = target.value;
+        reportState.modified = true;
+    }
+}
+
 
 function openLightbox(img) {
     const lightbox = document.getElementById('lightbox');
@@ -375,14 +405,18 @@ function closeLightbox() {
 
 function saveDraft() {
     if (!reportState.modified) return;
-    const data = {
-        findings: reportState.findings,
-        reviewer: reportState.reviewer,
-        savedAt: new Date().toISOString()
-    };
-    localStorage.setItem('screenscribe_draft_' + reportState.reportId, JSON.stringify(data));
-    showNotification('Draft saved');
-    reportState.modified = false;
+    try {
+        const data = {
+            findings: reportState.findings,
+            reviewer: reportState.reviewer,
+            savedAt: new Date().toISOString()
+        };
+        localStorage.setItem('screenscribe_draft_' + reportState.reportId, JSON.stringify(data));
+        showNotification('Draft saved');
+        reportState.modified = false;
+    } catch (e) {
+        console.warn('Could not save draft to localStorage:', e);
+    }
 }
 
 function restoreUIFromState() {
@@ -414,6 +448,21 @@ function restoreUIFromState() {
 }
 
 function exportReviewedJSON() {
+    // Validate reviewer name
+    if (!reportState.reviewer.trim()) {
+        showNotification('Please enter your name before exporting');
+        document.getElementById('reviewer-name').focus();
+        return;
+    }
+
+    // Check if at least one finding was reviewed
+    const reviewedCount = Object.values(reportState.findings).filter(f => f.confirmed !== null).length;
+    if (reviewedCount === 0) {
+        if (!confirm('No findings have been reviewed yet. Export anyway?')) {
+            return;
+        }
+    }
+
     const originalFindings = JSON.parse(document.getElementById('original-findings').textContent);
     const reviewedFindings = originalFindings.map(f => {
         const review = reportState.findings[f.id] || {};
@@ -447,9 +496,13 @@ function exportReviewedJSON() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    localStorage.removeItem('screenscribe_draft_' + reportState.reportId);
+    try {
+        localStorage.removeItem('screenscribe_draft_' + reportState.reportId);
+    } catch (e) {
+        console.warn('Could not clear draft from localStorage:', e);
+    }
     reportState.modified = false;
-    showNotification('Review exported and draft cleared');
+    showNotification('Review exported successfully');
 }
 
 function showNotification(msg) {

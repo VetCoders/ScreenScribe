@@ -462,7 +462,7 @@ def generate_visual_summary_unified(findings: list[UnifiedFinding]) -> str:
 
     # Format summary
     lines = ["## Podsumowanie analizy wizualnej", ""]
-    lines.append("### Najczestsze problemy:")
+    lines.append("### Najczęstsze problemy:")
     for issue, count in issue_counts.most_common(10):
         lines.append(f"- {issue} ({count}x)")
 
