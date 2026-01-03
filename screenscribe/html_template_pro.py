@@ -157,63 +157,38 @@ body::after {
    ========================================================================== */
 
 .app-container {
-    display: grid;
-    grid-template-columns: minmax(400px, 1fr) 480px;
-    grid-template-rows: auto 1fr auto;
-    gap: var(--space-lg);
-    max-width: 1800px;
-    margin: 0 auto;
-    padding: var(--space-lg);
+    display: block;
+    max-width: calc(100vw - 480px - 3 * var(--space-lg));  /* Leave space for fixed sidebar */
+    margin: 0;
+    margin-left: var(--space-lg);
+    padding-top: 80px;  /* Space for fixed header */
+    padding-bottom: 80px;  /* Space for fixed footer */
     min-height: 100vh;
+    box-sizing: border-box;
 }
 
 @media (max-width: 1200px) {
     .app-container {
-        grid-template-columns: 1fr;
+        max-width: 100%;
+        margin: 0;
+        padding: var(--space-md);
+        padding-top: 80px;
+        padding-bottom: 80px;
     }
     .sidebar {
         position: static !important;
+        width: 100% !important;
         max-height: none !important;
+        right: auto !important;
+        top: auto !important;
+        bottom: auto !important;
+        margin-top: var(--space-lg);
     }
 }
 
 /* ==========================================================================
-   TAB SYSTEM
+   TAB CONTENT (controlled by header tabs)
    ========================================================================== */
-
-.tabs {
-    display: flex;
-    gap: 2px;
-    background: var(--surface-primary);
-    padding: var(--space-xs);
-    border-radius: var(--radius-md);
-    margin-bottom: var(--space-md);
-}
-
-.tab-btn {
-    flex: 1;
-    padding: var(--space-sm) var(--space-md);
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    color: var(--text-muted);
-    font-family: var(--font-sans);
-    font-size: 0.8125rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all var(--motion-fast) var(--ease-out);
-}
-
-.tab-btn:hover {
-    color: var(--text-secondary);
-    background: var(--surface-hover);
-}
-
-.tab-btn.active {
-    background: var(--surface-card);
-    color: var(--quantum-green);
-    box-shadow: var(--shadow-sm);
-}
 
 .tab-content {
     display: none;
@@ -291,27 +266,41 @@ body::after {
 }
 
 /* ==========================================================================
-   HEADER
+   HEADER WITH INTEGRATED TABS
    ========================================================================== */
 
 .app-header {
-    grid-column: 1 / -1;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--space-md) var(--space-lg);
+    padding: var(--space-sm) var(--space-lg);
     background: var(--surface-elevated);
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-lg);
+    border-bottom: 1px solid var(--border-default);
     box-shadow: var(--shadow-md);
+    gap: var(--space-lg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    flex-shrink: 0;
 }
 
 .app-header h1 {
-    font-size: 1.25rem;
+    font-size: 1.125rem;
     font-weight: 600;
     display: flex;
     align-items: center;
     gap: var(--space-sm);
+    white-space: nowrap;
 }
 
 .app-header h1::before {
@@ -326,10 +315,93 @@ body::after {
     51%, 100% { opacity: 0; }
 }
 
+.header-tabs {
+    display: flex;
+    gap: 2px;
+    background: var(--surface-primary);
+    padding: 3px;
+    border-radius: var(--radius-sm);
+    flex: 1;
+    max-width: 400px;
+    justify-content: center;
+}
+
+.header-tabs .tab-btn {
+    flex: 1;
+    padding: var(--space-xs) var(--space-md);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--motion-fast) var(--ease-out);
+    white-space: nowrap;
+}
+
+.header-tabs .tab-btn:hover {
+    color: var(--text-secondary);
+    background: var(--surface-hover);
+}
+
+.header-tabs .tab-btn.active {
+    background: var(--surface-card);
+    color: var(--quantum-green);
+    box-shadow: var(--shadow-sm);
+}
+
 .app-header .meta {
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     color: var(--text-secondary);
     font-family: var(--font-mono);
+    flex-shrink: 0;
+    text-align: right;
+}
+
+@media (max-width: 900px) {
+    .app-header {
+        flex-wrap: wrap;
+    }
+    .header-tabs {
+        order: 3;
+        max-width: none;
+        width: 100%;
+    }
+}
+
+/* Language toggle */
+.lang-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--surface-card);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+    margin-left: var(--space-md);
+}
+
+.lang-toggle button {
+    padding: 4px 8px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all var(--motion-fast);
+}
+
+.lang-toggle button:hover {
+    color: var(--text-secondary);
+}
+
+.lang-toggle button.active {
+    background: var(--quantum-green);
+    color: var(--crt-black);
 }
 
 /* ==========================================================================
@@ -337,11 +409,15 @@ body::after {
    ========================================================================== */
 
 .video-section {
+    position: sticky;
+    top: calc(var(--space-lg) + 60px); /* Below sticky header */
+    align-self: start;
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
     contain: layout;
     overflow: hidden;
+    max-height: calc(100vh - 180px); /* Leave room for header + export bar */
 }
 
 .video-container {
@@ -411,12 +487,14 @@ body::after {
    ========================================================================== */
 
 .sidebar {
-    position: sticky;
-    top: var(--space-lg);
-    max-height: calc(100vh - 2 * var(--space-lg));
+    position: fixed;
+    top: 80px;  /* Below fixed header */
+    right: var(--space-lg);
+    bottom: 80px;  /* Above fixed footer */
+    width: 480px;
     display: flex;
     flex-direction: column;
-    grid-row: 2 / 4;
+    overflow: hidden;
 }
 
 .sidebar-panel {
@@ -428,19 +506,6 @@ body::after {
     flex-direction: column;
     flex: 1;
     max-height: 100%;
-}
-
-.sidebar-header {
-    padding: var(--space-md);
-    border-bottom: 1px solid var(--border-default);
-    flex-shrink: 0;
-}
-
-.sidebar-header h3 {
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: var(--space-sm);
 }
 
 .sidebar-scroll {
@@ -768,6 +833,16 @@ body::after {
     resize: vertical;
 }
 
+.ai-suggestions {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    background: var(--glass-subtle);
+    padding: var(--space-sm);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--space-sm);
+    border-left: 3px solid var(--vista-mint);
+}
+
 .radio-group {
     display: flex;
     gap: var(--space-md);
@@ -858,12 +933,12 @@ body::after {
    ========================================================================== */
 
 .export-bar {
-    grid-column: 1 / -1;
-    position: sticky;
+    position: fixed;
     bottom: 0;
+    left: 0;
+    right: 0;
     background: var(--surface-elevated);
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-lg);
+    border-top: 1px solid var(--border-default);
     padding: var(--space-md) var(--space-lg);
     display: flex;
     justify-content: space-between;
@@ -871,6 +946,8 @@ body::after {
     gap: var(--space-md);
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
     z-index: 100;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
 }
 
 .export-options {
@@ -910,6 +987,11 @@ body::after {
     height: 16px;
 }
 
+.export-buttons {
+    display: flex;
+    gap: var(--space-sm);
+}
+
 .export-bar button {
     padding: var(--space-sm) var(--space-lg);
     background: var(--vista-mint);
@@ -924,6 +1006,17 @@ body::after {
 .export-bar button:hover {
     background: var(--vista-mint-light);
     box-shadow: var(--shadow-glow);
+}
+
+.export-bar button.btn-secondary {
+    background: var(--surface-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+}
+
+.export-bar button.btn-secondary:hover {
+    background: var(--surface-hover);
+    border-color: var(--vista-mint);
 }
 
 /* ==========================================================================
@@ -1111,7 +1204,7 @@ class ScreenScribePlayer {
             this.subtitleDisplay.textContent = text;
             this.subtitleDisplay.classList.remove('empty');
         } else {
-            this.subtitleDisplay.textContent = 'Brak napisu';
+            this.subtitleDisplay.textContent = i18n[currentLang].noSubtitle;
             this.subtitleDisplay.classList.add('empty');
         }
     }
@@ -1192,7 +1285,7 @@ function initReviewState() {
             reportState.findings = parsed.findings || {};
             reportState.reviewer = parsed.reviewer || '';
             restoreUIFromState();
-            showNotification('Draft restored');
+            showNotification(i18n[currentLang].draftRestored);
         }
     } catch (e) {
         console.warn('localStorage not available:', e);
@@ -1306,7 +1399,7 @@ function saveDraft() {
             savedAt: new Date().toISOString()
         };
         localStorage.setItem('screenscribe_draft_' + reportState.reportId, JSON.stringify(data));
-        showNotification('Draft saved');
+        showNotification(i18n[currentLang].draftSaved);
         reportState.modified = false;
     } catch (e) {
         console.warn('Could not save draft:', e);
@@ -1342,14 +1435,14 @@ function restoreUIFromState() {
 
 function exportReviewedJSON() {
     if (!reportState.reviewer.trim()) {
-        showNotification('Podaj swoje imie przed eksportem');
+        showNotification(i18n[currentLang].enterName);
         document.getElementById('reviewer-name').focus();
         return;
     }
 
     const reviewedCount = Object.values(reportState.findings).filter(f => f.confirmed !== null).length;
     if (reviewedCount === 0) {
-        if (!confirm('Nie przejrzano zadnych znalezisk. Eksportowac mimo to?')) {
+        if (!confirm(i18n[currentLang].noReviewed)) {
             return;
         }
     }
@@ -1398,9 +1491,9 @@ function exportReviewedJSON() {
     // Copy assumed download path to clipboard
     const downloadPath = '~/Downloads/' + filename;
     navigator.clipboard.writeText(downloadPath).then(() => {
-        showNotification('Eksport ukonczony. Sciezka skopiowana: ' + downloadPath);
+        showNotification(i18n[currentLang].exportDone + ' ' + downloadPath);
     }).catch(() => {
-        showNotification('Eksport ukonczony: ' + filename);
+        showNotification(i18n[currentLang].exportDoneSimple + ' ' + filename);
     });
 
     try {
@@ -1413,6 +1506,82 @@ function seekToTimestamp(seconds) {
     if (window.player) {
         window.player.seekTo(seconds);
     }
+}
+
+function exportTodoList() {
+    const originalFindings = JSON.parse(document.getElementById('original-findings').textContent);
+    const videoName = document.body.dataset.videoName || 'report';
+    const reviewer = reportState.reviewer || 'Anonymous';
+
+    // Build markdown TODO list
+    let md = `# TODO: ${videoName}\\n`;
+    md += `> Recenzent: ${reviewer} | Data: ${new Date().toISOString().split('T')[0]}\\n\\n`;
+
+    // Group by severity
+    const bySeverity = { critical: [], high: [], medium: [], low: [] };
+
+    originalFindings.forEach((f, idx) => {
+        const review = reportState.findings[f.id] || {};
+        const unified = f.unified_analysis || {};
+        const severity = review.severity_override || unified.severity || 'medium';
+        const confirmed = review.confirmed;
+
+        // Skip if explicitly marked as false alarm
+        if (confirmed === false) return;
+
+        const checkbox = confirmed === true ? '[x]' : '[ ]';
+        const summary = unified.summary || f.text || 'No description';
+        const notes = review.notes || '';
+        const actionItems = unified.action_items || [];
+
+        let item = `- ${checkbox} **#${idx + 1}** [${severity.toUpperCase()}] ${summary}`;
+        if (notes) item += `\\n  - 📝 ${notes}`;
+        if (actionItems.length > 0) {
+            item += `\\n  - Actions: ${actionItems.slice(0, 3).join(', ')}`;
+        }
+
+        if (bySeverity[severity]) {
+            bySeverity[severity].push(item);
+        } else {
+            bySeverity.medium.push(item);
+        }
+    });
+
+    // Output by severity
+    if (bySeverity.critical.length > 0) {
+        md += `## 🔴 Critical\\n${bySeverity.critical.join('\\n')}\\n\\n`;
+    }
+    if (bySeverity.high.length > 0) {
+        md += `## 🟠 High\\n${bySeverity.high.join('\\n')}\\n\\n`;
+    }
+    if (bySeverity.medium.length > 0) {
+        md += `## 🟡 Medium\\n${bySeverity.medium.join('\\n')}\\n\\n`;
+    }
+    if (bySeverity.low.length > 0) {
+        md += `## 🟢 Low\\n${bySeverity.low.join('\\n')}\\n\\n`;
+    }
+
+    md += `---\\n_Generated by ScreenScribe Pro_\\n`;
+
+    // Download
+    const filename = 'TODO_' + videoName.replace(/\\.[^.]+$/, '') + '.md';
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    // Copy path to clipboard
+    const downloadPath = '~/Downloads/' + filename;
+    navigator.clipboard.writeText(downloadPath).then(() => {
+        showNotification(i18n[currentLang].exportDone + ' ' + downloadPath);
+    }).catch(() => {
+        showNotification(i18n[currentLang].exportDoneSimple + ' ' + filename);
+    });
 }
 
 function showNotification(msg) {
@@ -1464,9 +1633,147 @@ function toggleDrawer() {
     }
 }
 
+// i18n translations
+const i18n = {
+    pl: {
+        summary: 'Podsumowanie',
+        findings: 'Znaleziska',
+        stats: 'Statystyki',
+        transcript: 'Transkrypcja',
+        searchTranscript: 'Szukaj w transkrypcji...',
+        noSubtitle: 'Brak napisu',
+        total: 'Razem',
+        critical: 'Krytyczne',
+        high: 'Wysokie',
+        medium: 'Srednie',
+        low: 'Niskie',
+        executiveSummary: 'Streszczenie',
+        noSummary: 'Brak podsumowania AI',
+        pipelineErrors: 'Bledy Pipeline',
+        review: 'Recenzja',
+        confirmed: 'Potwierdzone?',
+        yes: 'Tak',
+        noFalseAlarm: 'Nie / Falszy alarm',
+        changePriority: 'Zmien priorytet',
+        noChange: '-- Bez zmian --',
+        notes: 'Notatki / Akcje',
+        notesPlaceholder: 'Twoje uwagi, akcje do podjęcia...',
+        reviewer: 'Recenzent:',
+        reviewerPlaceholder: 'Twoje imie',
+        embedScreenshots: 'Embeduj screenshoty (audyt zewn.)',
+        exportJson: 'Eksportuj JSON',
+        exportTodo: 'Eksportuj TODO',
+        exportDone: 'Eksport ukonczony. Sciezka skopiowana:',
+        exportDoneSimple: 'Eksport ukonczony:',
+        enterName: 'Podaj swoje imie przed eksportem',
+        noReviewed: 'Nie przejrzano zadnych znalezisk. Eksportowac mimo to?',
+        draftRestored: 'Przywrocono wersje robocza',
+        draftSaved: 'Zapisano wersje robocza',
+        affectedComponents: 'Dotknięte komponenty',
+        suggestedFix: 'Sugerowana poprawka',
+        visualIssues: 'Wizualne problemy',
+        clickToSeek: 'Kliknij aby przejsc do tego momentu',
+        aiSuggestions: 'Sugestie AI:'
+    },
+    en: {
+        summary: 'Summary',
+        findings: 'Findings',
+        stats: 'Statistics',
+        transcript: 'Transcript',
+        searchTranscript: 'Search transcript...',
+        noSubtitle: 'No subtitle',
+        total: 'Total',
+        critical: 'Critical',
+        high: 'High',
+        medium: 'Medium',
+        low: 'Low',
+        executiveSummary: 'Executive Summary',
+        noSummary: 'No AI summary available',
+        pipelineErrors: 'Pipeline Errors',
+        review: 'Review',
+        confirmed: 'Confirmed?',
+        yes: 'Yes',
+        noFalseAlarm: 'No / False alarm',
+        changePriority: 'Change priority',
+        noChange: '-- No change --',
+        notes: 'Notes / Actions',
+        notesPlaceholder: 'Your notes, actions to take...',
+        reviewer: 'Reviewer:',
+        reviewerPlaceholder: 'Your name',
+        embedScreenshots: 'Embed screenshots (external audit)',
+        exportJson: 'Export JSON',
+        exportTodo: 'Export TODO',
+        exportDone: 'Export complete. Path copied:',
+        exportDoneSimple: 'Export complete:',
+        enterName: 'Enter your name before export',
+        noReviewed: 'No findings reviewed. Export anyway?',
+        draftRestored: 'Draft restored',
+        draftSaved: 'Draft saved',
+        affectedComponents: 'Affected components',
+        suggestedFix: 'Suggested fix',
+        visualIssues: 'Visual issues',
+        clickToSeek: 'Click to jump to this moment',
+        aiSuggestions: 'AI Suggestions:'
+    }
+};
+
+let currentLang = 'pl';
+
+function setLanguage(lang) {
+    if (!i18n[lang]) return;
+    currentLang = lang;
+
+    // Update toggle buttons
+    document.querySelectorAll('.lang-toggle button').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.lang === lang);
+    });
+
+    // Update all i18n elements
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.dataset.i18n;
+        if (i18n[lang][key]) {
+            if (el.tagName === 'INPUT' && el.placeholder) {
+                el.placeholder = i18n[lang][key];
+            } else {
+                el.textContent = i18n[lang][key];
+            }
+        }
+    });
+
+    // Update tab buttons with count preservation
+    document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
+        const tab = btn.dataset.tab;
+        if (tab === 'summary') btn.textContent = i18n[lang].summary;
+        if (tab === 'stats') btn.textContent = i18n[lang].stats;
+        if (tab === 'findings') {
+            const count = btn.textContent.match(/\\((\\d+)\\)/);
+            btn.textContent = i18n[lang].findings + (count ? ` (${count[1]})` : '');
+        }
+    });
+
+    // Save preference
+    try { localStorage.setItem('screenscribe_lang', lang); } catch(e) {}
+}
+
+function initLanguage() {
+    // Check saved preference
+    try {
+        const saved = localStorage.getItem('screenscribe_lang');
+        if (saved && i18n[saved]) {
+            setLanguage(saved);
+        }
+    } catch(e) {}
+
+    // Setup toggle buttons
+    document.querySelectorAll('.lang-toggle button').forEach(btn => {
+        btn.addEventListener('click', () => setLanguage(btn.dataset.lang));
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     initReviewState();
     initTabs();
+    initLanguage();
 });
 """
 
@@ -1492,23 +1799,23 @@ def _render_stats(findings: list[dict[str, Any]]) -> str:
     return f"""
     <div class="stats">
         <div class="stat-card">
-            <div class="label">Razem</div>
+            <div class="label" data-i18n="total">Razem</div>
             <div class="value">{total}</div>
         </div>
         <div class="stat-card critical">
-            <div class="label">Krytyczne</div>
+            <div class="label" data-i18n="critical">Krytyczne</div>
             <div class="value">{severity_counts["critical"]}</div>
         </div>
         <div class="stat-card high">
-            <div class="label">Wysokie</div>
+            <div class="label" data-i18n="high">Wysokie</div>
             <div class="value">{severity_counts["high"]}</div>
         </div>
         <div class="stat-card medium">
-            <div class="label">Srednie</div>
+            <div class="label" data-i18n="medium">Srednie</div>
             <div class="value">{severity_counts["medium"]}</div>
         </div>
         <div class="stat-card low">
-            <div class="label">Niskie</div>
+            <div class="label" data-i18n="low">Niskie</div>
             <div class="value">{severity_counts["low"]}</div>
         </div>
     </div>
@@ -1520,7 +1827,11 @@ def _render_errors(errors: list[dict[str, str]]) -> str:
     if not errors:
         return ""
 
-    lines = ['<div class="errors-section">', "<h3>Bledy Pipeline</h3>", "<ul>"]
+    lines = [
+        '<div class="errors-section">',
+        '<h3 data-i18n="pipelineErrors">Bledy Pipeline</h3>',
+        "<ul>",
+    ]
 
     for error in errors:
         stage = html.escape(error.get("stage", "unknown"))
@@ -1596,35 +1907,36 @@ def _render_finding(f: dict[str, Any], index: int) -> str:
         </div>
 
         <div class="human-review">
-            <h4>Recenzja</h4>
+            <h4 data-i18n="review">Recenzja</h4>
             <div class="review-row">
                 <div class="review-field">
-                    <label>Potwierdzone?</label>
+                    <label data-i18n="confirmed">Potwierdzone?</label>
                     <div class="radio-group">
                         <label>
                             <input type="radio" name="confirmed-{finding_id}" value="true">
-                            Tak
+                            <span data-i18n="yes">Tak</span>
                         </label>
                         <label>
                             <input type="radio" name="confirmed-{finding_id}" value="false">
-                            Nie / Falszy alarm
+                            <span data-i18n="noFalseAlarm">Nie / Falszy alarm</span>
                         </label>
                     </div>
                 </div>
                 <div class="review-field">
-                    <label>Zmien priorytet</label>
+                    <label data-i18n="changePriority">Zmien priorytet</label>
                     <select class="severity-select">
-                        <option value="">-- Bez zmian --</option>
-                        <option value="critical">Krytyczny</option>
-                        <option value="high">Wysoki</option>
-                        <option value="medium">Sredni</option>
-                        <option value="low">Niski</option>
+                        <option value="" data-i18n="noChange">-- Bez zmian --</option>
+                        <option value="critical" data-i18n="critical">Krytyczny</option>
+                        <option value="high" data-i18n="high">Wysoki</option>
+                        <option value="medium" data-i18n="medium">Sredni</option>
+                        <option value="low" data-i18n="low">Niski</option>
                     </select>
                 </div>
             </div>
             <div class="review-field notes">
-                <label>Notatki / Akcje</label>
-                <textarea placeholder="Twoje uwagi, akcje do podjęcia...">{html.escape(action_items_display)}</textarea>
+                <label data-i18n="notes">Notatki / Akcje</label>
+                {f'<div class="ai-suggestions"><strong data-i18n="aiSuggestions">Sugestie AI:</strong> {html.escape(action_items_display)}</div>' if action_items_display else ''}
+                <textarea placeholder="Twoje uwagi, akcje do podjęcia..." data-i18n="notesPlaceholder"></textarea>
             </div>
         </div>
     </article>
@@ -1670,6 +1982,7 @@ def render_html_report_pro(
         display_time = generated_at
 
     # Video source handling
+    # Use absolute path with file:// protocol for local files so browser can find them
     video_src = ""
     if video_path:
         video_path_obj = Path(video_path)
@@ -1680,9 +1993,14 @@ def render_html_report_pro(
                     video_b64 = base64.b64encode(vf.read()).decode("ascii")
                 video_src = f"data:video/mp4;base64,{video_b64}"
             else:
-                video_src = video_path_obj.name
+                # Use absolute path for large files
+                video_src = f"file://{video_path_obj.resolve()}"
         else:
-            video_src = video_path_obj.name if video_path_obj.exists() else video_path
+            # Use absolute path so browser can locate the file
+            if video_path_obj.exists():
+                video_src = f"file://{video_path_obj.resolve()}"
+            else:
+                video_src = video_path
 
     # Generate VTT data URL for subtitles
     vtt_data_url = ""
@@ -1718,9 +2036,20 @@ def render_html_report_pro(
     <div class="app-container">
 
         <header class="app-header">
-            <h1>ScreenScribe Pro</h1>
+            <div class="header-left">
+                <h1>ScreenScribe Pro</h1>
+            </div>
+            <nav class="header-tabs">
+                <button class="tab-btn active" data-tab="summary">Podsumowanie</button>
+                <button class="tab-btn" data-tab="findings">Znaleziska ({len(findings)})</button>
+                <button class="tab-btn" data-tab="stats">Statystyki</button>
+            </nav>
             <div class="meta">
                 {html.escape(video_name)} | {html.escape(display_time)}
+                <div class="lang-toggle">
+                    <button data-lang="pl" class="active">PL</button>
+                    <button data-lang="en">EN</button>
+                </div>
             </div>
         </header>
 
@@ -1738,12 +2067,12 @@ def render_html_report_pro(
 
             <div class="transcript-drawer open" id="transcriptDrawer">
                 <div class="drawer-header" onclick="toggleDrawer()">
-                    <h3>Transkrypcja</h3>
+                    <h3 data-i18n="transcript">Transkrypcja</h3>
                     <span class="drawer-toggle">▲</span>
                 </div>
                 <div class="drawer-content">
                     <div class="drawer-search">
-                        <input type="text" id="subtitleSearch" class="search-box" placeholder="Szukaj w transkrypcji...">
+                        <input type="text" id="subtitleSearch" class="search-box" placeholder="Szukaj w transkrypcji..." data-i18n="searchTranscript">
                     </div>
                     <div id="subtitleList" class="drawer-list"></div>
                 </div>
@@ -1752,17 +2081,10 @@ def render_html_report_pro(
 
         <aside class="sidebar">
             <div class="sidebar-panel">
-                <div class="sidebar-header">
-                    <div class="tabs">
-                        <button class="tab-btn active" data-tab="summary">Podsumowanie</button>
-                        <button class="tab-btn" data-tab="findings">Znaleziska ({len(findings)})</button>
-                        <button class="tab-btn" data-tab="stats">Statystyki</button>
-                    </div>
-                </div>
                 <div class="sidebar-scroll">
                     <div id="tab-summary" class="tab-content active">
                         {_render_errors(errors)}
-                        {f'<div class="executive-summary"><h3>Streszczenie</h3><p>{html.escape(executive_summary)}</p></div>' if executive_summary else '<p class="text-muted">Brak podsumowania AI</p>'}
+                        {f'<div class="executive-summary"><h3 data-i18n="executiveSummary">Streszczenie</h3><p>{html.escape(executive_summary)}</p></div>' if executive_summary else '<p class="text-muted" data-i18n="noSummary">Brak podsumowania AI</p>'}
                     </div>
                     <div id="tab-findings" class="tab-content">
                         <section class="findings-section">
@@ -1778,15 +2100,18 @@ def render_html_report_pro(
 
         <div class="export-bar">
             <div class="export-options">
-                <label>Recenzent:
-                    <input type="text" id="reviewer-name" placeholder="Twoje imie">
+                <label><span data-i18n="reviewer">Recenzent:</span>
+                    <input type="text" id="reviewer-name" placeholder="Twoje imie" data-i18n="reviewerPlaceholder">
                 </label>
                 <label class="checkbox-label">
                     <input type="checkbox" id="embed-screenshots">
-                    Embeduj screenshoty (audyt zewn.)
+                    <span data-i18n="embedScreenshots">Embeduj screenshoty (audyt zewn.)</span>
                 </label>
             </div>
-            <button onclick="exportReviewedJSON()">Eksportuj JSON</button>
+            <div class="export-buttons">
+                <button onclick="exportTodoList()" class="btn-secondary" data-i18n="exportTodo">Eksportuj TODO</button>
+                <button onclick="exportReviewedJSON()" data-i18n="exportJson">Eksportuj JSON</button>
+            </div>
         </div>
 
     </div>

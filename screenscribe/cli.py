@@ -74,8 +74,82 @@ app = typer.Typer(
 )
 
 
-@app.callback()
+def _interactive_mode() -> None:
+    """Launch interactive mode when no subcommand is given."""
+    from rich.prompt import Prompt
+
+    console.print()
+    console.print(
+        Panel(
+            f"[bold]ScreenScribe[/] v{__version__}\n"
+            "[dim]Video review automation - extract bugs and changes from screencast[/]",
+            border_style="green",
+        )
+    )
+    console.print()
+
+    # Command selection
+    commands = {
+        "1": ("review", "Analyze video and generate report"),
+        "2": ("transcribe", "Transcribe video only"),
+        "3": ("config", "Show/edit configuration"),
+        "4": ("version", "Show version info"),
+    }
+
+    console.print("[bold]Select command:[/]")
+    for key, (cmd, desc) in commands.items():
+        console.print(f"  [cyan]{key}[/]) [bold]{cmd}[/] - {desc}")
+    console.print()
+
+    choice = Prompt.ask("Enter choice", choices=["1", "2", "3", "4"], default="1")
+    selected_cmd = commands[choice][0]
+
+    if selected_cmd == "version":
+        console.print(f"\n[bold]ScreenScribe[/] v{__version__}")
+        raise typer.Exit()
+
+    if selected_cmd == "config":
+        console.print("\n[dim]Running:[/] screenscribe config --show")
+        import subprocess
+        import sys
+
+        subprocess.run([sys.executable, "-m", "screenscribe", "config", "--show"])
+        raise typer.Exit()
+
+    # For review/transcribe, ask for video path
+    console.print()
+    video_path = Prompt.ask(
+        "[bold]Video path[/] (paste or drag file here)",
+        default="",
+    )
+
+    if not video_path.strip():
+        console.print("[red]No video path provided. Exiting.[/]")
+        raise typer.Exit(1)
+
+    # Clean path (remove quotes if dragged)
+    video_path = video_path.strip().strip("'\"")
+    video = Path(video_path)
+
+    if not video.exists():
+        console.print(f"[red]File not found:[/] {video}")
+        raise typer.Exit(1)
+
+    console.print()
+    console.print(f"[dim]Running:[/] screenscribe {selected_cmd} {video}")
+    console.print()
+
+    # Use subprocess to call commands (avoids forward reference issues)
+    import subprocess
+    import sys
+
+    run_cmd = [sys.executable, "-m", "screenscribe", selected_cmd, str(video)]
+    subprocess.run(run_cmd)
+
+
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: Annotated[
         bool,
         typer.Option(
@@ -88,7 +162,9 @@ def main(
     ] = False,
 ) -> None:
     """ScreenScribe - Video review automation."""
-    pass
+    # If no subcommand given, launch interactive mode
+    if ctx.invoked_subcommand is None:
+        _interactive_mode()
 
 
 # Time estimates (seconds per unit)
@@ -830,7 +906,14 @@ def review(
         # Clean up checkpoint on success
         delete_checkpoint(video_output)
 
-        console.print(f"\n[bold green]Done![/] Results saved to: {video_output}\n")
+        # Final success output
+        console.rule("[bold green]Finished successfully![/]")
+        console.print()
+        console.print(f"[green]Enhanced report saved:[/] {video_output / 'report.json'}")
+        console.print(f"[green]Enhanced Markdown report saved:[/] {video_output / 'report.md'}")
+        console.print(f"[green]HTML Pro report saved:[/] {video_output / 'report.html'}")
+        console.print()
+        console.rule(f"[dim]ScreenScribe v{__version__} by VetCoders[/]")
 
         # Update context for next video in batch
         if unified_findings:

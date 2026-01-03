@@ -102,13 +102,64 @@ def parse_json_response(content: str) -> dict[str, Any]:
     return result
 
 
-def extract_response_content(result: dict[str, Any]) -> str:
+def _clean_summary_response(text: str) -> str:
+    """Clean up LLM response that may contain markdown fences or JSON.
+
+    Some models return JSON wrapped in markdown code fences even when asked
+    for plain text. This function:
+    1. Strips markdown code fences (```json ... ``` or ``` ... ```)
+    2. If remaining content is JSON with a "summary" key, extracts it
+    3. Otherwise returns the clean text
+
+    Args:
+        text: Raw response text from LLM
+
+    Returns:
+        Cleaned plain text
+    """
+    cleaned = text.strip()
+
+    # Strip markdown code fences
+    fence_pattern = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL | re.IGNORECASE)
+    match = fence_pattern.match(cleaned)
+    if match:
+        cleaned = match.group(1).strip()
+
+    # Try to parse as JSON and extract summary if present
+    if cleaned.startswith("{"):
+        try:
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, dict):
+                # Look for summary field
+                if "summary" in parsed:
+                    return str(parsed["summary"])
+                # Or return the whole thing as formatted text
+                # Build readable output from known fields
+                parts = []
+                if parsed.get("summary"):
+                    parts.append(parsed["summary"])
+                if parsed.get("action_items"):
+                    items = parsed["action_items"]
+                    if isinstance(items, list):
+                        parts.append("\n\nPriorytetowe akcje:")
+                        for item in items[:5]:
+                            parts.append(f"• {item}")
+                if parts:
+                    return "\n".join(parts)
+        except json.JSONDecodeError:
+            pass
+
+    return cleaned
+
+
+def extract_response_content(result: dict[str, Any], clean_summary: bool = False) -> str:
     """Extract text content from v1/responses API format.
 
     Handles both reasoning and message output blocks.
 
     Args:
         result: API response JSON
+        clean_summary: If True, clean up markdown fences and extract from JSON
 
     Returns:
         Extracted text content
@@ -138,6 +189,10 @@ def extract_response_content(result: dict[str, Any]) -> str:
             text = item.get("text", "")
             if isinstance(text, str):
                 content += text
+
+    if clean_summary:
+        content = _clean_summary_response(content)
+
     return content
 
 
@@ -426,7 +481,7 @@ def generate_unified_summary(findings: list[UnifiedFinding], config: ScreenScrib
         )
 
         result = response.json()
-        return extract_response_content(result)
+        return extract_response_content(result, clean_summary=True)
 
     except Exception as e:
         console.print(f"[yellow]Executive summary failed: {e}[/]")
