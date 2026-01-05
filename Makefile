@@ -51,8 +51,16 @@ dev: setup-hooks
 setup-hooks:
 	@if [ -f .pre-commit-config.yaml ]; then \
 		echo "Installing pre-commit hooks..."; \
+		GLOBAL_HOOKS=$$(git config --global core.hooksPath 2>/dev/null || true); \
+		if [ -n "$$GLOBAL_HOOKS" ]; then \
+			git config --global --unset core.hooksPath; \
+		fi; \
 		uv run pre-commit install --install-hooks; \
 		uv run pre-commit install --hook-type pre-push; \
+		if [ -n "$$GLOBAL_HOOKS" ]; then \
+			git config --global core.hooksPath "$$GLOBAL_HOOKS"; \
+		fi; \
+		git config --local core.hooksPath .git/hooks; \
 		echo "Hooks installed: pre-commit, pre-push"; \
 	fi
 

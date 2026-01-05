@@ -1529,7 +1529,7 @@ function exportTodoList() {
         // Skip if explicitly marked as false alarm
         if (confirmed === false) return;
 
-        const checkbox = confirmed === true ? '[x]' : '[ ]';
+        const checkbox = '[ ]';  // Always unchecked - these are TODOs to complete
         const summary = unified.summary || f.text || 'No description';
         const notes = review.notes || '';
         const actionItems = unified.action_items || [];
