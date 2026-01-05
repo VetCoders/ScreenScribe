@@ -55,8 +55,8 @@ setup-hooks:
 		if [ -n "$$GLOBAL_HOOKS" ]; then \
 			git config --global --unset core.hooksPath 2>/dev/null || true; \
 		fi; \
-		uv run pre-commit install --install-hooks 2>/dev/null || true; \
-		uv run pre-commit install --hook-type pre-push 2>/dev/null || true; \
+		uv run pre-commit install --install-hooks >/dev/null 2>&1 || true; \
+		uv run pre-commit install --hook-type pre-push >/dev/null 2>&1 || true; \
 		if [ -n "$$GLOBAL_HOOKS" ]; then \
 			git config --global core.hooksPath "$$GLOBAL_HOOKS"; \
 		fi; \
