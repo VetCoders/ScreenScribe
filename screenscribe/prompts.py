@@ -204,13 +204,16 @@ WAŻNE - określ czy użytkownik zgłasza PROBLEM czy POTWIERDZA że coś jest O
 - "Teraz jest ok" → is_issue: false
 - "Jest brzydkie" → is_issue: true
 - "Działa ładnie" → is_issue: false
+- "Nie działa, bo nie mam danych w bazie" → is_issue: false, severity: "none" (user wyjaśnia że to nie bug, tylko brak danych testowych)
 
-Przeanalizuj screenshot I transkrypcję RAZEM i odpowiedz JSON:
+KLUCZOWE: Summary musi bazować TYLKO na transkrypcji użytkownika. Screenshot służy tylko do kontekstu wizualnego - NIE dodawaj szczegółów ze screenshota do summary!
+
+Przeanalizuj screenshot i transkrypcję, ale summary pisz TYLKO na podstawie tego co użytkownik powiedział:
 {{
     "is_issue": true/false,
     "sentiment": "problem|positive|neutral",
     "severity": "critical|high|medium|low|none",
-    "summary": "Co użytkownik mówi i co widać na screenshocie (1-2 zdania)",
+    "summary": "TYLKO co użytkownik mówi w transkrypcji (1-2 zdania, BEZ dodawania szczegółów widocznych tylko na screenshocie)",
     "action_items": ["Konkretne zadania do wykonania (puste jeśli is_issue=false)"],
     "affected_components": ["Komponenty UI których dotyczy"],
     "suggested_fix": "Sugerowane rozwiązanie techniczne",
@@ -243,13 +246,16 @@ IMPORTANT - determine if the user is reporting a PROBLEM or CONFIRMING something
 - "Now it's fine" → is_issue: false
 - "It's ugly" → is_issue: true
 - "Works nicely" → is_issue: false
+- "Doesn't work because I have no data in database" → is_issue: false, severity: "none" (user explains it's not a bug, just missing test data)
 
-Analyze the screenshot AND transcript TOGETHER and respond with JSON:
+KEY: Summary must be based ONLY on user's transcript. Screenshot is only for visual context - DO NOT add screenshot details to summary!
+
+Analyze screenshot and transcript, but write summary ONLY based on what user said:
 {{
     "is_issue": true/false,
     "sentiment": "problem|positive|neutral",
     "severity": "critical|high|medium|low|none",
-    "summary": "What the user says and what's visible in the screenshot (1-2 sentences)",
+    "summary": "ONLY what the user says in the transcript (1-2 sentences, WITHOUT adding details visible only in screenshot)",
     "action_items": ["Specific tasks to complete (empty if is_issue=false)"],
     "affected_components": ["UI components this relates to"],
     "suggested_fix": "Suggested technical solution",
