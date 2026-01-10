@@ -22,7 +22,7 @@ import httpx
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from .api_utils import retry_request
+from .api_utils import extract_llm_response_text, is_chat_completions_endpoint, retry_request
 from .config import ScreenScribeConfig
 from .detect import Detection
 from .image_utils import encode_image_base64, get_media_type
@@ -152,43 +152,51 @@ def _clean_summary_response(text: str) -> str:
     return cleaned
 
 
-def extract_response_content(result: dict[str, Any], clean_summary: bool = False) -> str:
-    """Extract text content from v1/responses API format.
+def extract_response_content(
+    result: dict[str, Any], clean_summary: bool = False, endpoint: str = ""
+) -> str:
+    """Extract text content from API response (supports both formats).
 
-    Handles both reasoning and message output blocks.
+    Handles both LibraxisAI v1/responses and OpenAI Chat Completions formats.
 
     Args:
         result: API response JSON
         clean_summary: If True, clean up markdown fences and extract from JSON
+        endpoint: API endpoint URL (used to detect format)
 
     Returns:
         Extracted text content
     """
-    content = ""
-    output_list = result.get("output", [])
-    if not isinstance(output_list, list):
-        return content
-    for item in output_list:
-        if not isinstance(item, dict):
-            continue
-        item_type = item.get("type", "")
-        # Handle reasoning blocks (skip - look for actual output)
-        if item_type == "reasoning":
-            pass
-        # Handle message blocks
-        elif item_type == "message":
-            item_content = item.get("content", [])
-            if isinstance(item_content, list):
-                for part in item_content:
-                    if isinstance(part, dict) and part.get("type") in ("output_text", "text"):
-                        text = part.get("text", "")
-                        if isinstance(text, str):
-                            content += text
-        # Handle direct output_text or text
-        elif item_type in ("output_text", "text"):
-            text = item.get("text", "")
-            if isinstance(text, str):
-                content += text
+    # Use unified helper if endpoint provided
+    if endpoint and is_chat_completions_endpoint(endpoint):
+        content = extract_llm_response_text(result, endpoint)
+    else:
+        # LibraxisAI v1/responses format
+        content = ""
+        output_list = result.get("output", [])
+        if not isinstance(output_list, list):
+            return content
+        for item in output_list:
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type", "")
+            # Handle reasoning blocks (skip - look for actual output)
+            if item_type == "reasoning":
+                pass
+            # Handle message blocks
+            elif item_type == "message":
+                item_content = item.get("content", [])
+                if isinstance(item_content, list):
+                    for part in item_content:
+                        if isinstance(part, dict) and part.get("type") in ("output_text", "text"):
+                            text = part.get("text", "")
+                            if isinstance(text, str):
+                                content += text
+            # Handle direct output_text or text
+            elif item_type in ("output_text", "text"):
+                text = item.get("text", "")
+                if isinstance(text, str):
+                    content += text
 
     if clean_summary:
         content = _clean_summary_response(content)
@@ -238,30 +246,47 @@ def analyze_finding_unified(
 
         def do_unified_request() -> httpx.Response:
             with httpx.Client(timeout=120.0) as client:
-                # Build content array
-                content: list[dict[str, str]] = [{"type": "input_text", "text": prompt}]
+                # Build content array based on API format
+                use_chat_completions = is_chat_completions_endpoint(config.vision_endpoint)
 
-                # Add image if available
-                if has_screenshot and screenshot_path:
-                    image_base64 = encode_image_base64(screenshot_path)
-                    media_type = get_media_type(screenshot_path)
-                    content.append(
-                        {
-                            "type": "input_image",
-                            "image_url": f"data:{media_type};base64,{image_base64}",
-                            "detail": "high",
-                        }
-                    )
-
-                # Build request payload
-                payload: dict[str, object] = {
-                    "model": config.vision_model,
-                    "input": [{"role": "user", "content": content}],
-                }
-
-                # Add conversation chaining if we have previous context
-                if previous_response_id:
-                    payload["previous_response_id"] = previous_response_id
+                if use_chat_completions:
+                    # OpenAI Chat Completions format
+                    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+                    if has_screenshot and screenshot_path:
+                        image_base64 = encode_image_base64(screenshot_path)
+                        media_type = get_media_type(screenshot_path)
+                        content.append(
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{media_type};base64,{image_base64}"},
+                            }
+                        )
+                    payload: dict[str, object] = {
+                        "model": config.vision_model,
+                        "messages": [{"role": "user", "content": content}],
+                    }
+                else:
+                    # LibraxisAI Responses API format
+                    content_libraxis: list[dict[str, str]] = [
+                        {"type": "input_text", "text": prompt}
+                    ]
+                    if has_screenshot and screenshot_path:
+                        image_base64 = encode_image_base64(screenshot_path)
+                        media_type = get_media_type(screenshot_path)
+                        content_libraxis.append(
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:{media_type};base64,{image_base64}",
+                                "detail": "high",
+                            }
+                        )
+                    payload = {
+                        "model": config.vision_model,
+                        "input": [{"role": "user", "content": content_libraxis}],
+                    }
+                    # Add conversation chaining if we have previous context (LibraxisAI only)
+                    if previous_response_id:
+                        payload["previous_response_id"] = previous_response_id
 
                 response = client.post(
                     config.vision_endpoint,
@@ -292,8 +317,8 @@ def analyze_finding_unified(
             console.print(f"[yellow]Failed to parse API response: {e}[/]")
             return None
 
-        # Extract content from response
-        content_text = extract_response_content(result)
+        # Extract content from response (supports both API formats)
+        content_text = extract_response_content(result, endpoint=config.vision_endpoint)
 
         if not content_text:
             console.print(
@@ -458,18 +483,18 @@ def generate_unified_summary(findings: list[UnifiedFinding], config: ScreenScrib
 
         def do_summary_request() -> httpx.Response:
             with httpx.Client(timeout=60.0) as client:
+                # Build request body based on API format
+                from .api_utils import build_llm_request_body
+
                 response = client.post(
                     config.vision_endpoint,  # Use vision endpoint (same model)
                     headers={
                         "Authorization": f"Bearer {config.get_vision_api_key()}",
                         "Content-Type": "application/json",
                     },
-                    json={
-                        "model": config.vision_model,
-                        "input": [
-                            {"role": "user", "content": [{"type": "input_text", "text": prompt}]}
-                        ],
-                    },
+                    json=build_llm_request_body(
+                        config.vision_model, prompt, config.vision_endpoint
+                    ),
                 )
                 response.raise_for_status()
                 return response
@@ -481,7 +506,7 @@ def generate_unified_summary(findings: list[UnifiedFinding], config: ScreenScrib
         )
 
         result = response.json()
-        return extract_response_content(result, clean_summary=True)
+        return extract_response_content(result, clean_summary=True, endpoint=config.vision_endpoint)
 
     except Exception as e:
         console.print(f"[yellow]Executive summary failed: {e}[/]")

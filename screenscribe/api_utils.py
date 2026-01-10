@@ -144,3 +144,93 @@ def make_api_request(
         return response
 
     return retry_request(do_request, max_retries=max_retries, operation_name=operation_name)
+
+
+def is_chat_completions_endpoint(endpoint: str) -> bool:
+    """Check if endpoint uses Chat Completions API format."""
+    return "chat/completions" in endpoint or "api.openai.com" in endpoint
+
+
+def build_llm_request_body(
+    model: str,
+    prompt: str,
+    endpoint: str,
+    image_base64: str | None = None,
+) -> dict[str, Any]:
+    """Build request body for either Responses API or Chat Completions API.
+
+    Args:
+        model: Model name
+        prompt: Text prompt
+        endpoint: API endpoint URL (used to detect format)
+        image_base64: Optional base64-encoded image for vision
+
+    Returns:
+        Request body dict
+    """
+    if is_chat_completions_endpoint(endpoint):
+        # OpenAI Chat Completions format
+        if image_base64:
+            content: list[dict[str, Any]] = [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"},
+                },
+            ]
+        else:
+            content = prompt  # type: ignore[assignment]
+        return {
+            "model": model,
+            "messages": [{"role": "user", "content": content}],
+        }
+    else:
+        # LibraxisAI Responses API format
+        if image_base64:
+            input_content: list[dict[str, Any]] = [
+                {"type": "input_text", "text": prompt},
+                {"type": "input_image", "image_url": f"data:image/jpeg;base64,{image_base64}"},
+            ]
+        else:
+            input_content = [{"type": "input_text", "text": prompt}]
+        return {
+            "model": model,
+            "input": [{"role": "user", "content": input_content}],
+        }
+
+
+def extract_llm_response_text(response_json: dict[str, Any], endpoint: str) -> str:
+    """Extract text content from LLM response (either API format).
+
+    Args:
+        response_json: Parsed JSON response
+        endpoint: API endpoint URL (used to detect format)
+
+    Returns:
+        Extracted text content
+    """
+    if is_chat_completions_endpoint(endpoint):
+        # OpenAI Chat Completions format
+        choices = response_json.get("choices", [])
+        if choices:
+            message = choices[0].get("message", {})
+            content = message.get("content", "")
+            return content if isinstance(content, str) else ""
+        return ""
+    else:
+        # LibraxisAI Responses API format
+        content = ""
+        for item in response_json.get("output", []):
+            item_type = item.get("type", "")
+            if item_type == "reasoning":
+                # Skip reasoning blocks
+                pass
+            elif item_type == "message":
+                for part in item.get("content", []):
+                    if part.get("type") in ("output_text", "text"):
+                        text = part.get("text", "")
+                        content += text if isinstance(text, str) else ""
+            elif item_type in ("output_text", "text"):
+                text = item.get("text", "")
+                content += text if isinstance(text, str) else ""
+        return content

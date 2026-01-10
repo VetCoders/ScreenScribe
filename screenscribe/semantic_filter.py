@@ -12,7 +12,7 @@ from typing import Any, Literal
 import httpx
 from rich.console import Console
 
-from .api_utils import retry_request
+from .api_utils import build_llm_request_body, extract_llm_response_text, retry_request
 from .config import ScreenScribeConfig
 from .transcribe import Segment, TranscriptionResult
 
@@ -185,12 +185,7 @@ def semantic_prefilter(
                         "Authorization": f"Bearer {config.get_llm_api_key()}",
                         "Content-Type": "application/json",
                     },
-                    json={
-                        "model": config.llm_model,
-                        "input": [
-                            {"role": "user", "content": [{"type": "input_text", "text": prompt}]}
-                        ],
-                    },
+                    json=build_llm_request_body(config.llm_model, prompt, config.llm_endpoint),
                 )
                 response.raise_for_status()
                 return response
@@ -201,9 +196,9 @@ def semantic_prefilter(
             operation_name="Semantic pre-filter",
         )
 
-        # Parse response
+        # Parse response (supports both API formats)
         result = response.json()
-        content = _extract_content_from_response(result)
+        content = extract_llm_response_text(result, config.llm_endpoint)
 
         if not content:
             console.print("[yellow]Empty response from semantic pre-filter[/]")
