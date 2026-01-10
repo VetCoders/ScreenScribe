@@ -539,7 +539,29 @@ ScreenScribe automatically detects and supports two API formats:
 | **Chat Completions** | OpenAI, Ollama, Azure | `/chat/completions` in endpoint |
 | **Responses API** | LibraxisAI | `/responses` in endpoint |
 
-### Local Ollama Setup (Recommended for Privacy)
+### LibraxisAI Setup (Default)
+
+Full cloud setup using LibraxisAI for all services:
+
+```env
+# ~/.config/screenscribe/config.env
+
+LIBRAXIS_API_KEY=vista-xxx
+
+# All endpoints on LibraxisAI
+SCREENSCRIBE_STT_ENDPOINT=https://api.libraxis.cloud/v1/audio/transcriptions
+SCREENSCRIBE_LLM_ENDPOINT=https://api.libraxis.cloud/v1/responses
+SCREENSCRIBE_VISION_ENDPOINT=https://api.libraxis.cloud/v1/responses
+
+# Models
+SCREENSCRIBE_STT_MODEL=whisper-v3-large
+SCREENSCRIBE_LLM_MODEL=chat
+SCREENSCRIBE_VISION_MODEL=chat
+```
+
+**Note:** Vision is auto-detected when images are present — the gateway routes to VLM internally.
+
+### Local Ollama Setup (Alternative for Privacy)
 
 Run everything locally with Ollama — no API keys needed for LLM/Vision:
 
