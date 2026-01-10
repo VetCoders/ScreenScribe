@@ -769,6 +769,63 @@ body::after {
 }
 
 /* ==========================================================================
+   ANNOTATION TOOL (Thumbnail - preview only)
+   ========================================================================== */
+
+.annotation-container {
+    position: relative;
+    display: inline-block;
+    margin-top: var(--space-md);
+}
+
+.annotation-container .thumbnail {
+    display: block;
+    margin-top: 0;
+}
+
+.annotation-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    border-radius: var(--radius-md);
+}
+
+.annotation-hint {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.7);
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.annotation-container:hover .annotation-hint {
+    opacity: 1;
+}
+
+/* Show indicator when annotations exist */
+.annotation-container.has-annotations::after {
+    content: '';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 12px;
+    height: 12px;
+    background: var(--vista-mint);
+    border-radius: 50%;
+    border: 2px solid var(--bg-base);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+/* ==========================================================================
    HUMAN REVIEW SECTION
    ========================================================================== */
 
@@ -882,11 +939,137 @@ body::after {
     display: flex;
 }
 
-.lightbox img {
+.lightbox-content {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
     max-width: 95%;
-    max-height: 95%;
+    max-height: 85%;
+}
+
+.lightbox img {
+    max-width: 100%;
+    max-height: 100%;
     object-fit: contain;
     border-radius: var(--radius-md);
+}
+
+.lightbox-annotation-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    border-radius: var(--radius-md);
+}
+
+.lightbox-annotation-canvas.drawing {
+    pointer-events: auto;
+    cursor: crosshair;
+}
+
+.lightbox-toolbar {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: var(--space-sm);
+    align-items: center;
+    background: var(--surface-card);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    padding: var(--space-sm) var(--space-md);
+    z-index: 10001;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.lightbox-toolbar .tool-btn {
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: all 0.15s ease;
+}
+
+.lightbox-toolbar .tool-btn:hover {
+    background: var(--vista-mint-soft);
+    border-color: var(--vista-mint);
+}
+
+.lightbox-toolbar .tool-btn.active {
+    background: var(--vista-mint);
+    color: var(--bg-base);
+    border-color: var(--vista-mint);
+}
+
+.lightbox-toolbar .color-picker {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 2px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.lightbox-toolbar .undo-btn,
+.lightbox-toolbar .clear-btn {
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.875rem;
+}
+
+.lightbox-toolbar .clear-btn {
+    color: var(--severity-high);
+}
+
+.lightbox-toolbar .done-btn {
+    padding: var(--space-xs) var(--space-md);
+    background: var(--vista-mint);
+    border: 1px solid var(--vista-mint);
+    border-radius: var(--radius-sm);
+    color: var(--bg-base);
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 600;
+    margin-left: var(--space-sm);
+}
+
+.lightbox-toolbar .done-btn:hover {
+    background: var(--vista-mint-dark);
+}
+
+.lightbox-close {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    width: 44px;
+    height: 44px;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid var(--border-default);
+    border-radius: 50%;
+    color: var(--text-primary);
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 10002;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+
+.lightbox-close:hover {
+    background: var(--severity-high);
+    border-color: var(--severity-high);
+    color: white;
 }
 
 /* ==========================================================================
@@ -1379,15 +1562,60 @@ function handleChangeEvent(e) {
     }
 }
 
+let currentLightboxFindingId = null;
+let lightboxAnnotationTool = null;
+
 function openLightbox(img) {
     const lightbox = document.getElementById('lightbox');
     const lightboxImg = document.getElementById('lightbox-img');
+    const lightboxCanvas = document.getElementById('lightbox-canvas');
+    const lightboxToolbar = document.getElementById('lightbox-toolbar');
+
+    // Get finding ID from parent annotation container
+    const container = img.closest('.annotation-container');
+    currentLightboxFindingId = container ? container.dataset.findingId : null;
+
     lightboxImg.src = img.dataset.full || img.src;
     lightbox.classList.add('active');
+
+    // Setup canvas after image loads
+    lightboxImg.onload = () => {
+        // Set canvas size to match image
+        lightboxCanvas.width = lightboxImg.naturalWidth;
+        lightboxCanvas.height = lightboxImg.naturalHeight;
+        lightboxCanvas.style.width = lightboxImg.offsetWidth + 'px';
+        lightboxCanvas.style.height = lightboxImg.offsetHeight + 'px';
+
+        // Create annotation tool for lightbox
+        lightboxAnnotationTool = new LightboxAnnotationTool(
+            lightboxCanvas,
+            lightboxToolbar,
+            currentLightboxFindingId
+        );
+
+        lightboxToolbar.style.display = 'flex';
+    };
 }
 
 function closeLightbox() {
-    document.getElementById('lightbox').classList.remove('active');
+    const lightbox = document.getElementById('lightbox');
+    const lightboxToolbar = document.getElementById('lightbox-toolbar');
+
+    // Save annotations before closing
+    if (lightboxAnnotationTool && currentLightboxFindingId) {
+        lightboxAnnotationTool.saveAnnotations();
+
+        // Update thumbnail canvas with new annotations
+        const thumbnailTool = annotationTools.get(currentLightboxFindingId);
+        if (thumbnailTool) {
+            thumbnailTool.loadAnnotations();
+        }
+    }
+
+    lightbox.classList.remove('active');
+    lightboxToolbar.style.display = 'none';
+    lightboxAnnotationTool = null;
+    currentLightboxFindingId = null;
 }
 
 function saveDraft() {
@@ -1453,19 +1681,41 @@ function exportReviewedJSON() {
         const review = reportState.findings[f.id] || {};
         // Remove base64 screenshot from export unless checkbox is checked
         const { screenshot, ...findingWithoutBase64 } = f;
+
+        // Get annotations for this finding
+        const annotations = review.annotations || [];
+
         const result = {
             ...findingWithoutBase64,
             human_review: {
                 confirmed: review.confirmed,
                 severity_override: review.severity || null,
                 notes: review.notes || '',
+                annotations: annotations,
                 reviewer: reportState.reviewer,
                 reviewed_at: new Date().toISOString()
             }
         };
-        // Only include base64 screenshot if embed option is checked
+
+        // Handle screenshot with annotations
         if (embedScreenshots && screenshot) {
-            result.screenshot = screenshot;
+            // If there are annotations, merge them onto the screenshot
+            if (annotations.length > 0) {
+                try {
+                    const tool = annotationTools.get(String(f.id));
+                    if (tool) {
+                        result.screenshot = tool.getMergedDataURL();
+                        result.screenshot_annotated = true;
+                    } else {
+                        result.screenshot = screenshot;
+                    }
+                } catch (e) {
+                    console.error('Failed to merge annotations for finding', f.id, e);
+                    result.screenshot = screenshot;
+                }
+            } else {
+                result.screenshot = screenshot;
+            }
         }
         return result;
     });
@@ -1500,6 +1750,110 @@ function exportReviewedJSON() {
         localStorage.removeItem('screenscribe_draft_' + reportState.reportId);
     } catch (e) {}
     reportState.modified = false;
+}
+
+async function exportReviewedZIP() {
+    if (!reportState.reviewer.trim()) {
+        showNotification(i18n[currentLang].enterName);
+        document.getElementById('reviewer-name').focus();
+        return;
+    }
+
+    const reviewedCount = Object.values(reportState.findings).filter(f => f.confirmed !== null).length;
+    if (reviewedCount === 0) {
+        if (!confirm(i18n[currentLang].noReviewed)) {
+            return;
+        }
+    }
+
+    showNotification(i18n[currentLang].generatingZip);
+
+    try {
+        const zip = new JSZip();
+        const originalFindings = JSON.parse(document.getElementById('original-findings').textContent);
+        const annotatedFolder = zip.folder('annotated');
+
+        const reviewedFindings = [];
+
+        for (const f of originalFindings) {
+            const review = reportState.findings[f.id] || {};
+            const { screenshot, ...findingWithoutBase64 } = f;
+            const annotations = review.annotations || [];
+
+            const result = {
+                ...findingWithoutBase64,
+                human_review: {
+                    confirmed: review.confirmed,
+                    severity_override: review.severity || null,
+                    notes: review.notes || '',
+                    annotations: annotations,
+                    reviewer: reportState.reviewer,
+                    reviewed_at: new Date().toISOString()
+                }
+            };
+
+            // Generate annotated screenshot if there are annotations
+            if (annotations.length > 0) {
+                try {
+                    const tool = annotationTools.get(String(f.id));
+                    if (tool) {
+                        const dataUrl = tool.getMergedDataURL();
+                        // Extract base64 data (remove data:image/png;base64, prefix)
+                        if (dataUrl.startsWith('data:image')) {
+                            const base64Data = dataUrl.split(',')[1];
+                            const filename = f.timestamp_formatted.replace(':', '-') + '_' + f.category + '_annotated.png';
+                            annotatedFolder.file(filename, base64Data, {base64: true});
+                            result.screenshot_annotated = 'annotated/' + filename;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Failed to generate annotated screenshot for finding', f.id, e);
+                }
+            }
+
+            // Keep original screenshot reference (not embedded)
+            if (screenshot) {
+                result.screenshot_original = screenshot;
+            }
+
+            reviewedFindings.push(result);
+        }
+
+        const output = {
+            video: document.body.dataset.videoName,
+            reviewed_at: new Date().toISOString(),
+            reviewer: reportState.reviewer,
+            findings: reviewedFindings
+        };
+
+        // Add JSON to zip
+        zip.file('review.json', JSON.stringify(output, null, 2));
+
+        // Generate and download ZIP
+        const videoName = document.body.dataset.videoName || 'report';
+        const zipFilename = videoName.replace(/\\.[^.]+$/, '') + '_review.zip';
+
+        const blob = await zip.generateAsync({type: 'blob'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = zipFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showNotification(i18n[currentLang].zipExported + ' ' + zipFilename);
+
+        try {
+            localStorage.removeItem('screenscribe_draft_' + reportState.reportId);
+        } catch (e) {}
+        reportState.modified = false;
+
+    } catch (e) {
+        console.error('ZIP export failed:', e);
+        showNotification(i18n[currentLang].zipError + ' ' + e.message);
+    }
 }
 
 function seekToTimestamp(seconds) {
@@ -1673,7 +2027,12 @@ const i18n = {
         suggestedFix: 'Sugerowana poprawka',
         visualIssues: 'Wizualne problemy',
         clickToSeek: 'Kliknij aby przejsc do tego momentu',
-        aiSuggestions: 'Sugestie AI:'
+        aiSuggestions: 'Sugestie AI:',
+        exportZip: 'Eksportuj ZIP',
+        exportZipTitle: 'ZIP z adnotowanymi zdjeciami',
+        generatingZip: 'Generowanie ZIP...',
+        zipExported: 'ZIP wyeksportowany:',
+        zipError: 'Blad eksportu ZIP:'
     },
     en: {
         summary: 'Summary',
@@ -1713,7 +2072,12 @@ const i18n = {
         suggestedFix: 'Suggested fix',
         visualIssues: 'Visual issues',
         clickToSeek: 'Click to jump to this moment',
-        aiSuggestions: 'AI Suggestions:'
+        aiSuggestions: 'AI Suggestions:',
+        exportZip: 'Export ZIP',
+        exportZipTitle: 'ZIP with annotated screenshots',
+        generatingZip: 'Generating ZIP...',
+        zipExported: 'ZIP exported:',
+        zipError: 'ZIP export error:'
     }
 };
 
@@ -1737,6 +2101,11 @@ function setLanguage(lang) {
             } else {
                 el.textContent = i18n[lang][key];
             }
+        }
+        // Handle title attribute
+        const titleKey = el.dataset.i18nTitle;
+        if (titleKey && i18n[lang][titleKey]) {
+            el.title = i18n[lang][titleKey];
         }
     });
 
@@ -1770,10 +2139,511 @@ function initLanguage() {
     });
 }
 
+// =============================================================================
+// LIGHTBOX ANNOTATION TOOL (for fullscreen drawing)
+// =============================================================================
+
+class LightboxAnnotationTool {
+    constructor(canvas, toolbar, findingId) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.toolbar = toolbar;
+        this.findingId = findingId;
+
+        this.tool = null;
+        this.color = '#ff0066';
+        this.strokeWidth = 4;
+        this.isDrawing = false;
+        this.startX = 0;
+        this.startY = 0;
+        this.annotations = [];
+        this.currentPath = [];
+
+        this.init();
+    }
+
+    init() {
+        this.bindEvents();
+        this.loadAnnotations();
+    }
+
+    bindEvents() {
+        // Tool selection
+        this.toolbar.querySelectorAll('.tool-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.selectTool(btn.dataset.tool);
+            });
+        });
+
+        // Color picker
+        const colorPicker = this.toolbar.querySelector('.color-picker');
+        colorPicker.addEventListener('click', (e) => e.stopPropagation());
+        colorPicker.addEventListener('input', (e) => {
+            this.color = e.target.value;
+        });
+
+        // Undo/Clear
+        this.toolbar.querySelector('.undo-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.undo();
+        });
+        this.toolbar.querySelector('.clear-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.clear();
+        });
+
+        // Drawing events
+        this.canvas.addEventListener('mousedown', (e) => this.startDraw(e));
+        this.canvas.addEventListener('mousemove', (e) => this.draw(e));
+        this.canvas.addEventListener('mouseup', (e) => this.endDraw(e));
+        this.canvas.addEventListener('mouseleave', () => this.endDraw());
+
+        // Touch support
+        this.canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.startDraw(e.touches[0]);
+        });
+        this.canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.draw(e.touches[0]);
+        });
+        this.canvas.addEventListener('touchend', (e) => {
+            e.stopPropagation();
+            this.endDraw();
+        });
+    }
+
+    selectTool(tool) {
+        this.tool = this.tool === tool ? null : tool;
+        this.toolbar.querySelectorAll('.tool-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tool === this.tool);
+        });
+        this.canvas.classList.toggle('drawing', this.tool !== null);
+    }
+
+    getPos(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
+        return {
+            x: (e.clientX - rect.left) * scaleX,
+            y: (e.clientY - rect.top) * scaleY
+        };
+    }
+
+    startDraw(e) {
+        if (!this.tool) return;
+        e.stopPropagation();
+        this.isDrawing = true;
+        const pos = this.getPos(e);
+        this.startX = pos.x;
+        this.startY = pos.y;
+        if (this.tool === 'pen') {
+            this.currentPath = [pos];
+        }
+    }
+
+    draw(e) {
+        if (!this.isDrawing || !this.tool) return;
+        e.stopPropagation();
+        const pos = this.getPos(e);
+
+        this.redraw();
+        this.ctx.strokeStyle = this.color;
+        this.ctx.lineWidth = this.strokeWidth;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+
+        if (this.tool === 'pen') {
+            this.currentPath.push(pos);
+            this.drawPath(this.currentPath);
+        } else if (this.tool === 'rect') {
+            this.drawRect(this.startX, this.startY, pos.x - this.startX, pos.y - this.startY);
+        } else if (this.tool === 'arrow') {
+            this.drawArrow(this.startX, this.startY, pos.x, pos.y);
+        }
+    }
+
+    endDraw(e) {
+        if (!this.isDrawing || !this.tool) return;
+        if (e) e.stopPropagation();
+
+        const pos = e ? this.getPos(e) : { x: this.startX, y: this.startY };
+
+        if (this.tool === 'pen' && this.currentPath.length > 1) {
+            this.annotations.push({
+                type: 'pen',
+                points: [...this.currentPath],
+                color: this.color,
+                strokeWidth: this.strokeWidth
+            });
+        } else if (this.tool === 'rect') {
+            const w = pos.x - this.startX;
+            const h = pos.y - this.startY;
+            if (Math.abs(w) > 5 && Math.abs(h) > 5) {
+                this.annotations.push({
+                    type: 'rect',
+                    x: this.startX,
+                    y: this.startY,
+                    width: w,
+                    height: h,
+                    color: this.color,
+                    strokeWidth: this.strokeWidth
+                });
+            }
+        } else if (this.tool === 'arrow') {
+            const dx = pos.x - this.startX;
+            const dy = pos.y - this.startY;
+            if (Math.sqrt(dx*dx + dy*dy) > 10) {
+                this.annotations.push({
+                    type: 'arrow',
+                    startX: this.startX,
+                    startY: this.startY,
+                    endX: pos.x,
+                    endY: pos.y,
+                    color: this.color,
+                    strokeWidth: this.strokeWidth
+                });
+            }
+        }
+
+        this.isDrawing = false;
+        this.currentPath = [];
+        this.redraw();
+    }
+
+    drawPath(points) {
+        if (points.length < 2) return;
+        this.ctx.beginPath();
+        this.ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            this.ctx.lineTo(points[i].x, points[i].y);
+        }
+        this.ctx.stroke();
+    }
+
+    drawRect(x, y, w, h) {
+        this.ctx.strokeRect(x, y, w, h);
+    }
+
+    drawArrow(x1, y1, x2, y2) {
+        const headLength = 15;
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+
+        this.ctx.beginPath();
+        this.ctx.moveTo(x1, y1);
+        this.ctx.lineTo(x2, y2);
+        this.ctx.stroke();
+
+        // Arrowhead
+        this.ctx.beginPath();
+        this.ctx.moveTo(x2, y2);
+        this.ctx.lineTo(
+            x2 - headLength * Math.cos(angle - Math.PI/6),
+            y2 - headLength * Math.sin(angle - Math.PI/6)
+        );
+        this.ctx.moveTo(x2, y2);
+        this.ctx.lineTo(
+            x2 - headLength * Math.cos(angle + Math.PI/6),
+            y2 - headLength * Math.sin(angle + Math.PI/6)
+        );
+        this.ctx.stroke();
+    }
+
+    redraw() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.annotations.forEach(ann => {
+            this.ctx.strokeStyle = ann.color;
+            this.ctx.lineWidth = ann.strokeWidth;
+            this.ctx.lineCap = 'round';
+            this.ctx.lineJoin = 'round';
+
+            if (ann.type === 'pen') {
+                this.drawPath(ann.points);
+            } else if (ann.type === 'rect') {
+                this.drawRect(ann.x, ann.y, ann.width, ann.height);
+            } else if (ann.type === 'arrow') {
+                this.drawArrow(ann.startX, ann.startY, ann.endX, ann.endY);
+            }
+        });
+    }
+
+    undo() {
+        this.annotations.pop();
+        this.redraw();
+    }
+
+    clear() {
+        this.annotations = [];
+        this.redraw();
+    }
+
+    saveAnnotations() {
+        if (!this.findingId) return;
+        if (!reportState.findings[this.findingId]) {
+            reportState.findings[this.findingId] = {};
+        }
+        reportState.findings[this.findingId].annotations = [...this.annotations];
+        reportState.modified = true;
+    }
+
+    loadAnnotations() {
+        if (!this.findingId) return;
+        const state = reportState.findings[this.findingId];
+        if (state && state.annotations) {
+            this.annotations = [...state.annotations];
+            this.redraw();
+        }
+    }
+
+    getMergedDataURL() {
+        // Create temp canvas with image + annotations
+        const img = document.getElementById('lightbox-img');
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = this.canvas.width;
+        tempCanvas.height = this.canvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
+
+        // Draw image
+        tempCtx.drawImage(img, 0, 0, tempCanvas.width, tempCanvas.height);
+
+        // Draw annotations on top
+        tempCtx.drawImage(this.canvas, 0, 0);
+
+        return tempCanvas.toDataURL('image/png');
+    }
+}
+
+// =============================================================================
+// THUMBNAIL ANNOTATION TOOL (display-only, drawing happens in lightbox)
+// =============================================================================
+
+class AnnotationTool {
+    constructor(container) {
+        this.container = container;
+        this.findingId = container.dataset.findingId;
+        this.img = container.querySelector('.thumbnail');
+        this.canvas = container.querySelector('.annotation-canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.annotations = [];
+
+        this.init();
+    }
+
+    init() {
+        if (this.img.complete) {
+            this.setupCanvas();
+        } else {
+            this.img.onload = () => this.setupCanvas();
+        }
+        this.loadAnnotations();
+    }
+
+    setupCanvas() {
+        const displayWidth = this.img.offsetWidth || this.img.clientWidth;
+        const displayHeight = this.img.offsetHeight || this.img.clientHeight;
+
+        this.canvas.width = displayWidth;
+        this.canvas.height = displayHeight;
+        this.canvas.style.width = displayWidth + 'px';
+        this.canvas.style.height = displayHeight + 'px';
+
+        this.redraw();
+    }
+
+    loadAnnotations() {
+        const review = reportState.findings[this.findingId];
+        if (review && review.annotations && review.annotations.length > 0) {
+            this.annotations = review.annotations;
+            this.container.classList.add('has-annotations');
+            this.redraw();
+        } else {
+            this.container.classList.remove('has-annotations');
+        }
+    }
+
+    redraw() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Scale factor: annotations stored in full resolution, thumbnail is smaller
+        const img = this.img;
+        const scaleX = this.canvas.width / (img.naturalWidth || this.canvas.width);
+        const scaleY = this.canvas.height / (img.naturalHeight || this.canvas.height);
+
+        for (const a of this.annotations) {
+            this.ctx.strokeStyle = a.color;
+            this.ctx.lineWidth = Math.max(1, a.strokeWidth * scaleX);
+            this.ctx.lineCap = 'round';
+            this.ctx.lineJoin = 'round';
+
+            if (a.type === 'pen' && a.points) {
+                this.drawPath(a.points, scaleX, scaleY);
+            } else if (a.type === 'rect') {
+                this.drawRect(a.x * scaleX, a.y * scaleY, a.width * scaleX, a.height * scaleY);
+            } else if (a.type === 'arrow') {
+                this.drawArrow(a.startX * scaleX, a.startY * scaleY, a.endX * scaleX, a.endY * scaleY);
+            }
+        }
+    }
+
+    drawPath(points, scaleX, scaleY) {
+        if (points.length < 2) return;
+        this.ctx.beginPath();
+        this.ctx.moveTo(points[0].x * scaleX, points[0].y * scaleY);
+        for (let i = 1; i < points.length; i++) {
+            this.ctx.lineTo(points[i].x * scaleX, points[i].y * scaleY);
+        }
+        this.ctx.stroke();
+    }
+
+    drawRect(x, y, w, h) {
+        this.ctx.strokeRect(x, y, w, h);
+    }
+
+    drawArrow(x1, y1, x2, y2) {
+        const headLen = 8;
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+
+        this.ctx.beginPath();
+        this.ctx.moveTo(x1, y1);
+        this.ctx.lineTo(x2, y2);
+        this.ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
+        this.ctx.moveTo(x2, y2);
+        this.ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+        this.ctx.stroke();
+    }
+
+    // Get annotations layer as transparent PNG (for export when original image is file://)
+    getAnnotationsOnlyDataURL() {
+        const img = this.img;
+        const fullWidth = img.naturalWidth || this.canvas.width || 1920;
+        const fullHeight = img.naturalHeight || this.canvas.height || 1080;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = fullWidth;
+        canvas.height = fullHeight;
+        const ctx = canvas.getContext('2d');
+
+        // Transparent background - just draw annotations
+        const state = reportState.findings[this.findingId];
+        const annotations = (state && state.annotations) ? state.annotations : this.annotations;
+
+        for (const a of annotations) {
+            ctx.strokeStyle = a.color;
+            ctx.lineWidth = a.strokeWidth;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            if (a.type === 'pen' && a.points) {
+                ctx.beginPath();
+                ctx.moveTo(a.points[0].x, a.points[0].y);
+                for (let i = 1; i < a.points.length; i++) {
+                    ctx.lineTo(a.points[i].x, a.points[i].y);
+                }
+                ctx.stroke();
+            } else if (a.type === 'rect') {
+                ctx.strokeRect(a.x, a.y, a.width, a.height);
+            } else if (a.type === 'arrow') {
+                const headLen = 15;
+                const angle = Math.atan2(a.endY - a.startY, a.endX - a.startX);
+                ctx.beginPath();
+                ctx.moveTo(a.startX, a.startY);
+                ctx.lineTo(a.endX, a.endY);
+                ctx.lineTo(a.endX - headLen * Math.cos(angle - Math.PI / 6), a.endY - headLen * Math.sin(angle - Math.PI / 6));
+                ctx.moveTo(a.endX, a.endY);
+                ctx.lineTo(a.endX - headLen * Math.cos(angle + Math.PI / 6), a.endY - headLen * Math.sin(angle + Math.PI / 6));
+                ctx.stroke();
+            }
+        }
+
+        return canvas.toDataURL('image/png');
+    }
+
+    // Get merged image with annotations at full resolution (for export)
+    getMergedDataURL() {
+        try {
+            const img = this.img;
+
+            // Check if image is base64 (not file://) - only then we can merge
+            if (!img.src.startsWith('data:')) {
+                // Can't merge file:// images due to canvas tainting
+                // Return annotations-only layer instead
+                return this.getAnnotationsOnlyDataURL();
+            }
+
+            const fullWidth = img.naturalWidth || this.canvas.width;
+            const fullHeight = img.naturalHeight || this.canvas.height;
+
+            const mergedCanvas = document.createElement('canvas');
+            mergedCanvas.width = fullWidth;
+            mergedCanvas.height = fullHeight;
+            const ctx = mergedCanvas.getContext('2d');
+
+            // Draw original image at full resolution
+            ctx.drawImage(img, 0, 0, fullWidth, fullHeight);
+
+            // Get annotations from state (might be newer than this.annotations)
+            const state = reportState.findings[this.findingId];
+            const annotations = (state && state.annotations) ? state.annotations : this.annotations;
+
+            // Draw annotations at full resolution
+            for (const a of annotations) {
+                ctx.strokeStyle = a.color;
+                ctx.lineWidth = a.strokeWidth;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                if (a.type === 'pen' && a.points) {
+                    ctx.beginPath();
+                    ctx.moveTo(a.points[0].x, a.points[0].y);
+                    for (let i = 1; i < a.points.length; i++) {
+                        ctx.lineTo(a.points[i].x, a.points[i].y);
+                    }
+                    ctx.stroke();
+                } else if (a.type === 'rect') {
+                    ctx.strokeRect(a.x, a.y, a.width, a.height);
+                } else if (a.type === 'arrow') {
+                    const headLen = 15;
+                    const angle = Math.atan2(a.endY - a.startY, a.endX - a.startX);
+                    ctx.beginPath();
+                    ctx.moveTo(a.startX, a.startY);
+                    ctx.lineTo(a.endX, a.endY);
+                    ctx.lineTo(a.endX - headLen * Math.cos(angle - Math.PI / 6), a.endY - headLen * Math.sin(angle - Math.PI / 6));
+                    ctx.moveTo(a.endX, a.endY);
+                    ctx.lineTo(a.endX - headLen * Math.cos(angle + Math.PI / 6), a.endY - headLen * Math.sin(angle + Math.PI / 6));
+                    ctx.stroke();
+                }
+            }
+
+            return mergedCanvas.toDataURL('image/png');
+        } catch (e) {
+            console.error('getMergedDataURL failed:', e);
+            // Return annotations-only as fallback
+            return this.getAnnotationsOnlyDataURL();
+        }
+    }
+}
+
+// Global annotation tools map
+const annotationTools = new Map();
+
+function initAnnotationTools() {
+    document.querySelectorAll('.annotation-container').forEach(container => {
+        const findingId = container.dataset.findingId;
+        if (!annotationTools.has(findingId)) {
+            annotationTools.set(findingId, new AnnotationTool(container));
+        }
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     initReviewState();
     initTabs();
     initLanguage();
+    initAnnotationTools();
 });
 """
 
@@ -1876,8 +2746,12 @@ def _render_finding(f: dict[str, Any], index: int) -> str:
         escaped_src = html.escape(screenshot)
         screenshot_html = f"""
         <div class="finding-screenshot">
-            <img class="thumbnail" src="{escaped_src}" data-full="{escaped_src}"
-                 alt="Screenshot @ {timestamp}">
+            <div class="annotation-container" data-finding-id="{finding_id}">
+                <img class="thumbnail" src="{escaped_src}" data-full="{escaped_src}"
+                     alt="Screenshot @ {timestamp}" title="Kliknij aby powiekszye i adnotowac">
+                <canvas class="annotation-canvas"></canvas>
+                <div class="annotation-hint">Kliknij aby adnotowac</div>
+            </div>
         </div>
         """
 
@@ -2030,6 +2904,7 @@ def render_html_report_pro(
     <style>
 {CSS_QUANTUM_VISTA}
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body data-report-id="{report_id}" data-video-name="{html.escape(video_name)}">
 
@@ -2111,13 +2986,27 @@ def render_html_report_pro(
             <div class="export-buttons">
                 <button onclick="exportTodoList()" class="btn-secondary" data-i18n="exportTodo">Eksportuj TODO</button>
                 <button onclick="exportReviewedJSON()" data-i18n="exportJson">Eksportuj JSON</button>
+                <button onclick="exportReviewedZIP()" class="btn-primary" data-i18n="exportZip" data-i18n-title="exportZipTitle">Eksportuj ZIP</button>
             </div>
         </div>
 
     </div>
 
     <div id="lightbox" class="lightbox">
-        <img id="lightbox-img" src="" alt="Pelny rozmiar">
+        <button type="button" class="lightbox-close" onclick="closeLightbox()" title="Zamknij (ESC)">&times;</button>
+        <div class="lightbox-content" onclick="event.stopPropagation()">
+            <img id="lightbox-img" src="" alt="Pelny rozmiar">
+            <canvas id="lightbox-canvas" class="lightbox-annotation-canvas"></canvas>
+        </div>
+        <div id="lightbox-toolbar" class="lightbox-toolbar" style="display: none;" onclick="event.stopPropagation()">
+            <button type="button" class="tool-btn" data-tool="pen">Pen</button>
+            <button type="button" class="tool-btn" data-tool="rect">Rect</button>
+            <button type="button" class="tool-btn" data-tool="arrow">Arrow</button>
+            <input type="color" class="color-picker" value="#ff0066">
+            <button type="button" class="undo-btn">Undo</button>
+            <button type="button" class="clear-btn">Clear</button>
+            <button type="button" class="done-btn" onclick="closeLightbox()">Done</button>
+        </div>
     </div>
 
     <script id="original-findings" type="application/json">

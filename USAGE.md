@@ -8,14 +8,15 @@ This guide covers practical examples and workflows for using ScreenScribe to ana
 2. [Batch Mode](#batch-mode)
 3. [Common Workflows](#common-workflows)
 4. [Understanding Output](#understanding-output)
-5. [Sentiment Detection](#sentiment-detection)
-6. [Detection Modes](#detection-modes)
-7. [Multi-Provider Setup](#multi-provider-setup)
-8. [Advanced Options](#advanced-options)
-9. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
-10. [Custom Keywords](#custom-keywords)
-11. [Resuming Interrupted Processing](#resuming-interrupted-processing)
-12. [Troubleshooting](#troubleshooting)
+5. [HTML Pro Report](#html-pro-report)
+6. [Sentiment Detection](#sentiment-detection)
+7. [Detection Modes](#detection-modes)
+8. [Multi-Provider Setup](#multi-provider-setup)
+9. [Advanced Options](#advanced-options)
+10. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
+11. [Custom Keywords](#custom-keywords)
+12. [Resuming Interrupted Processing](#resuming-interrupted-processing)
+13. [Troubleshooting](#troubleshooting)
 
 ## Basic Usage
 
@@ -28,6 +29,7 @@ screenscribe review ~/Videos/app-review.mov
 ```
 
 This will:
+
 1. Extract audio from the video
 2. Transcribe the audio with timestamps
 3. Detect mentions of bugs, changes, and UI issues
@@ -76,6 +78,7 @@ Video 3, Finding 1 → previous_response_id: "def456"  ← VLM knows Video 1+2!
 ```
 
 This means:
+
 - Later videos benefit from earlier context
 - VLM can identify patterns across videos
 - Duplicate findings are better understood
@@ -122,6 +125,7 @@ screenscribe review video.mov --no-semantic --no-vision
 ```
 
 This gives you:
+
 - Full transcript
 - Screenshots at issue timestamps
 - Basic report with detected keywords
@@ -137,6 +141,7 @@ screenscribe review video.mov --no-vision
 ```
 
 This includes:
+
 - Full transcript
 - Screenshots
 - AI-powered severity ratings
@@ -154,6 +159,7 @@ screenscribe review video.mov
 ```
 
 This includes:
+
 - Full transcript with timestamps
 - Screenshots at issue moments
 - **Unified VLM analysis** (semantic + visual in one call):
@@ -175,6 +181,7 @@ screenscribe transcribe video.mov -o transcript.txt
 ```
 
 Useful for:
+
 - Quick transcription needs
 - Pre-processing before manual review
 - Archiving meeting recordings
@@ -282,6 +289,100 @@ The Markdown report contains:
 
 See [Sentiment Detection](#sentiment-detection) for details on `is_issue` and `sentiment` fields.
 
+## HTML Pro Report
+
+ScreenScribe generates an interactive HTML report (`report.html`) alongside JSON and Markdown outputs. This report provides a visual dashboard for reviewing findings with additional human annotation capabilities.
+
+### Opening the Report
+
+```bash
+# After processing, open the HTML report
+open ./video_review/report.html
+
+# Or use your browser directly
+firefox ./video_review/report.html
+```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Finding Cards** | Each finding displayed with screenshot, transcript, and AI analysis |
+| **Severity Badges** | Visual indicators: Critical (red), High (orange), Medium (yellow), Low (green) |
+| **Lightbox View** | Click any screenshot to view in fullscreen |
+| **Language Toggle** | Switch between Polish and English (PL/EN button) |
+| **Human Review** | Edit severity, add notes, mark as accepted/rejected |
+| **Annotation Tools** | Draw directly on screenshots (pen, rectangle, arrow) |
+| **Export Options** | JSON, TODO list, or ZIP bundle with annotated images |
+
+### Annotation Tools
+
+The HTML Pro report includes built-in annotation tools for marking up screenshots. This is useful for highlighting specific UI elements or problems before sharing with developers.
+
+**How to annotate:**
+
+1. Click on any screenshot thumbnail to open the lightbox view
+2. Use the toolbar at the bottom:
+   - **Pen** — freehand drawing for circling or underlining
+   - **Rect** — draw rectangles to highlight areas
+   - **Arrow** — point to specific elements
+   - **Color picker** — change annotation color
+   - **Undo** — remove last annotation
+   - **Clear** — remove all annotations for this finding
+3. Click **Done** to save and close
+
+Annotations are stored in browser localStorage and persist between sessions.
+
+### Human Review Workflow
+
+Each finding can be reviewed and annotated:
+
+1. **Severity** — adjust AI-assigned severity if needed
+2. **Status** — mark as Accepted, Rejected, or Pending
+3. **Notes** — add context or instructions for developers
+4. **Annotations** — draw on screenshot to highlight issues
+
+A green dot indicator appears on thumbnails that have annotations.
+
+### Export Options
+
+The HTML Pro report provides three export formats:
+
+#### JSON Export
+
+```
+Export JSON button → downloads reviewed_[video].json
+```
+
+Contains all findings with human review data (severity overrides, status, notes). Optionally embed screenshots as base64.
+
+#### TODO Export
+
+```
+Export TODO button → downloads todo_[video].md
+```
+
+Generates a Markdown checklist with accepted findings, suitable for pasting into issue trackers or task management systems.
+
+#### ZIP Export
+
+```
+Export ZIP button → downloads [video]_review.zip
+```
+
+Creates a ZIP bundle containing:
+- `review.json` — full review data with human annotations
+- `annotated/` — folder with PNG screenshots that have annotations "burned in"
+
+The ZIP export is ideal for sharing with AI agents or external tools that need images with visual markup included.
+
+### Notes
+
+- The HTML report is **self-contained** — screenshots are embedded as base64, no external dependencies
+- Human review data is stored in **localStorage** — clearing browser data will lose reviews
+- Annotations work best in fullscreen lightbox view for precision
+- ZIP export only includes screenshots that have annotations
+
 ## Sentiment Detection
 
 ScreenScribe understands context and **negations**. Not every detected transcript fragment is a problem - sometimes users confirm that something works correctly.
@@ -290,21 +391,21 @@ ScreenScribe understands context and **negations**. Not every detected transcrip
 
 Each finding in the report includes:
 
-| Field | Values | Description |
-|-------|--------|-------------|
-| `is_issue` | `true` / `false` | Whether user reports a problem or confirms OK |
-| `sentiment` | `problem` / `positive` / `neutral` | Tone of the user's statement |
+| Field       | Values                             | Description                                   |
+| ----------- | ---------------------------------- | --------------------------------------------- |
+| `is_issue`  | `true` / `false`                   | Whether user reports a problem or confirms OK |
+| `sentiment` | `problem` / `positive` / `neutral` | Tone of the user's statement                  |
 
 ### Examples
 
-| User says... | is_issue | sentiment | Interpretation |
-|--------------|----------|-----------|----------------|
-| "This button doesn't work" | `true` | `problem` | Reports a bug |
-| "The white backgrounds don't bother me" | `false` | `positive` | Confirms it's OK |
-| "Should be transparent" | `true` | `problem` | Requests a change |
-| "Works nicely now" | `false` | `positive` | Confirms fix worked |
-| "It's ugly" | `true` | `problem` | Reports UI issue |
-| "Let me check this section" | `false` | `neutral` | Neutral observation |
+| User says...                            | is_issue | sentiment  | Interpretation      |
+| --------------------------------------- | -------- | ---------- | ------------------- |
+| "This button doesn't work"              | `true`   | `problem`  | Reports a bug       |
+| "The white backgrounds don't bother me" | `false`  | `positive` | Confirms it's OK    |
+| "Should be transparent"                 | `true`   | `problem`  | Requests a change   |
+| "Works nicely now"                      | `false`  | `positive` | Confirms fix worked |
+| "It's ugly"                             | `true`   | `problem`  | Reports UI issue    |
+| "Let me check this section"             | `false`  | `neutral`  | Neutral observation |
 
 ### Negation Handling
 
@@ -366,16 +467,19 @@ screenscribe review video.mov
 ```
 
 **How it works:**
+
 1. LLM analyzes the **entire transcript** before frame extraction
 2. Identifies "points of interest" based on context and meaning
 3. Extracts screenshots only at flagged moments
 
 **Pros:**
+
 - Finds issues that keyword matching would miss
 - Understands implicit problems: "navigation feels slow"
 - Contextual awareness: "this works here but not there"
 
 **Cons:**
+
 - Slower (~8s per minute of video for pre-filter)
 - Requires API calls
 
@@ -386,38 +490,41 @@ screenscribe review video.mov --keywords-only
 ```
 
 **How it works:**
+
 1. Scans transcript for predefined keywords (bug, błąd, nie działa, etc.)
 2. Extracts screenshots at keyword matches
 3. No LLM pre-analysis
 
 **Pros:**
+
 - Very fast (<1s for detection)
 - No API costs for detection phase
 - Predictable results
 
 **Cons:**
+
 - Misses issues without explicit keywords
 - No contextual understanding
 - ~70-80% recall compared to semantic mode
 
 ### When to Use Which
 
-| Scenario | Recommended Mode |
-|----------|------------------|
+| Scenario                | Recommended Mode   |
+| ----------------------- | ------------------ |
 | Full review with budget | Default (semantic) |
-| Quick triage | `--keywords-only` |
-| API rate limited | `--keywords-only` |
-| Non-technical reviewer | Default (semantic) |
-| Clear bug mentions | `--keywords-only` |
+| Quick triage            | `--keywords-only`  |
+| API rate limited        | `--keywords-only`  |
+| Non-technical reviewer  | Default (semantic) |
+| Clear bug mentions      | `--keywords-only`  |
 
 ### Performance Comparison
 
 For a 15-minute video with ~40 issues:
 
-| Mode | Detection Time | API Calls | Issues Found |
-|------|----------------|-----------|--------------|
-| Semantic | ~2 min | 1 (pre-filter) | ~40 |
-| Keywords | <1s | 0 | ~30-35 |
+| Mode     | Detection Time | API Calls      | Issues Found |
+| -------- | -------------- | -------------- | ------------ |
+| Semantic | ~2 min         | 1 (pre-filter) | ~40          |
+| Keywords | <1s            | 0              | ~30-35       |
 
 ## Multi-Provider Setup
 
@@ -447,15 +554,16 @@ SCREENSCRIBE_VISION_MODEL=gpt-4o
 
 ### How Keys Are Resolved
 
-| Key Variable | Used For |
-|--------------|----------|
-| `LIBRAXIS_API_KEY` | STT endpoint |
-| `OPENAI_API_KEY` | LLM + Vision endpoints |
+| Key Variable           | Used For                   |
+| ---------------------- | -------------------------- |
+| `LIBRAXIS_API_KEY`     | STT endpoint               |
+| `OPENAI_API_KEY`       | LLM + Vision endpoints     |
 | `SCREENSCRIBE_API_KEY` | Fallback for all endpoints |
 
 ### Example Configurations
 
 **All OpenAI:**
+
 ```env
 OPENAI_API_KEY=sk-proj-xxx
 SCREENSCRIBE_STT_ENDPOINT=https://api.openai.com/v1/audio/transcriptions
@@ -464,12 +572,14 @@ SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
 ```
 
 **All LibraxisAI:**
+
 ```env
 LIBRAXIS_API_KEY=vista-xxx
 # Endpoints default to LibraxisAI, no need to specify
 ```
 
 **Hybrid (recommended for cost):**
+
 ```env
 LIBRAXIS_API_KEY=vista-xxx              # STT
 OPENAI_API_KEY=sk-proj-xxx              # VLM
@@ -528,11 +638,12 @@ screenscribe config --show
 ```
 
 Output:
+
 ```
 Current Configuration:
 
 API Base: https://api.libraxis.cloud
-API Key: ********************abc123
+API Key: *******************
 STT Model: whisper-1
 LLM Model: ai-suggestions
 Vision Model: ai-suggestions
@@ -554,6 +665,7 @@ screenscribe review video.mov --estimate
 ```
 
 Output:
+
 ```
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃              Estimated Processing Time                         ┃
@@ -581,11 +693,13 @@ screenscribe review video.mov --dry-run
 ```
 
 This actually processes the video (transcription takes ~30s), but stops before:
+
 - Taking screenshots
 - Running AI analysis
 - Generating full reports
 
 Output:
+
 ```
 ─────────────────── Dry Run Results ───────────────────
 
@@ -609,11 +723,11 @@ Run without --dry-run to process fully.
 
 ### When to Use Which
 
-| Mode | Use When |
-|------|----------|
-| `--estimate` | Quick check before starting, no API calls |
-| `--dry-run` | Want to see actual detections before full processing |
-| (no flag) | Ready to run full analysis |
+| Mode         | Use When                                             |
+| ------------ | ---------------------------------------------------- |
+| `--estimate` | Quick check before starting, no API calls            |
+| `--dry-run`  | Want to see actual detections before full processing |
+| (no flag)    | Ready to run full analysis                           |
 
 ## Custom Keywords
 
@@ -744,18 +858,19 @@ ScreenScribe uses a "best effort" approach - if something fails, it continues an
 
 ### What Happens When Things Fail
 
-| If this fails... | ScreenScribe will... |
-|------------------|----------------------|
-| Semantic analysis | Continue without AI insights, report basic detections |
-| Vision analysis | Continue without screenshot analysis |
-| Executive summary | Continue with individual analyses |
-| Single API request | Retry 3 times with backoff, then skip that item |
+| If this fails...   | ScreenScribe will...                                  |
+| ------------------ | ----------------------------------------------------- |
+| Semantic analysis  | Continue without AI insights, report basic detections |
+| Vision analysis    | Continue without screenshot analysis                  |
+| Executive summary  | Continue with individual analyses                     |
+| Single API request | Retry 3 times with backoff, then skip that item       |
 
 ### Errors in Reports
 
 When errors occur, they appear in your report:
 
 **In Markdown:**
+
 ```markdown
 ## ⚠️ Processing Errors
 
@@ -766,6 +881,7 @@ Some analysis steps encountered errors but processing continued:
 ```
 
 **In JSON:**
+
 ```json
 {
   "errors": [
@@ -778,6 +894,7 @@ Some analysis steps encountered errors but processing continued:
 ### Partial Results Are Still Useful
 
 Even with errors, you get:
+
 - Full transcript
 - All detected issues
 - Screenshots
@@ -790,6 +907,7 @@ This means you never lose work due to a temporary API issue.
 ### Audio Contains No Speech
 
 If you see this warning:
+
 ```
 ⚠️ Audio appears to contain little or no speech!
 The recording may have been made without microphone input.
@@ -798,22 +916,27 @@ The recording may have been made without microphone input.
 **Common causes:**
 
 1. **Microphone not enabled during recording**
+
    - macOS: Press `Cmd+Shift+5` → Click "Options" → Select your microphone
    - Windows: Settings → Sound → Input device
 
 2. **Wrong audio input selected**
+
    - Check System Preferences/Settings for correct microphone
    - Some apps default to "No Audio" or system sounds only
 
 3. **Microphone volume too low**
+
    - Check input level in System Preferences → Sound → Input
    - Ensure microphone isn't muted
 
 4. **Screen recording without audio permission**
+
    - macOS: System Preferences → Privacy & Security → Microphone
    - Grant permission to your recording app
 
 **To verify your recording has audio:**
+
 ```bash
 ffprobe -v quiet -show_streams video.mov | grep -E "codec_type|sample_rate"
 ```
@@ -857,7 +980,9 @@ screenscribe review video.mov --no-vision
 If no issues are found, check:
 
 1. **Language**: Ensure `--lang` matches the video's language
+
 2. **Keywords**: The detector looks for specific keywords. Try reviewing the transcript:
+
    ```bash
    screenscribe transcribe video.mov -o transcript.txt
    cat transcript.txt | grep -i "bug\|error\|problem\|zmiana"
@@ -883,7 +1008,10 @@ screenscribe review video.mov --resume
 If you get permission errors:
 
 ```bash
-# Make sure ~/.local/bin is in PATH
+#
+
+
+ sure ~/.local/bin is in PATH
 export PATH="$HOME/.local/bin:$PATH"
 
 # Add to your shell profile

@@ -5,6 +5,38 @@ All notable changes to ScreenScribe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-01-10
+
+### Added
+
+- **Screenshot Annotation Tools**: Draw directly on screenshots in HTML Pro report:
+  - Pen tool for freehand drawing (circles, underlines)
+  - Rectangle tool for highlighting areas
+  - Arrow tool for pointing to specific elements
+  - Color picker for annotation colors
+  - Undo/Clear functionality
+  - Annotations persist in localStorage between sessions
+
+- **Lightbox Annotation UI**: Full-screen drawing experience:
+  - Click thumbnail to open lightbox with annotation toolbar
+  - Annotations rendered at full resolution for precision
+  - Thumbnails display scaled preview of annotations
+  - Green dot indicator on thumbnails with annotations
+
+- **ZIP Export**: New export format for AI agents and external tools:
+  - `review.json` with full human review data
+  - `annotated/` folder with PNG screenshots (annotations burned in)
+  - JSZip library for client-side ZIP generation
+
+- **i18n Support**: All new UI elements support Polish/English toggle:
+  - `exportZip`, `exportZipTitle`, `generatingZip`, `zipExported`, `zipError`
+  - `data-i18n-title` attribute support for button tooltips
+
+### Changed
+
+- Annotation workflow moved from thumbnail to lightbox for better precision
+- Export buttons now use consistent i18n system (no hardcoded text)
+
 ## [0.1.3] - 2025-12-30
 
 ### Added
