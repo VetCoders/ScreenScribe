@@ -528,7 +528,51 @@ For a 15-minute video with ~40 issues:
 
 ## Multi-Provider Setup
 
-ScreenScribe supports using different API providers for different tasks. This is useful for cost optimization — e.g., cheaper STT with LibraxisAI, powerful VLM with OpenAI.
+ScreenScribe supports using different API providers for different tasks. This is useful for cost optimization — e.g., cheaper STT with LibraxisAI, powerful VLM with OpenAI, or fully local with Ollama.
+
+### Supported API Formats
+
+ScreenScribe automatically detects and supports two API formats:
+
+| Format | Providers | Detection |
+|--------|-----------|-----------|
+| **Chat Completions** | OpenAI, Ollama, Azure | `/chat/completions` in endpoint |
+| **Responses API** | LibraxisAI | `/responses` in endpoint |
+
+### Local Ollama Setup (Recommended for Privacy)
+
+Run everything locally with Ollama — no API keys needed for LLM/Vision:
+
+```env
+# ~/.config/screenscribe/config.env
+
+# Dummy key for local Ollama (not used but required)
+SCREENSCRIBE_API_KEY=ollama-local
+
+# LibraxisAI for STT (cloud transcription)
+LIBRAXIS_API_KEY=vista-xxx
+SCREENSCRIBE_STT_ENDPOINT=https://api.libraxis.cloud/v1/audio/transcriptions
+SCREENSCRIBE_STT_MODEL=whisper-v3-large
+
+# Local Ollama for LLM and Vision
+SCREENSCRIBE_LLM_ENDPOINT=http://localhost:11434/v1/chat/completions
+SCREENSCRIBE_VISION_ENDPOINT=http://localhost:11434/v1/chat/completions
+SCREENSCRIBE_LLM_MODEL=gpt-oss:120b-cloud
+SCREENSCRIBE_VISION_MODEL=qwen3-vl:235b-cloud
+```
+
+**Required Ollama models:**
+
+```bash
+# Pull recommended models
+ollama pull gpt-oss:120b-cloud    # For semantic analysis
+ollama pull qwen3-vl:235b-cloud   # For vision analysis
+```
+
+**Benefits:**
+- Full privacy — no data leaves your machine (except STT)
+- No API rate limits
+- Works offline for LLM/Vision
 
 ### Per-Endpoint API Keys
 
@@ -543,8 +587,8 @@ OPENAI_API_KEY=sk-proj-xxx
 
 # Explicit endpoints (full URLs)
 SCREENSCRIBE_STT_ENDPOINT=https://api.libraxis.cloud/v1/audio/transcriptions
-SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
-SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
+SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/chat/completions
+SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/chat/completions
 
 # Models
 SCREENSCRIBE_STT_MODEL=whisper-1
