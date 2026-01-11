@@ -633,8 +633,8 @@ SCREENSCRIBE_VISION_MODEL=gpt-4o
 ```env
 OPENAI_API_KEY=sk-proj-xxx
 SCREENSCRIBE_STT_ENDPOINT=https://api.openai.com/v1/audio/transcriptions
-SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
-SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
+SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/chat/completions
+SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/chat/completions
 ```
 
 **All LibraxisAI:**
@@ -650,8 +650,8 @@ LIBRAXIS_API_KEY=vista-xxx
 LIBRAXIS_API_KEY=vista-xxx              # STT
 OPENAI_API_KEY=sk-proj-xxx              # VLM
 SCREENSCRIBE_STT_ENDPOINT=https://api.libraxis.cloud/v1/audio/transcriptions
-SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
-SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
+SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/chat/completions
+SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/chat/completions
 ```
 
 ## Advanced Options

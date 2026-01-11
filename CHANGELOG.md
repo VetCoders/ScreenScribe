@@ -52,8 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Explicit Endpoint Configuration**: Full URL configuration instead of path guessing:
   - `SCREENSCRIBE_STT_ENDPOINT=https://api.libraxis.cloud/v1/audio/transcriptions`
-  - `SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses`
-  - `SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses`
+  - `SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/chat/completions`
+  - `SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/chat/completions`
 
 - **UnifiedFinding Dataclass**: Combines all semantic + vision fields in single result:
   - Semantic: `is_issue`, `sentiment`, `severity`, `summary`, `action_items`, `suggested_fix`

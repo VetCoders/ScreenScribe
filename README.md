@@ -9,7 +9,7 @@ ScreenScribe extracts actionable insights from screencast recordings by transcri
 <img width="726" height="667" alt="image" src="https://github.com/user-attachments/assets/d3abff5f-d511-4a2d-9210-1d22d2f97b1d" />
 
 
-> **Status:** v0.1.3 — Unified VLM pipeline + Multi-provider support + Batch mode.
+> **Status:** v0.1.4 — HTML Pro with annotations + ZIP export + Dual API format support.
 
 ## API Provider
 
@@ -28,8 +28,8 @@ OPENAI_API_KEY=sk-proj-xxx              # → VLM (unified analysis)
 
 # Explicit endpoints (full URLs - recommended)
 SCREENSCRIBE_STT_ENDPOINT=https://api.libraxis.cloud/v1/audio/transcriptions
-SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
-SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
+SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/chat/completions
+SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/chat/completions
 
 # Models
 SCREENSCRIBE_STT_MODEL=whisper-1
@@ -234,8 +234,8 @@ SCREENSCRIBE_API_KEY=your-api-key
 
 # Explicit Endpoints (full URLs - recommended)
 SCREENSCRIBE_STT_ENDPOINT=https://api.openai.com/v1/audio/transcriptions
-SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
-SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
+SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/chat/completions
+SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/chat/completions
 
 # Alternative: Base URL (auto-derives /v1/... paths)
 # SCREENSCRIBE_API_BASE=https://api.libraxis.cloud

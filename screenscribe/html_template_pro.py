@@ -1811,9 +1811,9 @@ async function exportReviewedZIP() {
                 }
             }
 
-            // Keep original screenshot reference (not embedded)
-            if (screenshot) {
-                result.screenshot_original = screenshot;
+            // Keep original screenshot path reference (not base64)
+            if (f.screenshot_path) {
+                result.screenshot_original = f.screenshot_path;
             }
 
             reviewedFindings.push(result);
