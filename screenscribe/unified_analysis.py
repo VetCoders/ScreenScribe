@@ -815,14 +815,19 @@ def _normalize_text_for_similarity(text: str) -> set[str]:
     # Process words
     result = set()
     for word in words:
-        # Skip short words and stopwords
-        if len(word) <= 2 or word in stopwords:
-            continue
-        # Normalize numbers
+        # Normalize numbers first so digits survive length filter
         if word in number_map:
             result.add(number_map[word])
+            continue
+
+        # Allow key short tokens like UI/UX/AI and digits
+        if len(word) <= 2 and not word.isdigit() and word not in {"ui", "ux", "ai"}:
+            continue
+        if word in stopwords:
+            continue
+
         # Apply stemming
-        elif word in stem_map:
+        if word in stem_map:
             result.add(stem_map[word])
         else:
             result.add(word)
