@@ -10,7 +10,7 @@ import httpx
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from .api_utils import retry_request
+from .api_utils import extract_llm_response_text, is_chat_completions_endpoint, retry_request
 from .config import ScreenScribeConfig
 from .detect import Detection
 from .image_utils import encode_image_base64
@@ -95,27 +95,49 @@ def analyze_screenshot(
 
         def do_vision_request() -> httpx.Response:
             with httpx.Client(timeout=120.0) as client:
-                # Build request payload
-                payload: dict[str, object] = {
-                    "model": config.vision_model,
-                    "input": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "input_text", "text": prompt},
-                                {
-                                    "type": "input_image",
-                                    "image_url": f"data:{media_type};base64,{image_base64}",
-                                    "detail": "high",
-                                },
-                            ],
-                        }
-                    ],
-                }
+                # Build request payload based on API format
+                use_chat_completions = is_chat_completions_endpoint(config.vision_endpoint)
 
-                # Add conversation chaining if we have semantic analysis context
-                if previous_response_id:
-                    payload["previous_response_id"] = previous_response_id
+                if use_chat_completions:
+                    # OpenAI Chat Completions format
+                    payload: dict[str, object] = {
+                        "model": config.vision_model,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": prompt},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:{media_type};base64,{image_base64}"
+                                        },
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                else:
+                    # LibraxisAI Responses API format
+                    payload = {
+                        "model": config.vision_model,
+                        "input": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "input_text", "text": prompt},
+                                    {
+                                        "type": "input_image",
+                                        "image_url": f"data:{media_type};base64,{image_base64}",
+                                        "detail": "high",
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                    # Add conversation chaining if we have semantic analysis context (LibraxisAI only)
+                    if previous_response_id:
+                        payload["previous_response_id"] = previous_response_id
 
                 response = client.post(
                     config.vision_endpoint,
@@ -135,18 +157,8 @@ def analyze_screenshot(
         )
 
         result = response.json()
-        # v1/responses format - handle both reasoning and message outputs
-        content = ""
-        for item in result.get("output", []):
-            item_type = item.get("type", "")
-            if item_type == "reasoning":
-                pass  # Skip reasoning blocks
-            elif item_type == "message":
-                for part in item.get("content", []):
-                    if part.get("type") in ("output_text", "text"):
-                        content += part.get("text", "")
-            elif item_type in ("output_text", "text"):
-                content += item.get("text", "")
+        # Extract content using unified helper (supports both API formats)
+        content = extract_llm_response_text(result, config.vision_endpoint)
 
         # Parse JSON from response
         import json
