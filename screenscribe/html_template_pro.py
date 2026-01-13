@@ -1672,30 +1672,15 @@ function restoreUIFromState() {
     });
 }
 
-async function exportReviewedJSON() {
-    if (!reportState.reviewer.trim()) {
-        showNotification(i18n[currentLang].enterName);
-        document.getElementById('reviewer-name').focus();
-        return;
-    }
-
-    const reviewedCount = Object.values(reportState.findings).filter(f => f.confirmed !== null).length;
-    if (reviewedCount === 0) {
-        if (!confirm(i18n[currentLang].noReviewed)) {
-            return;
-        }
-    }
-
-    const embedScreenshots = document.getElementById('embed-screenshots')?.checked || false;
+// Shared function to build review data - used by both JSON and ZIP export
+function buildReviewData() {
     const originalFindings = JSON.parse(document.getElementById('original-findings').textContent);
     const reviewedFindings = [];
 
     for (const f of originalFindings) {
         const review = reportState.findings[f.id] || {};
-        // Remove base64 screenshot from export unless checkbox is checked
+        // Remove base64 screenshot - keep it lightweight
         const { screenshot, ...findingWithoutBase64 } = f;
-
-        // Get annotations for this finding
         const annotations = review.annotations || [];
 
         const result = {
@@ -1710,45 +1695,38 @@ async function exportReviewedJSON() {
             }
         };
 
-        // Handle screenshot with annotations
-        if (embedScreenshots && screenshot) {
-            // If there are annotations, merge them onto the screenshot
-            if (annotations.length > 0) {
-                try {
-                    const tool = annotationTools.get(String(f.id));
-                    const thumb = document.querySelector(`[data-finding-id="${f.id}"] .thumbnail`);
-                    let merged = null;
-                    if (tool && typeof tool.getMergedDataURL === 'function') {
-                        merged = await tool.getMergedDataURL();
-                    } else if (thumb) {
-                        merged = await mergeImageAndAnnotations(thumb, annotations);
-                        if (!merged) {
-                            const fallbackW = thumb.naturalWidth || 1920;
-                            const fallbackH = thumb.naturalHeight || 1080;
-                            merged = await annotationsToPng(annotations, fallbackW, fallbackH);
-                        }
-                    }
-                    result.screenshot = merged || screenshot;
-                    result.screenshot_annotated = true;
-                } catch (e) {
-                    console.error('Failed to merge annotations for finding', f.id, e);
-                    result.screenshot = screenshot;
-                }
-            } else {
-                result.screenshot = screenshot;
-            }
+        // Keep original screenshot path reference (not base64)
+        if (f.screenshot_path) {
+            result.screenshot_path = f.screenshot_path;
         }
+
         reviewedFindings.push(result);
     }
 
-    const output = {
+    return {
         video: document.body.dataset.videoName,
         reviewed_at: new Date().toISOString(),
         reviewer: reportState.reviewer,
         findings: reviewedFindings
     };
+}
 
-    const filename = 'reviewed_' + (document.body.dataset.videoName || 'report') + '.json';
+async function exportReviewedJSON() {
+    if (!reportState.reviewer.trim()) {
+        showNotification(i18n[currentLang].enterName);
+        document.getElementById('reviewer-name').focus();
+        return;
+    }
+
+    const reviewedCount = Object.values(reportState.findings).filter(f => f.confirmed !== null).length;
+    if (reviewedCount === 0) {
+        if (!confirm(i18n[currentLang].noReviewed)) {
+            return;
+        }
+    }
+
+    const output = buildReviewData();
+    const filename = 'report_reviewed.json';
     const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1857,7 +1835,7 @@ async function exportReviewedZIP() {
         };
 
         // Add JSON to zip
-        zip.file('review.json', JSON.stringify(output, null, 2));
+        zip.file('report_reviewed.json', JSON.stringify(output, null, 2));
 
         // Generate and download ZIP
         const videoName = document.body.dataset.videoName || 'report';
@@ -3213,10 +3191,6 @@ def render_html_report_pro(
             <div class="export-options">
                 <label><span data-i18n="reviewer">Recenzent:</span>
                     <input type="text" id="reviewer-name" placeholder="Twoje imie" data-i18n="reviewerPlaceholder">
-                </label>
-                <label class="checkbox-label">
-                    <input type="checkbox" id="embed-screenshots">
-                    <span data-i18n="embedScreenshots">Embeduj screenshoty (audyt zewn.)</span>
                 </label>
             </div>
             <div class="export-buttons">
