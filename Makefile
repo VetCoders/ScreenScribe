@@ -1,7 +1,7 @@
 # ScreenScribe Makefile
 # Uses uv as package manager
 
-.PHONY: help install dev lint format test test-unit test-integration test-all typecheck security clean version version-patch version-minor version-major
+.PHONY: help install dev setup-hooks lint format test test-unit test-integration test-all typecheck security clean version version-patch version-minor version-major
 
 # Default target
 help:
@@ -10,8 +10,9 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Setup:"
-	@echo "  install          Install production dependencies"
-	@echo "  dev              Install dev dependencies"
+	@echo "  install          Install CLI + git hooks"
+	@echo "  dev              Install dev dependencies + git hooks"
+	@echo "  setup-hooks      Install pre-commit/pre-push hooks only"
 	@echo ""
 	@echo "Quality:"
 	@echo "  lint             Run linter (ruff check)"
@@ -41,11 +42,27 @@ help:
 # Setup
 # ============================================================================
 
-install:
+install: setup-hooks
 	uv tool install .
 
-dev:
-	uv pip install -e ".[dev]" || uv pip install -e . && uv pip install pytest ruff mypy bandit
+dev: setup-hooks
+	uv sync --dev
+
+setup-hooks:
+	@if [ -f .pre-commit-config.yaml ]; then \
+		echo "Installing pre-commit hooks..."; \
+		GLOBAL_HOOKS=$$(git config --global core.hooksPath 2>/dev/null || true); \
+		if [ -n "$$GLOBAL_HOOKS" ]; then \
+			git config --global --unset core.hooksPath 2>/dev/null || true; \
+		fi; \
+		uv run pre-commit install --install-hooks >/dev/null 2>&1 || true; \
+		uv run pre-commit install --hook-type pre-push >/dev/null 2>&1 || true; \
+		if [ -n "$$GLOBAL_HOOKS" ]; then \
+			git config --global core.hooksPath "$$GLOBAL_HOOKS"; \
+		fi; \
+		git config --local core.hooksPath .git/hooks; \
+		echo "Hooks installed: pre-commit, pre-push"; \
+	fi
 
 # ============================================================================
 # Code Quality

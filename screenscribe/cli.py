@@ -33,6 +33,7 @@ from .report import (
     save_enhanced_json_report,
     save_enhanced_markdown_report,
     save_html_report,
+    save_html_report_pro,
 )
 from .screenshots import extract_screenshots_for_detections
 
@@ -73,8 +74,82 @@ app = typer.Typer(
 )
 
 
-@app.callback()
+def _interactive_mode() -> None:
+    """Launch interactive mode when no subcommand is given."""
+    from rich.prompt import Prompt
+
+    console.print()
+    console.print(
+        Panel(
+            f"[bold]ScreenScribe[/] v{__version__}\n"
+            "[dim]Video review automation - extract bugs and changes from screencast[/]",
+            border_style="green",
+        )
+    )
+    console.print()
+
+    # Command selection
+    commands = {
+        "1": ("review", "Analyze video and generate report"),
+        "2": ("transcribe", "Transcribe video only"),
+        "3": ("config", "Show/edit configuration"),
+        "4": ("version", "Show version info"),
+    }
+
+    console.print("[bold]Select command:[/]")
+    for key, (cmd, desc) in commands.items():
+        console.print(f"  [cyan]{key}[/]) [bold]{cmd}[/] - {desc}")
+    console.print()
+
+    choice = Prompt.ask("Enter choice", choices=["1", "2", "3", "4"], default="1")
+    selected_cmd = commands[choice][0]
+
+    if selected_cmd == "version":
+        console.print(f"\n[bold]ScreenScribe[/] v{__version__}")
+        raise typer.Exit()
+
+    if selected_cmd == "config":
+        console.print("\n[dim]Running:[/] screenscribe config --show")
+        import subprocess
+        import sys
+
+        subprocess.run([sys.executable, "-m", "screenscribe", "config", "--show"])
+        raise typer.Exit()
+
+    # For review/transcribe, ask for video path
+    console.print()
+    video_path = Prompt.ask(
+        "[bold]Video path[/] (paste or drag file here)",
+        default="",
+    )
+
+    if not video_path.strip():
+        console.print("[red]No video path provided. Exiting.[/]")
+        raise typer.Exit(1)
+
+    # Clean path (remove quotes if dragged)
+    video_path = video_path.strip().strip("'\"")
+    video = Path(video_path)
+
+    if not video.exists():
+        console.print(f"[red]File not found:[/] {video}")
+        raise typer.Exit(1)
+
+    console.print()
+    console.print(f"[dim]Running:[/] screenscribe {selected_cmd} {video}")
+    console.print()
+
+    # Use subprocess to call commands (avoids forward reference issues)
+    import subprocess
+    import sys
+
+    run_cmd = [sys.executable, "-m", "screenscribe", selected_cmd, str(video)]
+    subprocess.run(run_cmd)
+
+
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: Annotated[
         bool,
         typer.Option(
@@ -87,7 +162,10 @@ def main(
     ] = False,
 ) -> None:
     """ScreenScribe - Video review automation."""
-    pass
+    # If no subcommand given, launch interactive mode
+    if ctx.invoked_subcommand is None:
+        _interactive_mode()
+
 
 # Time estimates (seconds per unit)
 ESTIMATE_STT_PER_MINUTE = 2.0  # ~2s per minute of video
@@ -274,6 +352,20 @@ def review(
             help="Save interactive HTML report with human review workflow",
         ),
     ] = True,
+    pro_report: Annotated[
+        bool,
+        typer.Option(
+            "--pro/--no-pro",
+            help="Use Pro HTML template with video player and subtitle sync",
+        ),
+    ] = True,
+    embed_video: Annotated[
+        bool,
+        typer.Option(
+            "--embed-video",
+            help="Embed video as base64 in Pro HTML report (only for files <50MB)",
+        ),
+    ] = False,
     keywords_file: Annotated[
         Path | None,
         typer.Option(
@@ -662,15 +754,28 @@ def review(
                 errors=[],
             )
         if html_report:
-            save_html_report(
-                detections,
-                screenshots,
-                video,
-                video_output / "report.html",
-                unified_findings=[],
-                executive_summary="",
-                errors=[],
-            )
+            if pro_report:
+                save_html_report_pro(
+                    detections,
+                    screenshots,
+                    video,
+                    video_output / "report.html",
+                    segments=transcription.segments if transcription else None,
+                    unified_findings=[],
+                    executive_summary="",
+                    errors=[],
+                    embed_video=embed_video,
+                )
+            else:
+                save_html_report(
+                    detections,
+                    screenshots,
+                    video,
+                    video_output / "report.html",
+                    unified_findings=[],
+                    executive_summary="",
+                    errors=[],
+                )
         console.print("[dim]Basic report saved (AI analysis pending)[/]")
 
         # Step 5: Unified VLM Analysis - replaces separate semantic + vision
@@ -756,15 +861,28 @@ def review(
             )
 
         if html_report:
-            save_html_report(
-                detections,
-                screenshots,
-                video,
-                video_output / "report.html",
-                unified_findings=unified_findings,
-                executive_summary=executive_summary,
-                errors=pipeline_errors,
-            )
+            if pro_report:
+                save_html_report_pro(
+                    detections,
+                    screenshots,
+                    video,
+                    video_output / "report.html",
+                    segments=transcription.segments if transcription else None,
+                    unified_findings=unified_findings,
+                    executive_summary=executive_summary,
+                    errors=pipeline_errors,
+                    embed_video=embed_video,
+                )
+            else:
+                save_html_report(
+                    detections,
+                    screenshots,
+                    video,
+                    video_output / "report.html",
+                    unified_findings=unified_findings,
+                    executive_summary=executive_summary,
+                    errors=pipeline_errors,
+                )
 
         # Show errors summary if any
         if pipeline_errors:
@@ -788,7 +906,14 @@ def review(
         # Clean up checkpoint on success
         delete_checkpoint(video_output)
 
-        console.print(f"\n[bold green]Done![/] Results saved to: {video_output}\n")
+        # Final success output
+        console.rule("[bold green]Finished successfully![/]")
+        console.print()
+        console.print(f"[green]Enhanced report saved:[/] {video_output / 'report.json'}")
+        console.print(f"[green]Enhanced Markdown report saved:[/] {video_output / 'report.md'}")
+        console.print(f"[green]HTML Pro report saved:[/] {video_output / 'report.html'}")
+        console.print()
+        console.rule(f"[dim]ScreenScribe v{__version__} by VetCoders[/]")
 
         # Update context for next video in batch
         if unified_findings:
@@ -906,6 +1031,13 @@ def config(
         return
 
     if init:
+        config_path = Path.home() / ".config" / "screenscribe" / "config.env"
+        if config_path.exists():
+            console.print(f"[yellow]Config already exists:[/] {config_path}")
+            console.print("[dim]Use --show to view current config[/]")
+            if not typer.confirm("Overwrite existing config?", default=False):
+                console.print("[dim]Aborted. Existing config preserved.[/]")
+                return
         path = cfg.save_default_config()
         console.print(f"[green]Config created:[/] {path}")
         console.print("[dim]Edit this file to customize settings[/]")
