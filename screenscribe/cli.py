@@ -619,21 +619,33 @@ def review(
             continue  # Skip to next video in batch
 
         # Validate audio quality before proceeding
-        is_valid, validation_error = validate_audio_quality(transcription)
-        if not is_valid and validation_error:
+        is_valid, validation_message, is_warning = validate_audio_quality(transcription)
+        if validation_message:
             console.print()
-            console.print(
-                Panel(
-                    validation_error, title="[bold red]Audio Quality Issue[/]", border_style="red"
+            if is_valid and is_warning:
+                console.print(
+                    Panel(
+                        validation_message,
+                        title="[bold yellow]Audio Quality Warning[/]",
+                        border_style="yellow",
+                    )
                 )
-            )
-            console.print()
-            console.print(
-                "[yellow]Processing stopped.[/] Please fix the audio issue and try again."
-            )
-            console.print("[dim]If you believe this is a false positive, please report it.[/]")
-            delete_checkpoint(video_output)
-            continue  # Skip to next video in batch
+                console.print()
+            elif not is_valid:
+                console.print(
+                    Panel(
+                        validation_message,
+                        title="[bold red]Audio Quality Issue[/]",
+                        border_style="red",
+                    )
+                )
+                console.print()
+                console.print(
+                    "[yellow]Processing stopped.[/] Please fix the audio issue and try again."
+                )
+                console.print("[dim]If you believe this is a false positive, please report it.[/]")
+                delete_checkpoint(video_output)
+                continue  # Skip to next video in batch
 
         # Step 3: Issue Detection (varies by filter level)
         pois = []  # Points of interest from semantic pre-filter

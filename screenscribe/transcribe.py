@@ -163,7 +163,7 @@ def transcribe_audio(
     )
 
 
-def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | None]:
+def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | None, bool]:
     """
     Validate that audio actually contains speech.
 
@@ -174,12 +174,16 @@ def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | Non
         result: TranscriptionResult from transcribe_audio()
 
     Returns:
-        Tuple of (is_valid, error_message).
-        If is_valid is False, error_message contains user-friendly feedback.
+        Tuple of (is_valid, message, is_warning).
+        If is_valid is False, message contains user-friendly feedback.
+        If is_warning is True, pipeline should continue after showing the warning.
     """
+    min_words_for_warning = 40
     if not result.segments:
-        return False, (
-            "⚠️  No audio segments detected!\n   The audio file appears to be empty or corrupted."
+        return (
+            False,
+            "⚠️  No audio segments detected!\n   The audio file appears to be empty or corrupted.",
+            False,
         )
 
     # Calculate average no_speech probability
@@ -187,7 +191,22 @@ def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | Non
 
     # Check for high no_speech probability (silent audio)
     if avg_no_speech > 0.6:
-        return False, (
+        transcript_text = result.text.strip()
+        if not transcript_text:
+            transcript_text = " ".join(s.text for s in result.segments if s.text)
+        word_count = len(transcript_text.split())
+        if word_count >= min_words_for_warning:
+            return (
+                True,
+                f"⚠️  High no-speech score detected, but transcript has content.\n"
+                f"   Average no-speech probability: {avg_no_speech:.0%}\n"
+                f"   Word count: {word_count}\n"
+                f"\n"
+                f"   Continuing anyway. If results look wrong, check mic settings.",
+                True,
+            )
+        return (
+            False,
             f"⚠️  Audio appears to contain little or no speech!\n"
             f"   Average no-speech probability: {avg_no_speech:.0%}\n"
             f"\n"
@@ -196,7 +215,8 @@ def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | Non
             f"   • Microphone input volume is too low (check System Settings > Sound > Input)\n"
             f"   • Wrong audio input device selected\n"
             f"\n"
-            f"   Tip: When using Cmd+Shift+5, click 'Options' and select your microphone."
+            f"   Tip: When using Cmd+Shift+5, click 'Options' and select your microphone.",
+            False,
         )
 
     # Check for repetitive hallucinations (Whisper hallucinates on silence)
@@ -206,12 +226,14 @@ def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | Non
         if unique_ratio < 0.3 and len(texts) > 3:
             # More than 70% duplicates with multiple segments = likely hallucination
             most_common = max(set(texts), key=texts.count)
-            return False, (
+            return (
+                False,
                 f"⚠️  Detected repetitive transcription (likely silent audio)!\n"
                 f"   The same phrase '{most_common}' appears repeatedly.\n"
                 f"   This typically happens when Whisper hallucinates on silent input.\n"
                 f"\n"
-                f"   Please check your microphone settings and re-record."
+                f"   Please check your microphone settings and re-record.",
+                False,
             )
 
-    return True, None
+    return True, None, False
