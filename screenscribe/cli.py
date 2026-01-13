@@ -774,6 +774,13 @@ def review(
                                 f"[green]Deduplicated:[/] {original_count} → "
                                 f"{len(unified_findings)} findings"
                             )
+                            # Filter detections/screenshots to match deduplicated findings
+                            keep_ids = {f.detection_id for f in unified_findings}
+                            if keep_ids and len(keep_ids) < len(screenshots):
+                                screenshots = [
+                                    (d, p) for (d, p) in screenshots if d.segment.id in keep_ids
+                                ]
+                                detections = [d for (d, _) in screenshots]
                     checkpoint.unified_findings = [
                         serialize_unified_finding(f) for f in unified_findings
                     ]
