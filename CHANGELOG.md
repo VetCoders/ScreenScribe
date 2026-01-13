@@ -16,9 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Annotations persist in localStorage between sessions
   - Green dot indicator on thumbnails with annotations
 
+- **Modular HTML Pro Renderer**: Split template, styles, and scripts into a dedicated package
+
 - **ZIP Export**: Bundle for sharing with AI agents and external tools:
-  - `review.json` with human review data (severity, status, notes)
-  - `annotated/` folder with PNG screenshots (annotations burned in)
+  - `report_reviewed_<video>.json` with human review data (severity, status, notes)
+  - `TODO_<video>.md` with TODO list grouped by severity
+  - `annotated/` folder with PNG screenshots (annotations burned in, video-prefixed names)
   - Client-side generation via JSZip
 
 - **VTT Subtitle Generator**: Auto-generated subtitles for video player sync

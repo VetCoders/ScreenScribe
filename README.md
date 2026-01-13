@@ -42,6 +42,7 @@ SCREENSCRIBE_VISION_MODEL=gpt-4o
 ## Features
 
 - **HTML Pro Report** (`--pro`): Interactive report with video player, subtitle sync, annotation tools (pen/rect/arrow), and ZIP export
+- **Modular HTML Pro Renderer**: Template, styles, and scripts split into a maintainable package
 - **Unified VLM Pipeline**: Single VLM call analyzes screenshot + full transcript together (~45% faster than separate LLM+VLM)
 - **Batch Mode**: Process multiple videos with shared context — VLM remembers findings across videos
 - **Multi-Provider Support**: Per-endpoint API keys (e.g., LibraxisAI for STT, OpenAI for VLM)

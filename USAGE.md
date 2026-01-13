@@ -322,8 +322,9 @@ Click **Export JSON** to download `report_reviewed_{video}.json` with human revi
 ### ZIP Export
 
 Click **Export ZIP** to download a bundle containing:
-- `report_reviewed.json` — human review data (severity, status, notes, annotations)
-- `annotated/` — PNG screenshots with annotations burned in
+- `report_reviewed_<video>.json` — human review data (severity, status, notes, annotations)
+- `TODO_<video>.md` — TODO list grouped by severity
+- `annotated/` — PNG screenshots with annotations burned in (filenames include video name)
 
 Ideal for sharing with AI agents or external tools.
 
