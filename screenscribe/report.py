@@ -10,8 +10,8 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .detect import Detection, format_timestamp
+from .html_pro import render_html_report_pro
 from .html_template import render_html_report
-from .html_template_pro import render_html_report_pro
 from .image_utils import encode_image_base64
 from .transcribe import Segment
 

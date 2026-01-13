@@ -8,7 +8,7 @@ Made with (งಠ_ಠ)ง by ⌜ScreenScribe⌟ © 2025 — Maciej & Monika + Kl
 __version__ = "0.1.4"
 
 # Export key modules for external use
-from .html_template_pro import render_html_report_pro
+from .html_pro import render_html_report_pro
 from .vtt_generator import (
     SubtitleEntry,
     format_display_timestamp,
