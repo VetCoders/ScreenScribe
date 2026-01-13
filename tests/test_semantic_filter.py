@@ -11,6 +11,7 @@ from screenscribe.semantic_filter import (
     SemanticFilterLevel,
     _extract_content_from_response,
     _parse_prefilter_response,
+    deduplicate_pois,
     format_transcript_with_timestamps,
     get_semantic_prefilter_prompt,
     merge_pois_with_detections,
@@ -548,6 +549,63 @@ class TestMergePoisWithDetections:
         )
         result = merge_pois_with_detections([poi], [detection])
         assert result[0].confidence <= 1.0
+
+
+# --- Test deduplicate_pois ---
+
+
+class TestDeduplicatePois:
+    """Tests for POI deduplication."""
+
+    def test_noop_for_unique(self, sample_poi: PointOfInterest) -> None:
+        """Unique POIs should remain unchanged."""
+        other = PointOfInterest(
+            timestamp_start=10.0,
+            timestamp_end=12.0,
+            category="ui",
+            confidence=0.5,
+            reasoning="Layout looks fine",
+            transcript_excerpt="Layout wygląda dobrze.",
+            segment_ids=[2],
+        )
+
+        result = deduplicate_pois([sample_poi, other])
+
+        assert len(result) == 2
+        assert result[0] == sample_poi
+        assert result[1] == other
+
+    def test_merges_similar(self) -> None:
+        """Similar excerpts should merge into one POI."""
+        poi1 = PointOfInterest(
+            timestamp_start=1.0,
+            timestamp_end=2.0,
+            category="change",
+            confidence=0.6,
+            reasoning="Lista jest za dluga",
+            transcript_excerpt="Lista jest za długa, ograniczyć do 5 pozycji.",
+            segment_ids=[1],
+        )
+        poi2 = PointOfInterest(
+            timestamp_start=3.0,
+            timestamp_end=4.0,
+            category="ui",
+            confidence=0.9,
+            reasoning="Skrócić listę do 5 pozycji",
+            transcript_excerpt="Skrócić listę do 5 pozycji w dropdownie.",
+            segment_ids=[2],
+        )
+
+        result = deduplicate_pois([poi1, poi2])
+
+        assert len(result) == 1
+        merged = result[0]
+        assert merged.timestamp_start == 1.0
+        assert merged.timestamp_end == 4.0
+        assert merged.category == "ui"
+        assert merged.confidence == 0.9
+        assert sorted(merged.segment_ids) == [1, 2]
+        assert "lista" in merged.transcript_excerpt.lower()
 
 
 # --- Test poi_to_detection ---

@@ -14,6 +14,7 @@ from rich.console import Console
 
 from .api_utils import build_llm_request_body, extract_llm_response_text, retry_request
 from .config import ScreenScribeConfig
+from .text_similarity import _text_similarity
 from .transcribe import Segment, TranscriptionResult
 
 console = Console()
@@ -295,6 +296,79 @@ def _parse_prefilter_response(
         pois.append(poi)
 
     return pois
+
+
+def _poi_similarity_text(poi: PointOfInterest) -> str:
+    """Build a similarity string for POI deduplication."""
+    parts = [poi.transcript_excerpt, poi.reasoning]
+    return " ".join(part.strip() for part in parts if part and part.strip())
+
+
+def deduplicate_pois(
+    pois: list[PointOfInterest],
+    similarity_threshold: float = 0.45,
+) -> list[PointOfInterest]:
+    """Deduplicate similar POIs by transcript excerpt and reasoning."""
+    if not pois or len(pois) <= 1:
+        return pois
+
+    groups: list[list[PointOfInterest]] = []
+    used: set[int] = set()
+
+    for i, poi in enumerate(pois):
+        if i in used:
+            continue
+
+        group = [poi]
+        used.add(i)
+        poi_text = _poi_similarity_text(poi)
+
+        for j, other in enumerate(pois):
+            if j in used:
+                continue
+
+            similarity = _text_similarity(poi_text, _poi_similarity_text(other))
+            if similarity >= similarity_threshold:
+                group.append(other)
+                used.add(j)
+
+        groups.append(group)
+
+    result: list[PointOfInterest] = []
+
+    for group in groups:
+        if len(group) == 1:
+            result.append(group[0])
+            continue
+
+        group.sort(key=lambda p: p.timestamp_start)
+        earliest = group[0]
+        best = max(group, key=lambda p: p.confidence)
+
+        excerpts = [p.transcript_excerpt.strip() for p in group if p.transcript_excerpt.strip()]
+        reasoning = []
+        seen_reasoning: set[str] = set()
+        for p in group:
+            if not p.reasoning:
+                continue
+            key = p.reasoning.strip().lower()
+            if key in seen_reasoning:
+                continue
+            seen_reasoning.add(key)
+            reasoning.append(p.reasoning.strip())
+
+        merged = PointOfInterest(
+            timestamp_start=min(p.timestamp_start for p in group),
+            timestamp_end=max(p.timestamp_end for p in group),
+            category=best.category,
+            confidence=max(p.confidence for p in group),
+            reasoning=" | ".join(reasoning) if reasoning else earliest.reasoning,
+            transcript_excerpt=max(excerpts, key=len) if excerpts else earliest.transcript_excerpt,
+            segment_ids=sorted({sid for p in group for sid in p.segment_ids}),
+        )
+        result.append(merged)
+
+    return result
 
 
 def merge_pois_with_detections(

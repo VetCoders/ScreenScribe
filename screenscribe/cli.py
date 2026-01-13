@@ -41,6 +41,7 @@ from .screenshots import extract_screenshots_for_detections
 # from .semantic import analyze_detections_semantically, generate_executive_summary
 from .semantic_filter import (
     SemanticFilterLevel,
+    deduplicate_pois,
     merge_pois_with_detections,
     pois_to_detections,
     semantic_prefilter,
@@ -663,11 +664,23 @@ def review(
                 console.print("[cyan]Using semantic pre-filter (analyzing entire transcript)[/]")
                 pois = semantic_prefilter(transcription, config)
                 if pois:
-                    # Convert POIs to Detection objects for compatibility
-                    detections = pois_to_detections(pois, transcription)
-                    console.print(
-                        f"[green]Semantic pre-filter identified {len(detections)} findings[/]"
-                    )
+                    original_count = len(pois)
+                    pois = deduplicate_pois(pois)
+                    if len(pois) < original_count:
+                        console.print(f"[green]POI dedup:[/] {original_count} → {len(pois)}")
+                    if pois:
+                        # Convert POIs to Detection objects for compatibility
+                        detections = pois_to_detections(pois, transcription)
+                        console.print(
+                            f"[green]Semantic pre-filter identified {len(detections)} findings[/]"
+                        )
+                    else:
+                        # Fallback to keywords if semantic results collapse after dedupe
+                        console.print(
+                            "[yellow]Semantic pre-filter yielded no results after dedupe, "
+                            "falling back to keywords[/]"
+                        )
+                        detections = detect_issues(transcription, keywords_file=keywords_file)
                 else:
                     # Fallback to keywords if semantic fails
                     console.print(
@@ -686,13 +699,30 @@ def review(
                 pois = semantic_prefilter(transcription, config)
 
                 if pois:
-                    # Merge semantic POIs with keyword detections
-                    merged_pois = merge_pois_with_detections(pois, keyword_detections)
-                    detections = pois_to_detections(merged_pois, transcription)
-                    console.print(
-                        f"[green]Combined detection: {len(keyword_detections)} keywords + "
-                        f"{len(pois)} semantic → {len(detections)} merged findings[/]"
-                    )
+                    original_count = len(pois)
+                    pois = deduplicate_pois(pois)
+                    if len(pois) < original_count:
+                        console.print(
+                            f"[green]Semantic POI dedup:[/] {original_count} → {len(pois)}"
+                        )
+                    if pois:
+                        # Merge semantic POIs with keyword detections
+                        merged_pois = merge_pois_with_detections(pois, keyword_detections)
+                        merged_original = len(merged_pois)
+                        merged_pois = deduplicate_pois(merged_pois)
+                        if len(merged_pois) < merged_original:
+                            console.print(
+                                f"[green]Merged POI dedup:[/] {merged_original} → "
+                                f"{len(merged_pois)}"
+                            )
+                        detections = pois_to_detections(merged_pois, transcription)
+                        console.print(
+                            f"[green]Combined detection: {len(keyword_detections)} keywords + "
+                            f"{len(pois)} semantic → {len(detections)} merged findings[/]"
+                        )
+                    else:
+                        # Use keyword detections if semantic collapses after dedupe
+                        detections = keyword_detections
                 else:
                     # Use keyword detections if semantic fails
                     detections = keyword_detections
