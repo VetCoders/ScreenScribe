@@ -1726,7 +1726,8 @@ async function exportReviewedJSON() {
     }
 
     const output = buildReviewData();
-    const filename = 'report_reviewed.json';
+    const videoName = document.body.dataset.videoName || 'report';
+    const filename = 'report_reviewed_' + videoName.replace(/\\.[^.]+$/, '') + '.json';
     const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
