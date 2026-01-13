@@ -576,7 +576,7 @@ def generate_visual_summary_unified(findings: list[UnifiedFinding]) -> str:
 
 def deduplicate_findings(
     findings: list[UnifiedFinding],
-    similarity_threshold: float = 0.45,
+    similarity_threshold: float = 0.4,
 ) -> list[UnifiedFinding]:
     """Deduplicate similar findings by merging them.
 
@@ -597,14 +597,43 @@ def deduplicate_findings(
     if not findings or len(findings) <= 1:
         return findings
 
+    def normalize_summary(text: str) -> str:
+        return " ".join(text.lower().split())
+
+    def similarity_text(finding: UnifiedFinding) -> str:
+        if finding.summary.strip():
+            return finding.summary
+        parts = []
+        parts.extend(finding.action_items or [])
+        parts.extend(finding.affected_components or [])
+        parts.extend(finding.issues_detected or [])
+        parts.extend(finding.ui_elements or [])
+        return " ".join(part.strip() for part in parts if part and part.strip())
+
     # Severity ranking for comparison
     severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "none": 0}
+
+    # Group identical summaries first (stable, cross-category)
+    summary_groups: dict[str, list[int]] = {}
+    for idx, finding in enumerate(findings):
+        key = normalize_summary(finding.summary)
+        if key:
+            summary_groups.setdefault(key, []).append(idx)
 
     # Group similar findings
     groups: list[list[UnifiedFinding]] = []
     used: set[int] = set()
 
     for i, finding in enumerate(findings):
+        key = normalize_summary(finding.summary)
+        if key and len(summary_groups.get(key, [])) > 1:
+            if i in used:
+                continue
+            group = [findings[idx] for idx in summary_groups[key]]
+            groups.append(group)
+            used.update(summary_groups[key])
+            continue
+
         if i in used:
             continue
 
@@ -617,7 +646,12 @@ def deduplicate_findings(
             if j in used:
                 continue
 
-            similarity = _text_similarity(finding.summary, other.summary)
+            if finding.category == other.category:
+                if abs(finding.timestamp - other.timestamp) > 30:
+                    continue
+                similarity = _text_similarity(similarity_text(finding), similarity_text(other))
+            else:
+                similarity = 0.0
             if similarity >= similarity_threshold:
                 group.append(other)
                 used.add(j)

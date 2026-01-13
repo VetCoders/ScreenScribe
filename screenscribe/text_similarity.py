@@ -226,6 +226,43 @@ def _normalize_text_for_similarity(text: str) -> set[str]:
         "sekcji": "sekcja",
         "sekcję": "sekcja",
         "sekcje": "sekcja",
+        # szuflada (drawer)
+        "szuflady": "szuflada",
+        "szufladzie": "szuflada",
+        "szufladę": "szuflada",
+        # rozwin / rozwiń
+        "rozwiń": "rozwin",
+        "rozwin": "rozwin",
+        "rozwinac": "rozwin",
+        "rozwinąć": "rozwin",
+        # otwórz
+        "otwórz": "otworz",
+        "otworzyc": "otworz",
+        "otworzyć": "otworz",
+        "otwiera": "otworz",
+        "otwarcie": "otworz",
+        # zamaz / rozmaz
+        "zamazana": "zamaz",
+        "zamazane": "zamaz",
+        "zamazany": "zamaz",
+        "zamazania": "zamaz",
+        "rozmazany": "rozmaz",
+        "rozmazane": "rozmaz",
+        "rozmazania": "rozmaz",
+        # alert
+        "alerty": "alert",
+        "alertów": "alert",
+        "alertow": "alert",
+        # dane
+        "danych": "dane",
+        "danymi": "dane",
+        # historia
+        "historii": "historia",
+        "history": "historia",
+        # wizyta
+        "wizyty": "wizyta",
+        "wizytę": "wizyta",
+        "wizyt": "wizyta",
     }
 
     # Normalize: lowercase, remove punctuation, split
@@ -287,6 +324,16 @@ def _text_similarity(text1: str, text2: str) -> float:
         "input",
         "wybor",
         "opcja",
+        "szuflada",
+        "rozwin",
+        "otworz",
+        "zamaz",
+        "rozmaz",
+        "alert",
+        "dane",
+        "historia",
+        "wizyta",
+        "timeline",
         "1",
         "2",
         "3",
