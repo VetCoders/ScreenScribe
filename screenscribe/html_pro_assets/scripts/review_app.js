@@ -203,7 +203,7 @@ function restoreUIFromState() {
             const textarea = article.querySelector('.notes textarea');
             if (textarea) {
                 // Merge notes and actionItems for backwards compatibility
-                const combined = [state.notes, state.actionItems].filter(Boolean).join('\\n');
+                const combined = [state.notes, state.actionItems].filter(Boolean).join('\n');
                 textarea.value = combined;
             }
         }
@@ -314,7 +314,7 @@ async function exportReviewedJSON() {
 
     const output = buildReviewData();
     const videoName = document.body.dataset.videoName || 'report';
-    const baseName = videoName.replace(/\\.[^.]+$/, '');
+    const baseName = videoName.replace(/\.[^.]+$/, '');
     const filename = 'report_reviewed_' + baseName + '.json';
     const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -360,7 +360,7 @@ async function exportReviewedZIP() {
         const zip = new JSZip();
         const originalFindings = JSON.parse(document.getElementById('original-findings').textContent);
         const videoName = document.body.dataset.videoName || 'report';
-        const baseName = videoName.replace(/\\.[^.]+$/, '');
+        const baseName = videoName.replace(/\.[^.]+$/, '');
         const annotatedFolder = zip.folder('annotated');
 
         const reviewedFindings = [];
@@ -468,7 +468,7 @@ function exportTodoList() {
     const originalFindings = JSON.parse(document.getElementById('original-findings').textContent);
     const videoName = document.body.dataset.videoName || 'report';
     const reviewer = reportState.reviewer || 'Anonymous';
-    const baseName = videoName.replace(/\\.[^.]+$/, '');
+    const baseName = videoName.replace(/\.[^.]+$/, '');
     const md = buildTodoMarkdown(originalFindings, videoName, reviewer);
 
     // Download
@@ -669,7 +669,7 @@ function setLanguage(lang) {
         if (tab === 'summary') btn.textContent = i18n[lang].summary;
         if (tab === 'stats') btn.textContent = i18n[lang].stats;
         if (tab === 'findings') {
-            const count = btn.textContent.match(/\\((\\d+)\\)/);
+            const count = btn.textContent.match(/\((\d+)\)/);
             btn.textContent = i18n[lang].findings + (count ? ` (${count[1]})` : '');
         }
     });
