@@ -8,14 +8,15 @@ This guide covers practical examples and workflows for using ScreenScribe to ana
 2. [Batch Mode](#batch-mode)
 3. [Common Workflows](#common-workflows)
 4. [Understanding Output](#understanding-output)
-5. [Sentiment Detection](#sentiment-detection)
-6. [Detection Modes](#detection-modes)
-7. [Multi-Provider Setup](#multi-provider-setup)
-8. [Advanced Options](#advanced-options)
-9. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
-10. [Custom Keywords](#custom-keywords)
-11. [Resuming Interrupted Processing](#resuming-interrupted-processing)
-12. [Troubleshooting](#troubleshooting)
+5. [HTML Pro Report](#html-pro-report)
+6. [Sentiment Detection](#sentiment-detection)
+7. [Detection Modes](#detection-modes)
+8. [Multi-Provider Setup](#multi-provider-setup)
+9. [Advanced Options](#advanced-options)
+10. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
+11. [Custom Keywords](#custom-keywords)
+12. [Resuming Interrupted Processing](#resuming-interrupted-processing)
+13. [Troubleshooting](#troubleshooting)
 
 ## Basic Usage
 
@@ -281,6 +282,44 @@ The Markdown report contains:
 ```
 
 See [Sentiment Detection](#sentiment-detection) for details on `is_issue` and `sentiment` fields.
+
+## HTML Pro Report
+
+Generate an interactive HTML report with the `--pro` flag:
+
+```bash
+screenscribe review video.mov --pro
+```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Video Player** | Embedded player with subtitle sync - click finding to seek |
+| **Finding Cards** | Screenshot, transcript, AI analysis with severity badges |
+| **Lightbox View** | Click screenshot for full-resolution annotation |
+| **Annotation Tools** | Pen, rectangle, arrow tools with color picker |
+| **Human Review** | Edit severity, add notes, mark accepted/rejected |
+| **Language Toggle** | Switch between Polish and English (PL/EN) |
+| **Export Options** | JSON, TODO list, or ZIP bundle |
+
+### Annotation Workflow
+
+1. Click any screenshot thumbnail to open lightbox
+2. Use toolbar: **Pen** (freehand), **Rect** (highlight), **Arrow** (point)
+3. Pick color, draw annotations
+4. **Undo** / **Clear** to adjust
+5. Click **Done** to save
+
+Annotations persist in browser localStorage between sessions. Green dot indicates thumbnails with annotations.
+
+### ZIP Export
+
+Click **Export ZIP** to download a bundle containing:
+- `review.json` — human review data (severity, status, notes, annotations)
+- `annotated/` — PNG screenshots with annotations burned in
+
+Ideal for sharing with AI agents or external tools.
 
 ## Sentiment Detection
 

@@ -9,7 +9,7 @@ ScreenScribe extracts actionable insights from screencast recordings by transcri
 <img width="726" height="667" alt="image" src="https://github.com/user-attachments/assets/d3abff5f-d511-4a2d-9210-1d22d2f97b1d" />
 
 
-> **Status:** v0.1.3 — Unified VLM pipeline + Multi-provider support + Batch mode.
+> **Status:** v0.1.4 — HTML Pro reports + Annotation tools + ZIP export.
 
 ## API Provider
 
@@ -41,9 +41,11 @@ SCREENSCRIBE_VISION_MODEL=gpt-4o
 
 ## Features
 
+- **HTML Pro Report** (`--pro`): Interactive report with video player, subtitle sync, annotation tools (pen/rect/arrow), and ZIP export
 - **Unified VLM Pipeline**: Single VLM call analyzes screenshot + full transcript together (~45% faster than separate LLM+VLM)
 - **Batch Mode**: Process multiple videos with shared context — VLM remembers findings across videos
 - **Multi-Provider Support**: Per-endpoint API keys (e.g., LibraxisAI for STT, OpenAI for VLM)
+- **Dual API Format**: Works with LibraxisAI Responses API and OpenAI Chat Completions (auto-detected)
 - **Semantic Pre-Filtering**: LLM analyzes the entire transcript before frame extraction
 - **Sentiment Detection**: Understands negations and context - distinguishes real issues from confirmations
 - **Audio Extraction**: Automatically extracts audio from video files (MOV, MP4, etc.) using FFmpeg
@@ -55,7 +57,7 @@ SCREENSCRIBE_VISION_MODEL=gpt-4o
 - **Response Chaining**: Context persists via Responses API `previous_response_id` — across findings AND videos
 - **Model Validation**: Fail-fast validation of STT/LLM/Vision availability before pipeline starts
 - **AI-Optimized Reports**: JSON output designed for efficient AI agent consumption with structured action items
-- **Report Generation**: Creates JSON and Markdown reports with executive summaries
+- **Report Generation**: Creates JSON, Markdown, and HTML Pro reports with executive summaries
 - **Resumable Pipeline**: Checkpoint system allows resuming interrupted processing
 - **Graceful Degradation**: Best-effort processing - errors don't stop the pipeline
 - **Retry Logic**: Automatic retry with exponential backoff for API resilience
