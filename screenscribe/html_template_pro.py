@@ -2464,8 +2464,8 @@ class LightboxAnnotationTool {
         this.bindEvents();
         this.loadAnnotations();
         renderAnnotationsToSvg(this.svg, this.annotations, 1, 1);
-        // Auto-select rect tool so SVG receives pointer events
-        this.selectTool('rect');
+        // Don't auto-select tool - user must click toolbar to start drawing
+        // This prevents accidental annotations when just viewing
     }
 
     bindEvents() {
@@ -2547,12 +2547,10 @@ class LightboxAnnotationTool {
     getPosPct(e) {
         // Use actual image rect to account for object-fit: contain
         const rect = getActualImageRect(this.img);
-        return {
-            x: (e.clientX - rect.left) / rect.width,
-            y: (e.clientY - rect.top) / rect.height,
-            w: rect.width,
-            h: rect.height
-        };
+        // Clamp to 0-1 range to prevent out-of-bounds annotations
+        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+        return { x, y, w: rect.width, h: rect.height };
     }
 
     startDraw(e) {
