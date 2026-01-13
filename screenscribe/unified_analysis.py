@@ -571,3 +571,146 @@ def generate_visual_summary_unified(findings: list[UnifiedFinding]) -> str:
         lines.append(f"- {issue} ({count}x)")
 
     return "\n".join(lines)
+
+
+def _text_similarity(text1: str, text2: str) -> float:
+    """Calculate simple word-based Jaccard similarity between two texts.
+
+    Args:
+        text1: First text
+        text2: Second text
+
+    Returns:
+        Similarity score between 0.0 and 1.0
+    """
+    # Normalize: lowercase, split into words
+    words1 = set(text1.lower().split())
+    words2 = set(text2.lower().split())
+
+    if not words1 or not words2:
+        return 0.0
+
+    # Jaccard similarity: intersection / union
+    intersection = words1 & words2
+    union = words1 | words2
+
+    return len(intersection) / len(union) if union else 0.0
+
+
+def deduplicate_findings(
+    findings: list[UnifiedFinding],
+    similarity_threshold: float = 0.6,
+) -> list[UnifiedFinding]:
+    """Deduplicate similar findings by merging them.
+
+    Findings with similar summaries (above threshold) are merged into one.
+    The merged finding keeps:
+    - Highest severity
+    - Combined action items (deduplicated)
+    - First screenshot (earliest timestamp)
+    - Combined affected components
+
+    Args:
+        findings: List of UnifiedFinding objects
+        similarity_threshold: Minimum similarity (0-1) to consider as duplicate
+
+    Returns:
+        Deduplicated list of UnifiedFinding objects
+    """
+    if not findings or len(findings) <= 1:
+        return findings
+
+    # Severity ranking for comparison
+    severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "none": 0}
+
+    # Group similar findings
+    groups: list[list[UnifiedFinding]] = []
+    used: set[int] = set()
+
+    for i, finding in enumerate(findings):
+        if i in used:
+            continue
+
+        # Start new group with this finding
+        group = [finding]
+        used.add(i)
+
+        # Find similar findings
+        for j, other in enumerate(findings):
+            if j in used:
+                continue
+
+            similarity = _text_similarity(finding.summary, other.summary)
+            if similarity >= similarity_threshold:
+                group.append(other)
+                used.add(j)
+
+        groups.append(group)
+
+    # Merge each group into single finding
+    result: list[UnifiedFinding] = []
+
+    for group in groups:
+        if len(group) == 1:
+            result.append(group[0])
+            continue
+
+        # Sort by timestamp to get earliest
+        group.sort(key=lambda f: f.timestamp)
+        base = group[0]
+
+        # Find highest severity
+        best_severity = max(group, key=lambda f: severity_rank.get(f.severity, 0)).severity
+
+        # Combine action items (deduplicate)
+        all_actions: list[str] = []
+        seen_actions: set[str] = set()
+        for f in group:
+            for action in f.action_items:
+                action_lower = action.lower()
+                if action_lower not in seen_actions:
+                    all_actions.append(action)
+                    seen_actions.add(action_lower)
+
+        # Combine affected components
+        all_components: list[str] = []
+        seen_components: set[str] = set()
+        for f in group:
+            for comp in f.affected_components:
+                comp_lower = comp.lower()
+                if comp_lower not in seen_components:
+                    all_components.append(comp)
+                    seen_components.add(comp_lower)
+
+        # Create merged finding
+        merged = UnifiedFinding(
+            detection_id=base.detection_id,
+            screenshot_path=base.screenshot_path,
+            timestamp=base.timestamp,
+            # Use best values
+            category=base.category,
+            is_issue=any(f.is_issue for f in group),
+            sentiment=base.sentiment,
+            severity=best_severity,
+            summary=base.summary,  # Keep first (earliest) summary
+            action_items=all_actions[:5],  # Limit to 5 actions
+            affected_components=all_components,
+            suggested_fix=base.suggested_fix,
+            # Vision fields from first
+            ui_elements=base.ui_elements,
+            issues_detected=base.issues_detected,
+            accessibility_notes=base.accessibility_notes,
+            design_feedback=base.design_feedback,
+            technical_observations=base.technical_observations,
+            response_id=base.response_id,
+        )
+
+        result.append(merged)
+
+        # Log merge
+        if len(group) > 1:
+            console.print(
+                f"[dim]  Merged {len(group)} similar findings → " f"'{base.summary[:50]}...'[/]"
+            )
+
+    return result

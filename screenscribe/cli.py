@@ -49,6 +49,7 @@ from .transcribe import transcribe_audio, validate_audio_quality
 from .unified_analysis import (
     UnifiedFinding,
     analyze_all_findings_unified,
+    deduplicate_findings,
     generate_unified_summary,
     generate_visual_summary_unified,
 )
@@ -798,6 +799,15 @@ def review(
                     unified_findings = analyze_all_findings_unified(
                         screenshots, config, previous_response_id=batch_context_response_id
                     )
+                    # Deduplicate similar findings before saving
+                    if unified_findings:
+                        original_count = len(unified_findings)
+                        unified_findings = deduplicate_findings(unified_findings)
+                        if len(unified_findings) < original_count:
+                            console.print(
+                                f"[green]Deduplicated:[/] {original_count} → "
+                                f"{len(unified_findings)} findings"
+                            )
                     checkpoint.unified_findings = [
                         serialize_unified_finding(f) for f in unified_findings
                     ]
