@@ -178,7 +178,6 @@ def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | Non
         If is_valid is False, message contains user-friendly feedback.
         If is_warning is True, pipeline should continue after showing the warning.
     """
-    min_words_for_warning = 40
     if not result.segments:
         return (
             False,
@@ -189,22 +188,18 @@ def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | Non
     # Calculate average no_speech probability
     avg_no_speech = sum(s.no_speech_prob for s in result.segments) / len(result.segments)
 
-    # Check for high no_speech probability (silent audio)
-    if avg_no_speech > 0.6:
-        transcript_text = result.text.strip()
-        if not transcript_text:
-            transcript_text = " ".join(s.text for s in result.segments if s.text)
-        word_count = len(transcript_text.split())
-        if word_count >= min_words_for_warning:
-            return (
-                True,
-                f"⚠️  High no-speech score detected, but transcript has content.\n"
-                f"   Average no-speech probability: {avg_no_speech:.0%}\n"
-                f"   Word count: {word_count}\n"
-                f"\n"
-                f"   Continuing anyway. If results look wrong, check mic settings.",
-                True,
-            )
+    transcript_text = result.text.strip()
+    if not transcript_text:
+        transcript_text = " ".join(s.text for s in result.segments if s.text)
+    word_count = len(transcript_text.split())
+
+    suppress_warning_words = 150
+    stop_words_threshold = 40
+    stop_no_speech_threshold = 0.85
+    warn_no_speech_threshold = 0.75
+
+    # Only stop on very high no_speech + very short transcript.
+    if avg_no_speech > stop_no_speech_threshold and word_count < stop_words_threshold:
         return (
             False,
             f"⚠️  Audio appears to contain little or no speech!\n"
@@ -217,6 +212,21 @@ def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | Non
             f"\n"
             f"   Tip: When using Cmd+Shift+5, click 'Options' and select your microphone.",
             False,
+        )
+
+    # Suppress warning if transcript is long enough to be meaningful.
+    if word_count >= suppress_warning_words:
+        return True, None, False
+
+    if avg_no_speech >= warn_no_speech_threshold:
+        return (
+            True,
+            f"⚠️  High no-speech score detected, but transcript has content.\n"
+            f"   Average no-speech probability: {avg_no_speech:.0%}\n"
+            f"   Word count: {word_count}\n"
+            f"\n"
+            f"   Continuing anyway. If results look wrong, check mic settings.",
+            True,
         )
 
     # Check for repetitive hallucinations (Whisper hallucinates on silence)
