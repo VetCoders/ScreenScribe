@@ -5,7 +5,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from screenscribe.html_template_pro import render_html_report_pro
+from screenscribe.html_pro import render_html_report_pro
 from screenscribe.transcribe import Segment
 
 

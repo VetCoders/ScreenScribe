@@ -1,6 +1,6 @@
 """Test TODO export functionality in HTML Pro reports."""
 
-from screenscribe.html_template_pro import render_html_report_pro
+from screenscribe.html_pro import render_html_report_pro
 from screenscribe.transcribe import Segment
 
 
