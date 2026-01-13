@@ -422,7 +422,7 @@ def save_enhanced_markdown_report(
     for i, (detection, screenshot_path) in enumerate(issues, 1):
         uf = findings_by_id.get(detection.segment.id)
 
-        severity = uf.severity.upper() if uf else "UNKNOWN"
+        severity = (uf.severity if uf else "medium").upper()
         category = detection.category.upper()
 
         lines.append(
@@ -444,6 +444,9 @@ def save_enhanced_markdown_report(
             if uf.issues_detected:
                 lines.append("**Visual issues:** " + "; ".join(uf.issues_detected))
                 lines.append("")
+        else:
+            lines.append(f"**Summary:** {detection.segment.text}")
+            lines.append("")
 
         lines.append(f"Screenshot: {screenshot_path.name}")
         lines.extend(["", "---", ""])

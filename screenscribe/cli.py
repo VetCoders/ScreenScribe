@@ -739,7 +739,7 @@ def review(
         else:
             console.print("[dim]Step 4: Screenshot Extraction - skipped (cached)[/]")
 
-        # Save basic report immediately (before AI analysis)
+        # Save basic JSON report immediately (before AI analysis)
         # This ensures we have results even if AI steps fail
         if json_report:
             save_enhanced_json_report(
@@ -751,41 +751,7 @@ def review(
                 executive_summary="",
                 errors=[],
             )
-        if markdown_report:
-            save_enhanced_markdown_report(
-                detections,
-                screenshots,
-                video,
-                video_output / f"{video_stem}_report.md",
-                unified_findings=[],
-                executive_summary="",
-                visual_summary="",
-                errors=[],
-            )
-        if html_report:
-            if pro_report:
-                save_html_report_pro(
-                    detections,
-                    screenshots,
-                    video,
-                    video_output / f"{video_stem}_report.html",
-                    segments=transcription.segments if transcription else None,
-                    unified_findings=[],
-                    executive_summary="",
-                    errors=[],
-                    embed_video=embed_video,
-                )
-            else:
-                save_html_report(
-                    detections,
-                    screenshots,
-                    video,
-                    video_output / f"{video_stem}_report.html",
-                    unified_findings=[],
-                    executive_summary="",
-                    errors=[],
-                )
-        console.print("[dim]Basic report saved (AI analysis pending)[/]")
+            console.print("[dim]Basic JSON report saved (AI analysis pending)[/]")
 
         # Step 5: Unified VLM Analysis - replaces separate semantic + vision
         # VLM analyzes both screenshot AND full transcript context together
