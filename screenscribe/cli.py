@@ -507,11 +507,12 @@ def review(
             console.rule(f"[bold magenta]Video {video_idx + 1}/{len(videos)}: {video.name}[/]")
 
         # Setup output directory (per-video in batch mode)
+        video_stem = video.stem  # Video name without extension for file naming
         if output is None:
-            video_output = video.parent / f"{video.stem}_review"
+            video_output = video.parent / f"{video_stem}_review"
         elif len(videos) > 1:
             # Batch mode with -o: use subdirectories
-            video_output = output / f"{video.stem}_review"
+            video_output = output / f"{video_stem}_review"
         else:
             video_output = output
         video_output.mkdir(parents=True, exist_ok=True)
@@ -603,7 +604,7 @@ def review(
             save_checkpoint(checkpoint, video_output)
 
             # Save full transcript
-            transcript_path = video_output / "transcript.txt"
+            transcript_path = video_output / f"{video_stem}_transcript.txt"
             with open(transcript_path, "w", encoding="utf-8") as f:
                 f.write(transcription.text)
             console.print(f"[dim]Saved transcript: {transcript_path}[/]\n")
@@ -744,7 +745,7 @@ def review(
                 detections,
                 screenshots,
                 video,
-                video_output / "report.json",
+                video_output / f"{video_stem}_report.json",
                 unified_findings=[],
                 executive_summary="",
                 errors=[],
@@ -754,7 +755,7 @@ def review(
                 detections,
                 screenshots,
                 video,
-                video_output / "report.md",
+                video_output / f"{video_stem}_report.md",
                 unified_findings=[],
                 executive_summary="",
                 visual_summary="",
@@ -766,7 +767,7 @@ def review(
                     detections,
                     screenshots,
                     video,
-                    video_output / "report.html",
+                    video_output / f"{video_stem}_report.html",
                     segments=transcription.segments if transcription else None,
                     unified_findings=[],
                     executive_summary="",
@@ -778,7 +779,7 @@ def review(
                     detections,
                     screenshots,
                     video,
-                    video_output / "report.html",
+                    video_output / f"{video_stem}_report.html",
                     unified_findings=[],
                     executive_summary="",
                     errors=[],
@@ -849,7 +850,7 @@ def review(
                 detections,
                 screenshots,
                 video,
-                video_output / "report.json",
+                video_output / f"{video_stem}_report.json",
                 unified_findings=unified_findings,
                 executive_summary=executive_summary,
                 errors=pipeline_errors,
@@ -860,7 +861,7 @@ def review(
                 detections,
                 screenshots,
                 video,
-                video_output / "report.md",
+                video_output / f"{video_stem}_report.md",
                 unified_findings=unified_findings,
                 executive_summary=executive_summary,
                 visual_summary=visual_summary,
@@ -873,7 +874,7 @@ def review(
                     detections,
                     screenshots,
                     video,
-                    video_output / "report.html",
+                    video_output / f"{video_stem}_report.html",
                     segments=transcription.segments if transcription else None,
                     unified_findings=unified_findings,
                     executive_summary=executive_summary,
@@ -885,7 +886,7 @@ def review(
                     detections,
                     screenshots,
                     video,
-                    video_output / "report.html",
+                    video_output / f"{video_stem}_report.html",
                     unified_findings=unified_findings,
                     executive_summary=executive_summary,
                     errors=pipeline_errors,
@@ -916,9 +917,15 @@ def review(
         # Final success output
         console.rule("[bold green]Finished successfully![/]")
         console.print()
-        console.print(f"[green]Enhanced report saved:[/] {video_output / 'report.json'}")
-        console.print(f"[green]Enhanced Markdown report saved:[/] {video_output / 'report.md'}")
-        console.print(f"[green]HTML Pro report saved:[/] {video_output / 'report.html'}")
+        console.print(
+            f"[green]Enhanced report saved:[/] {video_output / f'{video_stem}_report.json'}"
+        )
+        console.print(
+            f"[green]Enhanced Markdown report saved:[/] {video_output / f'{video_stem}_report.md'}"
+        )
+        console.print(
+            f"[green]HTML Pro report saved:[/] {video_output / f'{video_stem}_report.html'}"
+        )
         console.print()
         console.rule(f"[dim]ScreenScribe v{__version__} by VetCoders[/]")
 
