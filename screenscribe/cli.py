@@ -464,6 +464,13 @@ def review(
     config.use_semantic_analysis = semantic
     config.use_vision_analysis = vision
 
+    # Validate endpoint configuration (fail fast on common mistakes)
+    config_warnings = config.validate()
+    if config_warnings:
+        for warning in config_warnings:
+            console.print(f"[red]Config Error:[/] {warning}")
+        raise typer.Exit(1)
+
     # Validate model availability (fail fast)
     if not skip_validation and not local:
         try:

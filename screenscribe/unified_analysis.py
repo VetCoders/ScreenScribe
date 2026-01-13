@@ -112,7 +112,8 @@ def parse_json_response(content: str) -> dict[str, Any]:
     last_error: json.JSONDecodeError | None = None
     for candidate in json_candidates:
         try:
-            return json.loads(candidate)
+            result: dict[str, Any] = json.loads(candidate)
+            return result
         except json.JSONDecodeError as e:
             last_error = e
             continue
