@@ -88,9 +88,10 @@ Each video gets its own subdirectory:
 ```
 all-reviews/
 ├── video1_review/
-│   ├── transcript.txt
-│   ├── report.json
-│   ├── report.md
+│   ├── video1_transcript.txt
+│   ├── video1_report.json
+│   ├── video1_report.md
+│   ├── video1_report.html   # HTML Pro report (only with --pro)
 │   └── screenshots/
 ├── video2_review/
 │   └── ...
@@ -185,12 +186,13 @@ Useful for:
 ### Directory Structure
 
 ```
-video_review/
-├── transcript.txt      # Plain text transcript
-├── report.json         # Full structured data
-├── report.md           # Human-readable report
+{video}_review/
+├── {video}_transcript.txt  # Plain text transcript
+├── {video}_report.json     # Full structured data
+├── {video}_report.md       # Human-readable report
+├── {video}_report.html     # HTML Pro report (only with --pro)
 └── screenshots/
-    ├── 01_bug_01-23.jpg      # Category_timestamp.jpg
+    ├── 01_bug_01-23.jpg    # Category_timestamp.jpg
     ├── 02_change_02-45.jpg
     ├── 03_ui_03-12.jpg
     └── ...
@@ -313,10 +315,14 @@ screenscribe review video.mov --pro
 
 Annotations persist in browser localStorage between sessions. Green dot indicates thumbnails with annotations.
 
+### Reviewed JSON Export
+
+Click **Export JSON** to download `report_reviewed_{video}.json` with human review data (severity, status, notes, annotations) without embedded screenshots.
+
 ### ZIP Export
 
 Click **Export ZIP** to download a bundle containing:
-- `review.json` — human review data (severity, status, notes, annotations)
+- `report_reviewed.json` — human review data (severity, status, notes, annotations)
 - `annotated/` — PNG screenshots with annotations burned in
 
 Ideal for sharing with AI agents or external tools.
@@ -385,13 +391,13 @@ Use `is_issue` to filter real problems from confirmations:
 
 ```bash
 # Extract only actual issues
-jq '.findings | map(select(.semantic_analysis.is_issue == true))' report.json
+jq '.findings | map(select(.semantic_analysis.is_issue == true))' video_report.json
 
 # Count real issues vs confirmations
 jq '{
   issues: [.findings[] | select(.semantic_analysis.is_issue == true)] | length,
   confirmations: [.findings[] | select(.semantic_analysis.is_issue == false)] | length
-}' report.json
+}' video_report.json
 ```
 
 ## Detection Modes

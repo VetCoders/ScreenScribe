@@ -194,10 +194,11 @@ flowchart TD
 ## Output Structure
 
 ```
-video_review/
-├── transcript.txt      # Full transcription
-├── report.json         # Machine-readable report
-├── report.md           # Human-readable Markdown
+{video}_review/
+├── {video}_transcript.txt  # Full transcription
+├── {video}_report.json     # Machine-readable report
+├── {video}_report.md       # Human-readable Markdown
+├── {video}_report.html     # HTML Pro report (only with --pro)
 └── screenshots/
     ├── 01_bug_01-23.jpg
     ├── 02_change_02-45.jpg
