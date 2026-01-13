@@ -23,6 +23,11 @@ screenscribe = "screenscribe.cli:app"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+include = [
+    "screenscribe/html_pro_assets/**",
+]
+
 [tool.uv]
 dev-dependencies = [
     "pytest>=8.0.0",

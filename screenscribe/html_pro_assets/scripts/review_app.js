@@ -424,7 +424,7 @@ function exportTodoList() {
     originalFindings.forEach((f, idx) => {
         const review = reportState.findings[f.id] || {};
         const unified = f.unified_analysis || {};
-        const severity = review.severity_override || unified.severity || 'medium';
+        const severity = review.severity || unified.severity || 'medium';
         const confirmed = review.confirmed;
 
         // Skip if explicitly marked as false alarm
