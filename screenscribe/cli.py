@@ -187,9 +187,10 @@ def _serve_report(output_dir: Path, video_path: Path, port: int = 8765) -> None:
         video_path: Path to the source video file
         port: Port for the HTTP server (default: 8765)
     """
-    report_file = output_dir / "report.html"
+    report_filename = f"{video_path.stem}_report.html"
+    report_file = output_dir / report_filename
     if not report_file.exists():
-        console.print("[yellow]No report.html found, skipping server.[/]")
+        console.print(f"[yellow]No {report_filename} found, skipping server.[/]")
         return
 
     # Create symlink to video in output dir if not already there
@@ -207,13 +208,13 @@ def _serve_report(output_dir: Path, video_path: Path, port: int = 8765) -> None:
     console.print()
     console.rule("[bold cyan]Starting Review Server[/]")
     console.print(f"[dim]Serving from:[/] [link=file://{output_dir}]{output_dir}[/link]")
-    console.print(f"[bold green]Report URL:[/] http://localhost:{port}/report.html")
+    console.print(f"[bold green]Report URL:[/] http://localhost:{port}/{report_filename}")
     console.print()
     console.print("[dim]Press Ctrl+C to stop the server and exit[/]")
     console.print()
 
     # Open browser
-    url = f"http://localhost:{port}/report.html"
+    url = f"http://localhost:{port}/{report_filename}"
     webbrowser.open(url)
 
     # Start server (blocking)
@@ -1118,9 +1119,9 @@ def review(
         # Final success output
         console.rule("[bold green]Finished successfully![/]")
         console.print()
-        json_path = video_output / "report.json"
-        md_path = video_output / "report.md"
-        html_path = video_output / "report.html"
+        json_path = video_output / f"{video_stem}_report.json"
+        md_path = video_output / f"{video_stem}_report.md"
+        html_path = video_output / f"{video_stem}_report.html"
         console.print(
             f"[green]Enhanced report saved:[/]\n[link=file://{json_path}]{json_path}[/link]"
         )
