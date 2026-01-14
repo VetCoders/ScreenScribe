@@ -249,6 +249,23 @@ def _serve_report(output_dir: Path, video_path: Path, port: int = 8765) -> None:
                 pass
 
 
+def _open_config_callback(value: bool) -> None:
+    """Open config file in editor."""
+    if value:
+        config_path = Path.home() / ".config" / "screenscribe" / "config.env"
+        if not config_path.exists():
+            # Create default config
+            cfg = ScreenScribeConfig.load()
+            cfg.save_default_config()
+            console.print(f"[green]Created default config:[/] {config_path}")
+
+        # Open in default editor
+        editor = os.environ.get("EDITOR", "open" if sys.platform == "darwin" else "nano")
+        console.print(f"[dim]Opening config in {editor}...[/]")
+        subprocess.run([editor, str(config_path)])
+        raise typer.Exit()
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
@@ -262,8 +279,17 @@ def main(
             help="Show version and exit.",
         ),
     ] = False,
+    config: Annotated[
+        bool,
+        typer.Option(
+            "--config",
+            callback=_open_config_callback,
+            is_eager=True,
+            help="Open config file in editor (creates default if missing).",
+        ),
+    ] = False,
 ) -> None:
-    """ScreenScribe - Video review automation."""
+    """ScreenScribe - Video review automation with AI. STT→LLM→VLM pipeline."""
     # If no subcommand given, launch interactive mode
     if ctx.invoked_subcommand is None:
         _interactive_mode()
