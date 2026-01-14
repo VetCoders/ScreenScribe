@@ -67,6 +67,34 @@ from .validation import APIKeyError, ModelValidationError, validate_models
 console = Console()
 
 
+def _find_next_review_path(base_path: Path) -> tuple[Path, int | None]:
+    """Find next available review path, appending _2, _3, etc. if needed.
+
+    Args:
+        base_path: The initial desired output path (e.g., video_review)
+
+    Returns:
+        Tuple of (available_path, version_number or None if first)
+    """
+
+    # Check if base path has a report (not just empty dir or checkpoint)
+    def has_report(p: Path) -> bool:
+        return (p / "report.html").exists() or (p / "report.json").exists()
+
+    if not base_path.exists() or not has_report(base_path):
+        return base_path, None
+
+    # Find next available number
+    version = 2
+    while True:
+        versioned_path = base_path.parent / f"{base_path.name}_{version}"
+        if not versioned_path.exists() or not has_report(versioned_path):
+            return versioned_path, version
+        version += 1
+        if version > 99:  # Safety limit
+            raise RuntimeError(f"Too many review versions for {base_path.name}")
+
+
 def version_callback(value: bool) -> None:
     """Show version and exit."""
     if value:
@@ -76,7 +104,7 @@ def version_callback(value: bool) -> None:
 
 app = typer.Typer(
     name="screenscribe",
-    help="Video review automation - extract bugs and changes from screencast commentary.",
+    help="Video review automation with AI-powered analysis. STT→LLM→VLM pipeline.",
     add_completion=False,
 )
 
@@ -517,27 +545,30 @@ def review(
     ] = False,
 ) -> None:
     """
-    Analyze screencast video(s) for bugs and change requests.
+    Analyze screencast video(s) and generate interactive review reports.
 
-    Extracts audio, transcribes it, detects issues mentioned in commentary,
-    captures screenshots, and optionally analyzes with AI models.
+    Pipeline: Audio → STT → Semantic Analysis → Screenshots → VLM → Report
 
-    Supports batch mode: pass multiple videos and they will be processed
-    sequentially with shared context (each video "remembers" previous ones).
+    Features:
+    • Response ID chaining: STT→LLM→VLM share context for better analysis
+    • Auto-versioning: existing reviews preserved as video_review_2, _3, etc.
+    • Interactive HTML report with video player, subtitle sync, and annotations
+    • Batch mode: multiple videos with shared context across files
 
-    By default, uses semantic pre-filtering (LLM analyzes entire transcript)
-    for comprehensive issue detection. Use --keywords-only for faster,
-    keyword-based detection.
+    Detection modes:
+    • Default: Semantic pre-filter (LLM analyzes entire transcript)
+    • --keywords-only: Fast regex-based detection
 
-    Use --resume to continue from a previous interrupted run.
-    Use --force to ignore checkpoint and reprocess from scratch.
-    Use --estimate to see time estimates without processing.
-    Use --dry-run to run only transcription and detection (no AI, no screenshots).
+    Output options:
+    • --serve/--no-serve: Start HTTP server and open report in browser
+    • --force: Overwrite existing review instead of versioning
+    • --resume: Continue from checkpoint if interrupted
 
     Examples:
         screenscribe review video.mov
         screenscribe review video1.mov video2.mov video3.mov
-        screenscribe review ./recordings/*.mov
+        screenscribe review ./recordings/*.mov --no-serve
+        screenscribe review video.mov --force --keywords-only
     """
     # Validate video paths exist
     for video in videos:
@@ -617,12 +648,28 @@ def review(
         # Setup output directory (per-video in batch mode)
         video_stem = video.stem  # Video name without extension for file naming
         if output is None:
-            video_output = video.parent / f"{video_stem}_review"
+            base_output = video.parent / f"{video_stem}_review"
         elif len(videos) > 1:
             # Batch mode with -o: use subdirectories
-            video_output = output / f"{video_stem}_review"
+            base_output = output / f"{video_stem}_review"
         else:
-            video_output = output
+            base_output = output
+
+        # Handle existing reviews: append _2, _3, etc. unless --force
+        if force:
+            video_output = base_output
+        else:
+            video_output, version = _find_next_review_path(base_output)
+            if version:
+                console.print(
+                    Panel(
+                        f"[yellow]Found previous review at:[/] {base_output.name}\n"
+                        f"[green]Creating new version:[/] {video_output.name}",
+                        title="[bold]Found Previous Review[/]",
+                        border_style="yellow",
+                    )
+                )
+
         video_output.mkdir(parents=True, exist_ok=True)
 
         console.print(f"\n[blue]Video:[/] [link=file://{video}]{video}[/link]")
@@ -1110,9 +1157,15 @@ def transcribe(
     ] = False,
 ) -> None:
     """
-    Transcribe a video file without full analysis.
+    Transcribe video audio to text (no analysis).
 
-    Useful for getting just the transcript text.
+    Quick transcription using LibraxisAI STT or local Whisper.
+    Outputs plain text transcript to stdout or file.
+
+    Examples:
+        screenscribe transcribe video.mov
+        screenscribe transcribe video.mov -o transcript.txt
+        screenscribe transcribe video.mov --local --lang en
     """
     config = ScreenScribeConfig.load()
 
@@ -1173,7 +1226,18 @@ def config(
     """
     Manage ScreenScribe configuration.
 
-    Config is stored in ~/.config/screenscribe/config.env
+    Config file: ~/.config/screenscribe/config.env
+
+    Options:
+        --show         Display current config values
+        --init         Create default config file
+        --init-keywords Create keywords.yaml for custom detection
+        --set-key KEY  Save API key to config
+
+    Examples:
+        screenscribe config --show
+        screenscribe config --init
+        screenscribe config --set-key sk-xxx
     """
     cfg = ScreenScribeConfig.load()
 
