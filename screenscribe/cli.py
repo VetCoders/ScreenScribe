@@ -106,7 +106,41 @@ app = typer.Typer(
     name="screenscribe",
     help="Video review automation with AI-powered analysis. STT→LLM→VLM pipeline.",
     add_completion=False,
+    invoke_without_command=True,
 )
+
+
+def _is_video_file(path: str) -> bool:
+    """Check if path looks like a video file."""
+    video_extensions = {".mov", ".mp4", ".avi", ".mkv", ".webm", ".m4v", ".wmv"}
+    return Path(path).suffix.lower() in video_extensions
+
+
+def _auto_review_if_video() -> None:
+    """If first positional arg is a video file, inject 'review' command."""
+    if len(sys.argv) > 1:
+        first_arg = sys.argv[1]
+        # Skip if it's already a command or flag
+        if first_arg in (
+            "review",
+            "transcribe",
+            "config",
+            "version",
+            "--help",
+            "-h",
+            "--version",
+            "-V",
+            "--config",
+        ):
+            return
+        # Check if it looks like a video file (path exists or has video extension)
+        if _is_video_file(first_arg) or (Path(first_arg).exists() and _is_video_file(first_arg)):
+            # Inject 'review' command
+            sys.argv.insert(1, "review")
+
+
+# Auto-detect video files and inject review command
+_auto_review_if_video()
 
 
 def _interactive_mode() -> None:
@@ -1301,7 +1335,23 @@ def config(
         return
 
     if show:
-        console.print("[bold]Current Configuration:[/]\n")
+        # Find which config file is being used
+        from .config import CONFIG_PATHS
+
+        config_source = None
+        for cp in CONFIG_PATHS:
+            if cp.exists():
+                config_source = cp
+                break
+
+        if config_source:
+            console.print(
+                f"[bold]Current Configuration[/] [dim](from [link=file://{config_source}]{config_source}[/link]):[/]\n"
+            )
+        else:
+            console.print(
+                "[bold]Current Configuration[/] [dim](defaults, no config file found):[/]\n"
+            )
 
         # API Keys
         console.print("[cyan]API Keys:[/]")
