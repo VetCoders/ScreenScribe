@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScreenScribe Pro - {video_name_escaped}</title>
+    <style>
+{css_content}
+    </style>
+    <!-- nosemgrep: html.security.audit.missing-integrity.missing-integrity -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body data-report-id="{report_id}" data-video-name="{video_name_escaped}">
+
+    <div class="app-container">
+
+        <header class="app-header">
+            <div class="header-left">
+                <h1>ScreenScribe Pro</h1>
+            </div>
+            <nav class="header-tabs">
+                <button class="tab-btn active" data-tab="summary">Podsumowanie</button>
+                <button class="tab-btn" data-tab="findings">Znaleziska ({findings_count})</button>
+                <button class="tab-btn" data-tab="stats">Statystyki</button>
+            </nav>
+            <div class="meta">
+                {video_name_escaped} | {display_time_escaped}
+                <div class="lang-toggle">
+                    <button data-lang="pl" class="active">PL</button>
+                    <button data-lang="en">EN</button>
+                </div>
+            </div>
+        </header>
+
+        <main class="video-section">
+            <div class="video-container">
+                <video id="videoPlayer" controls preload="metadata"
+                       {video_src_attr}>
+                    {vtt_track}
+                    Twoja przegladarka nie obsluguje wideo HTML5.
+                </video>
+            </div>
+            <div class="subtitle-display">
+                <div id="currentSubtitle" class="current-text empty">Brak napisu</div>
+            </div>
+
+            <div class="transcript-drawer open" id="transcriptDrawer">
+                <div class="drawer-header" onclick="toggleDrawer()">
+                    <h3 data-i18n="transcript">Transkrypcja</h3>
+                    <span class="drawer-toggle">▲</span>
+                </div>
+                <div class="drawer-content">
+                    <div class="drawer-search">
+                        <input type="text" id="subtitleSearch" class="search-box" placeholder="Szukaj w transkrypcji..." data-i18n="searchTranscript">
+                    </div>
+                    <div id="subtitleList" class="drawer-list"></div>
+                </div>
+            </div>
+        </main>
+
+        <aside class="sidebar">
+            <div class="sidebar-panel">
+                <div class="sidebar-scroll">
+                    <div id="tab-summary" class="tab-content active">
+                        {errors_html}
+                        {executive_summary_html}
+                    </div>
+                    <div id="tab-findings" class="tab-content">
+                        <section class="findings-section">
+                            {findings_html}
+                        </section>
+                    </div>
+                    <div id="tab-stats" class="tab-content">
+                        {stats_html}
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <div class="export-bar">
+            <div class="export-options">
+                <label><span data-i18n="reviewer">Recenzent:</span>
+                    <input type="text" id="reviewer-name" placeholder="Twoje imie" data-i18n="reviewerPlaceholder">
+                </label>
+            </div>
+            <div class="export-buttons">
+                <button onclick="exportTodoList()" class="btn-secondary" data-i18n="exportTodo">Eksportuj TODO</button>
+                <button onclick="exportReviewedJSON()" data-i18n="exportJson">Eksportuj JSON</button>
+                <button onclick="exportReviewedZIP()" class="btn-primary" data-i18n="exportZip" data-i18n-title="exportZipTitle">Eksportuj ZIP</button>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="lightbox" class="lightbox">
+        <button type="button" class="lightbox-close" onclick="closeLightbox()" title="Zamknij (ESC)">&times;</button>
+        <div class="lightbox-content" onclick="event.stopPropagation()">
+            <img id="lightbox-img" src="" alt="Pelny rozmiar">
+            <svg id="lightbox-svg" class="lightbox-annotation-svg"></svg>
+        </div>
+        <div id="lightbox-toolbar" class="lightbox-toolbar" style="display: none;" onclick="event.stopPropagation()">
+            <button type="button" class="tool-btn" data-tool="pen">Pen</button>
+            <button type="button" class="tool-btn" data-tool="rect">Rect</button>
+            <button type="button" class="tool-btn" data-tool="arrow">Arrow</button>
+            <input type="color" class="color-picker" value="#ff0066">
+            <button type="button" class="undo-btn">Undo</button>
+            <button type="button" class="clear-btn">Clear</button>
+            <button type="button" class="done-btn" onclick="closeLightbox()">Done</button>
+        </div>
+    </div>
+
+    <script id="original-findings" type="application/json">
+{findings_json}
+    </script>
+
+    <script>
+        window.TRANSCRIPT_SEGMENTS = {segments_json};
+    </script>
+
+    <script>
+{js_video_player}
+    </script>
+
+    <script>
+{js_review_app}
+    </script>
+
+    <footer>
+        Generated by ScreenScribe Pro | VetCoders 2025
+    </footer>
+
+</body>
+</html>

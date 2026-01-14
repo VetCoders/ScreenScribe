@@ -58,6 +58,9 @@ Thumbs.db
 .claude/
 .gemini/
 
+# Local-only agent docs
+docs/AGENT_GUIDE.md
+
 # Temp/patch files
 *.new
 *.patch

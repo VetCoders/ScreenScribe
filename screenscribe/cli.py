@@ -33,6 +33,7 @@ from .report import (
     save_enhanced_json_report,
     save_enhanced_markdown_report,
     save_html_report,
+    save_html_report_pro,
 )
 from .screenshots import extract_screenshots_for_detections
 
@@ -48,6 +49,7 @@ from .transcribe import transcribe_audio, validate_audio_quality
 from .unified_analysis import (
     UnifiedFinding,
     analyze_all_findings_unified,
+    deduplicate_findings,
     generate_unified_summary,
     generate_visual_summary_unified,
 )
@@ -73,8 +75,82 @@ app = typer.Typer(
 )
 
 
-@app.callback()
+def _interactive_mode() -> None:
+    """Launch interactive mode when no subcommand is given."""
+    from rich.prompt import Prompt
+
+    console.print()
+    console.print(
+        Panel(
+            f"[bold]ScreenScribe[/] v{__version__}\n"
+            "[dim]Video review automation - extract bugs and changes from screencast[/]",
+            border_style="green",
+        )
+    )
+    console.print()
+
+    # Command selection
+    commands = {
+        "1": ("review", "Analyze video and generate report"),
+        "2": ("transcribe", "Transcribe video only"),
+        "3": ("config", "Show/edit configuration"),
+        "4": ("version", "Show version info"),
+    }
+
+    console.print("[bold]Select command:[/]")
+    for key, (cmd, desc) in commands.items():
+        console.print(f"  [cyan]{key}[/]) [bold]{cmd}[/] - {desc}")
+    console.print()
+
+    choice = Prompt.ask("Enter choice", choices=["1", "2", "3", "4"], default="1")
+    selected_cmd = commands[choice][0]
+
+    if selected_cmd == "version":
+        console.print(f"\n[bold]ScreenScribe[/] v{__version__}")
+        raise typer.Exit()
+
+    if selected_cmd == "config":
+        console.print("\n[dim]Running:[/] screenscribe config --show")
+        import subprocess
+        import sys
+
+        subprocess.run([sys.executable, "-m", "screenscribe", "config", "--show"])
+        raise typer.Exit()
+
+    # For review/transcribe, ask for video path
+    console.print()
+    video_path = Prompt.ask(
+        "[bold]Video path[/] (paste or drag file here)",
+        default="",
+    )
+
+    if not video_path.strip():
+        console.print("[red]No video path provided. Exiting.[/]")
+        raise typer.Exit(1)
+
+    # Clean path (remove quotes if dragged)
+    video_path = video_path.strip().strip("'\"")
+    video = Path(video_path)
+
+    if not video.exists():
+        console.print(f"[red]File not found:[/] {video}")
+        raise typer.Exit(1)
+
+    console.print()
+    console.print(f"[dim]Running:[/] screenscribe {selected_cmd} {video}")
+    console.print()
+
+    # Use subprocess to call commands (avoids forward reference issues)
+    import subprocess
+    import sys
+
+    run_cmd = [sys.executable, "-m", "screenscribe", selected_cmd, str(video)]
+    subprocess.run(run_cmd)
+
+
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: Annotated[
         bool,
         typer.Option(
@@ -87,7 +163,10 @@ def main(
     ] = False,
 ) -> None:
     """ScreenScribe - Video review automation."""
-    pass
+    # If no subcommand given, launch interactive mode
+    if ctx.invoked_subcommand is None:
+        _interactive_mode()
+
 
 # Time estimates (seconds per unit)
 ESTIMATE_STT_PER_MINUTE = 2.0  # ~2s per minute of video
@@ -274,6 +353,20 @@ def review(
             help="Save interactive HTML report with human review workflow",
         ),
     ] = True,
+    pro_report: Annotated[
+        bool,
+        typer.Option(
+            "--pro/--no-pro",
+            help="Use Pro HTML template with video player and subtitle sync",
+        ),
+    ] = True,
+    embed_video: Annotated[
+        bool,
+        typer.Option(
+            "--embed-video",
+            help="Embed video as base64 in Pro HTML report (only for files <50MB)",
+        ),
+    ] = False,
     keywords_file: Annotated[
         Path | None,
         typer.Option(
@@ -372,6 +465,13 @@ def review(
     config.use_semantic_analysis = semantic
     config.use_vision_analysis = vision
 
+    # Validate endpoint configuration (fail fast on common mistakes)
+    config_warnings = config.validate()
+    if config_warnings:
+        for warning in config_warnings:
+            console.print(f"[red]Config Error:[/] {warning}")
+        raise typer.Exit(1)
+
     # Validate model availability (fail fast)
     if not skip_validation and not local:
         try:
@@ -408,11 +508,12 @@ def review(
             console.rule(f"[bold magenta]Video {video_idx + 1}/{len(videos)}: {video.name}[/]")
 
         # Setup output directory (per-video in batch mode)
+        video_stem = video.stem  # Video name without extension for file naming
         if output is None:
-            video_output = video.parent / f"{video.stem}_review"
+            video_output = video.parent / f"{video_stem}_review"
         elif len(videos) > 1:
             # Batch mode with -o: use subdirectories
-            video_output = output / f"{video.stem}_review"
+            video_output = output / f"{video_stem}_review"
         else:
             video_output = output
         video_output.mkdir(parents=True, exist_ok=True)
@@ -504,7 +605,7 @@ def review(
             save_checkpoint(checkpoint, video_output)
 
             # Save full transcript
-            transcript_path = video_output / "transcript.txt"
+            transcript_path = video_output / f"{video_stem}_transcript.txt"
             with open(transcript_path, "w", encoding="utf-8") as f:
                 f.write(transcription.text)
             console.print(f"[dim]Saved transcript: {transcript_path}[/]\n")
@@ -518,21 +619,33 @@ def review(
             continue  # Skip to next video in batch
 
         # Validate audio quality before proceeding
-        is_valid, validation_error = validate_audio_quality(transcription)
-        if not is_valid and validation_error:
+        is_valid, validation_message, is_warning = validate_audio_quality(transcription)
+        if validation_message:
             console.print()
-            console.print(
-                Panel(
-                    validation_error, title="[bold red]Audio Quality Issue[/]", border_style="red"
+            if is_valid and is_warning:
+                console.print(
+                    Panel(
+                        validation_message,
+                        title="[bold yellow]Audio Quality Warning[/]",
+                        border_style="yellow",
+                    )
                 )
-            )
-            console.print()
-            console.print(
-                "[yellow]Processing stopped.[/] Please fix the audio issue and try again."
-            )
-            console.print("[dim]If you believe this is a false positive, please report it.[/]")
-            delete_checkpoint(video_output)
-            continue  # Skip to next video in batch
+                console.print()
+            elif not is_valid:
+                console.print(
+                    Panel(
+                        validation_message,
+                        title="[bold red]Audio Quality Issue[/]",
+                        border_style="red",
+                    )
+                )
+                console.print()
+                console.print(
+                    "[yellow]Processing stopped.[/] Please fix the audio issue and try again."
+                )
+                console.print("[dim]If you believe this is a false positive, please report it.[/]")
+                delete_checkpoint(video_output)
+                continue  # Skip to next video in batch
 
         # Step 3: Issue Detection (varies by filter level)
         pois = []  # Points of interest from semantic pre-filter
@@ -638,40 +751,19 @@ def review(
         else:
             console.print("[dim]Step 4: Screenshot Extraction - skipped (cached)[/]")
 
-        # Save basic report immediately (before AI analysis)
+        # Save basic JSON report immediately (before AI analysis)
         # This ensures we have results even if AI steps fail
         if json_report:
             save_enhanced_json_report(
                 detections,
                 screenshots,
                 video,
-                video_output / "report.json",
+                video_output / f"{video_stem}_report.json",
                 unified_findings=[],
                 executive_summary="",
                 errors=[],
             )
-        if markdown_report:
-            save_enhanced_markdown_report(
-                detections,
-                screenshots,
-                video,
-                video_output / "report.md",
-                unified_findings=[],
-                executive_summary="",
-                visual_summary="",
-                errors=[],
-            )
-        if html_report:
-            save_html_report(
-                detections,
-                screenshots,
-                video,
-                video_output / "report.html",
-                unified_findings=[],
-                executive_summary="",
-                errors=[],
-            )
-        console.print("[dim]Basic report saved (AI analysis pending)[/]")
+            console.print("[dim]Basic JSON report saved (AI analysis pending)[/]")
 
         # Step 5: Unified VLM Analysis - replaces separate semantic + vision
         # VLM analyzes both screenshot AND full transcript context together
@@ -685,6 +777,22 @@ def review(
                     unified_findings = analyze_all_findings_unified(
                         screenshots, config, previous_response_id=batch_context_response_id
                     )
+                    # Deduplicate similar findings before saving
+                    if unified_findings:
+                        original_count = len(unified_findings)
+                        unified_findings = deduplicate_findings(unified_findings)
+                        if len(unified_findings) < original_count:
+                            console.print(
+                                f"[green]Deduplicated:[/] {original_count} → "
+                                f"{len(unified_findings)} findings"
+                            )
+                            # Filter detections/screenshots to match deduplicated findings
+                            keep_ids = {f.detection_id for f in unified_findings}
+                            if keep_ids and len(keep_ids) < len(screenshots):
+                                screenshots = [
+                                    (d, p) for (d, p) in screenshots if d.segment.id in keep_ids
+                                ]
+                                detections = [d for (d, _) in screenshots]
                     checkpoint.unified_findings = [
                         serialize_unified_finding(f) for f in unified_findings
                     ]
@@ -737,7 +845,7 @@ def review(
                 detections,
                 screenshots,
                 video,
-                video_output / "report.json",
+                video_output / f"{video_stem}_report.json",
                 unified_findings=unified_findings,
                 executive_summary=executive_summary,
                 errors=pipeline_errors,
@@ -748,7 +856,7 @@ def review(
                 detections,
                 screenshots,
                 video,
-                video_output / "report.md",
+                video_output / f"{video_stem}_report.md",
                 unified_findings=unified_findings,
                 executive_summary=executive_summary,
                 visual_summary=visual_summary,
@@ -756,15 +864,28 @@ def review(
             )
 
         if html_report:
-            save_html_report(
-                detections,
-                screenshots,
-                video,
-                video_output / "report.html",
-                unified_findings=unified_findings,
-                executive_summary=executive_summary,
-                errors=pipeline_errors,
-            )
+            if pro_report:
+                save_html_report_pro(
+                    detections,
+                    screenshots,
+                    video,
+                    video_output / f"{video_stem}_report.html",
+                    segments=transcription.segments if transcription else None,
+                    unified_findings=unified_findings,
+                    executive_summary=executive_summary,
+                    errors=pipeline_errors,
+                    embed_video=embed_video,
+                )
+            else:
+                save_html_report(
+                    detections,
+                    screenshots,
+                    video,
+                    video_output / f"{video_stem}_report.html",
+                    unified_findings=unified_findings,
+                    executive_summary=executive_summary,
+                    errors=pipeline_errors,
+                )
 
         # Show errors summary if any
         if pipeline_errors:
@@ -788,7 +909,20 @@ def review(
         # Clean up checkpoint on success
         delete_checkpoint(video_output)
 
-        console.print(f"\n[bold green]Done![/] Results saved to: {video_output}\n")
+        # Final success output
+        console.rule("[bold green]Finished successfully![/]")
+        console.print()
+        console.print(
+            f"[green]Enhanced report saved:[/] {video_output / f'{video_stem}_report.json'}"
+        )
+        console.print(
+            f"[green]Enhanced Markdown report saved:[/] {video_output / f'{video_stem}_report.md'}"
+        )
+        console.print(
+            f"[green]HTML Pro report saved:[/] {video_output / f'{video_stem}_report.html'}"
+        )
+        console.print()
+        console.rule(f"[dim]ScreenScribe v{__version__} by VetCoders[/]")
 
         # Update context for next video in batch
         if unified_findings:
@@ -906,6 +1040,13 @@ def config(
         return
 
     if init:
+        config_path = Path.home() / ".config" / "screenscribe" / "config.env"
+        if config_path.exists():
+            console.print(f"[yellow]Config already exists:[/] {config_path}")
+            console.print("[dim]Use --show to view current config[/]")
+            if not typer.confirm("Overwrite existing config?", default=False):
+                console.print("[dim]Aborted. Existing config preserved.[/]")
+                return
         path = cfg.save_default_config()
         console.print(f"[green]Config created:[/] {path}")
         console.print("[dim]Edit this file to customize settings[/]")

@@ -66,6 +66,35 @@ class ScreenScribeConfig:
         """Get API key for Vision endpoint."""
         return self.vision_api_key or self.api_key
 
+    def validate(self) -> list[str]:
+        """Validate config and return list of warnings."""
+        warnings = []
+
+        # Check for endpoint/provider mismatch
+        openai_endpoints = [
+            ep for ep in [self.llm_endpoint, self.vision_endpoint] if "api.openai.com" in ep
+        ]
+        for ep in openai_endpoints:
+            if "/v1/responses" in ep:
+                warnings.append(
+                    f"Invalid endpoint: {ep}\n"
+                    "  OpenAI does not support /v1/responses - use /v1/chat/completions\n"
+                    "  Fix in: ~/.config/screenscribe/config.env"
+                )
+
+        libraxis_endpoints = [
+            ep for ep in [self.llm_endpoint, self.vision_endpoint] if "libraxis" in ep
+        ]
+        for ep in libraxis_endpoints:
+            if "/v1/chat/completions" in ep:
+                warnings.append(
+                    f"Invalid endpoint: {ep}\n"
+                    "  LibraxisAI uses /v1/responses, not /v1/chat/completions\n"
+                    "  Fix in: ~/.config/screenscribe/config.env"
+                )
+
+        return warnings
+
     @classmethod
     def load(cls) -> "ScreenScribeConfig":
         """Load config from environment and config files."""

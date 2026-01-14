@@ -8,14 +8,15 @@ This guide covers practical examples and workflows for using ScreenScribe to ana
 2. [Batch Mode](#batch-mode)
 3. [Common Workflows](#common-workflows)
 4. [Understanding Output](#understanding-output)
-5. [Sentiment Detection](#sentiment-detection)
-6. [Detection Modes](#detection-modes)
-7. [Multi-Provider Setup](#multi-provider-setup)
-8. [Advanced Options](#advanced-options)
-9. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
-10. [Custom Keywords](#custom-keywords)
-11. [Resuming Interrupted Processing](#resuming-interrupted-processing)
-12. [Troubleshooting](#troubleshooting)
+5. [HTML Pro Report](#html-pro-report)
+6. [Sentiment Detection](#sentiment-detection)
+7. [Detection Modes](#detection-modes)
+8. [Multi-Provider Setup](#multi-provider-setup)
+9. [Advanced Options](#advanced-options)
+10. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
+11. [Custom Keywords](#custom-keywords)
+12. [Resuming Interrupted Processing](#resuming-interrupted-processing)
+13. [Troubleshooting](#troubleshooting)
 
 ## Basic Usage
 
@@ -87,9 +88,10 @@ Each video gets its own subdirectory:
 ```
 all-reviews/
 ├── video1_review/
-│   ├── transcript.txt
-│   ├── report.json
-│   ├── report.md
+│   ├── video1_transcript.txt
+│   ├── video1_report.json
+│   ├── video1_report.md
+│   ├── video1_report.html   # HTML Pro report (only with --pro)
 │   └── screenshots/
 ├── video2_review/
 │   └── ...
@@ -184,12 +186,13 @@ Useful for:
 ### Directory Structure
 
 ```
-video_review/
-├── transcript.txt      # Plain text transcript
-├── report.json         # Full structured data
-├── report.md           # Human-readable report
+{video}_review/
+├── {video}_transcript.txt  # Plain text transcript
+├── {video}_report.json     # Full structured data
+├── {video}_report.md       # Human-readable report
+├── {video}_report.html     # HTML Pro report (only with --pro)
 └── screenshots/
-    ├── 01_bug_01-23.jpg      # Category_timestamp.jpg
+    ├── 01_bug_01-23.jpg    # Category_timestamp.jpg
     ├── 02_change_02-45.jpg
     ├── 03_ui_03-12.jpg
     └── ...
@@ -282,6 +285,49 @@ The Markdown report contains:
 
 See [Sentiment Detection](#sentiment-detection) for details on `is_issue` and `sentiment` fields.
 
+## HTML Pro Report
+
+Generate an interactive HTML report with the `--pro` flag:
+
+```bash
+screenscribe review video.mov --pro
+```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Video Player** | Embedded player with subtitle sync - click finding to seek |
+| **Finding Cards** | Screenshot, transcript, AI analysis with severity badges |
+| **Lightbox View** | Click screenshot for full-resolution annotation |
+| **Annotation Tools** | Pen, rectangle, arrow tools with color picker |
+| **Human Review** | Edit severity, add notes, mark accepted/rejected |
+| **Language Toggle** | Switch between Polish and English (PL/EN) |
+| **Export Options** | JSON, TODO list, or ZIP bundle |
+
+### Annotation Workflow
+
+1. Click any screenshot thumbnail to open lightbox
+2. Use toolbar: **Pen** (freehand), **Rect** (highlight), **Arrow** (point)
+3. Pick color, draw annotations
+4. **Undo** / **Clear** to adjust
+5. Click **Done** to save
+
+Annotations persist in browser localStorage between sessions. Green dot indicates thumbnails with annotations.
+
+### Reviewed JSON Export
+
+Click **Export JSON** to download `report_reviewed_{video}.json` with human review data (severity, status, notes, annotations) without embedded screenshots.
+
+### ZIP Export
+
+Click **Export ZIP** to download a bundle containing:
+- `report_reviewed_<video>.json` — human review data (severity, status, notes, annotations)
+- `TODO_<video>.md` — TODO list grouped by severity
+- `annotated/` — PNG screenshots with annotations burned in (filenames include video name)
+
+Ideal for sharing with AI agents or external tools.
+
 ## Sentiment Detection
 
 ScreenScribe understands context and **negations**. Not every detected transcript fragment is a problem - sometimes users confirm that something works correctly.
@@ -346,13 +392,13 @@ Use `is_issue` to filter real problems from confirmations:
 
 ```bash
 # Extract only actual issues
-jq '.findings | map(select(.semantic_analysis.is_issue == true))' report.json
+jq '.findings | map(select(.semantic_analysis.is_issue == true))' video_report.json
 
 # Count real issues vs confirmations
 jq '{
   issues: [.findings[] | select(.semantic_analysis.is_issue == true)] | length,
   confirmations: [.findings[] | select(.semantic_analysis.is_issue == false)] | length
-}' report.json
+}' video_report.json
 ```
 
 ## Detection Modes

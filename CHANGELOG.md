@@ -5,6 +5,42 @@ All notable changes to ScreenScribe will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-01-13
+
+### Added
+
+- **HTML Pro Report** (`--pro`): Interactive HTML report with video player and annotations:
+  - Embedded video player with subtitle sync (click finding to seek)
+  - Screenshot annotation tools: pen, rectangle, arrow with color picker
+  - Lightbox view for full-resolution annotation
+  - Annotations persist in localStorage between sessions
+  - Green dot indicator on thumbnails with annotations
+
+- **Modular HTML Pro Renderer**: Split template, styles, and scripts into a dedicated package
+
+- **ZIP Export**: Bundle for sharing with AI agents and external tools:
+  - `report_reviewed_<video>.json` with human review data (severity, status, notes)
+  - `TODO_<video>.md` with TODO list grouped by severity
+  - `annotated/` folder with PNG screenshots (annotations burned in, video-prefixed names)
+  - Client-side generation via JSZip
+
+- **VTT Subtitle Generator**: Auto-generated subtitles for video player sync
+
+- **Dual API Format Support**: Works with both LibraxisAI Responses API and OpenAI Chat Completions format (auto-detected from endpoint URL)
+
+- **Makefile**: Development workflow with `make dev`, `make test`, `make lint`, git hooks setup
+
+### Changed
+
+- JSON parsing resilience in unified analysis - pipeline continues on malformed API responses
+
+### Fixed
+
+- Annotation position stability - annotations no longer jump on window resize
+- Export consistency - annotated screenshots match live preview exactly
+- Pen tool element creation
+- Arrow head sizing unified between live preview and export
+
 ## [0.1.3] - 2025-12-30
 
 ### Added
