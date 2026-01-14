@@ -18,6 +18,11 @@ class ScreenScribePlayer {
         this.video.addEventListener('timeupdate', () => this.onTimeUpdate());
         this.video.addEventListener('loadedmetadata', () => this.onMetadataLoaded());
 
+        // Click on video to toggle play/pause
+        this.video.addEventListener('click', () => {
+            this.video.paused ? this.video.play() : this.video.pause();
+        });
+
         // Render subtitle list
         this.renderSubtitleList(this.segments);
 

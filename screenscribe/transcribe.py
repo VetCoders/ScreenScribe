@@ -34,6 +34,7 @@ class TranscriptionResult:
     text: str
     segments: list[Segment]
     language: str
+    response_id: str = ""  # API response ID for conversation chaining to LLM
 
 
 def transcribe_audio(
@@ -156,10 +157,18 @@ def transcribe_audio(
             )
         )
 
+    # Capture response_id for conversation chaining to LLM
+    stt_response_id = result.get("response_id", "")
+    if stt_response_id:
+        console.print(f"[dim]  STT response_id for LLM chaining: {stt_response_id[:20]}...[/]")
+
     console.print(f"[green]Transcription complete:[/] {len(segments)} segments")
 
     return TranscriptionResult(
-        text=result.get("text", ""), segments=segments, language=result.get("language", language)
+        text=result.get("text", ""),
+        segments=segments,
+        language=result.get("language", language),
+        response_id=stt_response_id,
     )
 
 

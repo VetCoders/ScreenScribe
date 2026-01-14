@@ -1,5 +1,10 @@
 """CLI interface for ScreenScribe video review automation."""
 
+import os
+import shutil
+import subprocess
+import sys
+import webbrowser
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -41,6 +46,7 @@ from .screenshots import extract_screenshots_for_detections
 # from .semantic import analyze_detections_semantically, generate_executive_summary
 from .semantic_filter import (
     SemanticFilterLevel,
+    SemanticFilterResult,
     merge_pois_with_detections,
     pois_to_detections,
     semantic_prefilter,
@@ -111,9 +117,6 @@ def _interactive_mode() -> None:
 
     if selected_cmd == "config":
         console.print("\n[dim]Running:[/] screenscribe config --show")
-        import subprocess
-        import sys
-
         subprocess.run([sys.executable, "-m", "screenscribe", "config", "--show"])
         raise typer.Exit()
 
@@ -133,7 +136,7 @@ def _interactive_mode() -> None:
     video = Path(video_path)
 
     if not video.exists():
-        console.print(f"[red]File not found:[/] {video}")
+        console.print(f"[red]File not found:[/] [link=file://{video}]{video}[/link]")
         raise typer.Exit(1)
 
     console.print()
@@ -141,11 +144,81 @@ def _interactive_mode() -> None:
     console.print()
 
     # Use subprocess to call commands (avoids forward reference issues)
-    import subprocess
-    import sys
-
     run_cmd = [sys.executable, "-m", "screenscribe", selected_cmd, str(video)]
     subprocess.run(run_cmd)
+
+
+def _serve_report(output_dir: Path, video_path: Path, port: int = 8765) -> None:
+    """Start HTTP server and open report in browser.
+
+    Creates a symlink to the video in output_dir so the server can serve it,
+    then starts a simple HTTP server and opens the report in the default browser.
+
+    Args:
+        output_dir: Directory containing report.html
+        video_path: Path to the source video file
+        port: Port for the HTTP server (default: 8765)
+    """
+    report_file = output_dir / "report.html"
+    if not report_file.exists():
+        console.print("[yellow]No report.html found, skipping server.[/]")
+        return
+
+    # Create symlink to video in output dir if not already there
+    video_link = output_dir / video_path.name
+    if not video_link.exists() and video_path.exists():
+        try:
+            video_link.symlink_to(video_path.resolve())
+            console.print(
+                f"[dim]Created symlink to video: [link=file://{video_link}]{video_link.name}[/link][/]"
+            )
+        except OSError as e:
+            console.print(f"[yellow]Could not create video symlink: {e}[/]")
+
+    # Start HTTP server in background
+    console.print()
+    console.rule("[bold cyan]Starting Review Server[/]")
+    console.print(f"[dim]Serving from:[/] [link=file://{output_dir}]{output_dir}[/link]")
+    console.print(f"[bold green]Report URL:[/] http://localhost:{port}/report.html")
+    console.print()
+    console.print("[dim]Press Ctrl+C to stop the server and exit[/]")
+    console.print()
+
+    # Open browser
+    url = f"http://localhost:{port}/report.html"
+    webbrowser.open(url)
+
+    # Start server (blocking)
+    try:
+        # Change to output directory and start server
+        original_dir = os.getcwd()
+        os.chdir(output_dir)
+
+        # Use subprocess for cleaner handling
+        server_process = subprocess.Popen(
+            [sys.executable, "-m", "http.server", str(port)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        console.print(f"[green]Server running on port {port}[/]")
+
+        # Wait for Ctrl+C
+        try:
+            server_process.wait()
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Stopping server...[/]")
+            server_process.terminate()
+            server_process.wait(timeout=5)
+
+    finally:
+        os.chdir(original_dir)
+        # Clean up symlink
+        if video_link.exists() and video_link.is_symlink():
+            try:
+                video_link.unlink()
+            except OSError:
+                pass
 
 
 @app.callback(invoke_without_command=True)
@@ -384,6 +457,13 @@ def review(
             help="Resume from previous checkpoint if available",
         ),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Force reprocessing, ignore existing checkpoint",
+        ),
+    ] = False,
     estimate: Annotated[
         bool,
         typer.Option(
@@ -412,6 +492,29 @@ def review(
             help="Skip model availability check (faster start, may fail mid-pipeline)",
         ),
     ] = False,
+    serve: Annotated[
+        bool,
+        typer.Option(
+            "--serve/--no-serve",
+            help="Start HTTP server and open report in browser after processing",
+        ),
+    ] = True,
+    port: Annotated[
+        int,
+        typer.Option(
+            "--port",
+            "-p",
+            help="Port for the HTTP server (default: 8765)",
+        ),
+    ] = 8765,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Show detailed progress and debug information",
+        ),
+    ] = False,
 ) -> None:
     """
     Analyze screencast video(s) for bugs and change requests.
@@ -427,6 +530,7 @@ def review(
     keyword-based detection.
 
     Use --resume to continue from a previous interrupted run.
+    Use --force to ignore checkpoint and reprocess from scratch.
     Use --estimate to see time estimates without processing.
     Use --dry-run to run only transcription and detection (no AI, no screenshots).
 
@@ -438,10 +542,12 @@ def review(
     # Validate video paths exist
     for video in videos:
         if not video.exists():
-            console.print(f"[red]Error:[/] Video not found: {video}")
+            console.print(f"[red]Error:[/] Video not found: [link=file://{video}]{video}[/link]")
             raise typer.Exit(1)
         if video.is_dir():
-            console.print(f"[red]Error:[/] Path is a directory: {video}")
+            console.print(
+                f"[red]Error:[/] Path is a directory: [link=file://{video}]{video}[/link]"
+            )
             raise typer.Exit(1)
 
     console.print(
@@ -464,6 +570,7 @@ def review(
     config.language = language
     config.use_semantic_analysis = semantic
     config.use_vision_analysis = vision
+    config.verbose = verbose
 
     # Validate endpoint configuration (fail fast on common mistakes)
     config_warnings = config.validate()
@@ -518,8 +625,8 @@ def review(
             video_output = output
         video_output.mkdir(parents=True, exist_ok=True)
 
-        console.print(f"\n[blue]Video:[/] {video}")
-        console.print(f"[blue]Output:[/] {video_output}")
+        console.print(f"\n[blue]Video:[/] [link=file://{video}]{video}[/link]")
+        console.print(f"[blue]Output:[/] [link=file://{video_output}]{video_output}[/link]")
         console.print(
             f"[blue]AI Analysis:[/] Semantic={'✓' if semantic else '✗'} Vision={'✓' if vision else '✗'}"
         )
@@ -540,9 +647,18 @@ def review(
             _show_estimate(duration, semantic, vision, filter_level=semantic_filter_level.value)
             continue  # Continue to next video in batch mode
 
+        # Handle --force: delete existing checkpoint
+        if force:
+            cache_dir = video_output / ".screenscribe_cache"
+            if cache_dir.exists():
+                shutil.rmtree(cache_dir)
+                console.print(
+                    "[yellow]Force mode:[/] Deleted existing checkpoint, starting fresh\n"
+                )
+
         # Check for existing checkpoint
         checkpoint: PipelineCheckpoint | None = None
-        if resume:
+        if resume and not force:
             checkpoint = load_checkpoint(video_output)
             if checkpoint and checkpoint_valid_for_video(checkpoint, video, video_output, language):
                 console.print(
@@ -608,7 +724,9 @@ def review(
             transcript_path = video_output / f"{video_stem}_transcript.txt"
             with open(transcript_path, "w", encoding="utf-8") as f:
                 f.write(transcription.text)
-            console.print(f"[dim]Saved transcript: {transcript_path}[/]\n")
+            console.print(
+                f"[dim]Saved transcript:[/] [link=file://{transcript_path}]{transcript_path}[/link]\n"
+            )
         else:
             console.print("[dim]Step 2: Transcription - skipped (cached)[/]")
             if transcription is None and checkpoint.transcription:
@@ -661,7 +779,15 @@ def review(
             elif semantic_filter_level == SemanticFilterLevel.BASE:
                 # Level 1: Semantic pre-filter on entire transcript
                 console.print("[cyan]Using semantic pre-filter (analyzing entire transcript)[/]")
-                pois = semantic_prefilter(transcription, config)
+                # Chain from STT → semantic filter → VLM
+                stt_context = transcription.response_id or batch_context_response_id
+                filter_result: SemanticFilterResult = semantic_prefilter(
+                    transcription, config, previous_response_id=stt_context
+                )
+                pois = filter_result.pois
+                # Chain semantic filter context to VLM analysis
+                if filter_result.response_id:
+                    batch_context_response_id = filter_result.response_id
                 if pois:
                     # Convert POIs to Detection objects for compatibility
                     detections = pois_to_detections(pois, transcription)
@@ -682,8 +808,15 @@ def review(
                 # First: keyword detection
                 keyword_detections = detect_issues(transcription, keywords_file=keywords_file)
 
-                # Second: semantic pre-filter
-                pois = semantic_prefilter(transcription, config)
+                # Second: semantic pre-filter (chain from STT)
+                stt_context = transcription.response_id or batch_context_response_id
+                filter_result = semantic_prefilter(
+                    transcription, config, previous_response_id=stt_context
+                )
+                pois = filter_result.pois
+                # Chain semantic filter context to VLM analysis
+                if filter_result.response_id:
+                    batch_context_response_id = filter_result.response_id
 
                 if pois:
                     # Merge semantic POIs with keyword detections
@@ -912,14 +1045,17 @@ def review(
         # Final success output
         console.rule("[bold green]Finished successfully![/]")
         console.print()
+        json_path = video_output / "report.json"
+        md_path = video_output / "report.md"
+        html_path = video_output / "report.html"
         console.print(
-            f"[green]Enhanced report saved:[/] {video_output / f'{video_stem}_report.json'}"
+            f"[green]Enhanced report saved:[/]\n[link=file://{json_path}]{json_path}[/link]"
         )
         console.print(
-            f"[green]Enhanced Markdown report saved:[/] {video_output / f'{video_stem}_report.md'}"
+            f"[green]Enhanced Markdown report saved:[/]\n[link=file://{md_path}]{md_path}[/link]"
         )
         console.print(
-            f"[green]HTML Pro report saved:[/] {video_output / f'{video_stem}_report.html'}"
+            f"[green]HTML Pro report saved:[/]\n[link=file://{html_path}]{html_path}[/link]"
         )
         console.print()
         console.rule(f"[dim]ScreenScribe v{__version__} by VetCoders[/]")
@@ -929,6 +1065,14 @@ def review(
             last_finding = unified_findings[-1]
             if hasattr(last_finding, "response_id") and last_finding.response_id:
                 batch_context_response_id = last_finding.response_id
+
+        # Store last video info for serve
+        last_video = video
+        last_output = video_output
+
+    # After all videos processed, optionally serve the last report
+    if serve and "last_output" in locals():
+        _serve_report(last_output, last_video, port)
 
 
 @app.command()
@@ -989,7 +1133,7 @@ def transcribe(
     if output:
         with open(output, "w", encoding="utf-8") as f:
             f.write(result.text)
-        console.print(f"[green]Transcript saved:[/] {output}")
+        console.print(f"[green]Transcript saved:[/] [link=file://{output}]{output}[/link]")
     else:
         console.print()
         console.print(result.text)
@@ -1036,26 +1180,30 @@ def config(
     if set_key:
         cfg.api_key = set_key
         path = cfg.save_default_config()
-        console.print(f"[green]API key saved to:[/] {path}")
+        console.print(f"[green]API key saved to:[/] [link=file://{path}]{path}[/link]")
         return
 
     if init:
         config_path = Path.home() / ".config" / "screenscribe" / "config.env"
         if config_path.exists():
-            console.print(f"[yellow]Config already exists:[/] {config_path}")
+            console.print(
+                f"[yellow]Config already exists:[/] [link=file://{config_path}]{config_path}[/link]"
+            )
             console.print("[dim]Use --show to view current config[/]")
             if not typer.confirm("Overwrite existing config?", default=False):
                 console.print("[dim]Aborted. Existing config preserved.[/]")
                 return
         path = cfg.save_default_config()
-        console.print(f"[green]Config created:[/] {path}")
+        console.print(f"[green]Config created:[/] [link=file://{path}]{path}[/link]")
         console.print("[dim]Edit this file to customize settings[/]")
         return
 
     if init_keywords:
         keywords_path = Path.cwd() / "keywords.yaml"
         if keywords_path.exists():
-            console.print(f"[yellow]Keywords file already exists:[/] {keywords_path}")
+            console.print(
+                f"[yellow]Keywords file already exists:[/] [link=file://{keywords_path}]{keywords_path}[/link]"
+            )
             console.print("[dim]Delete it first if you want to reset to defaults[/]")
             return
         save_default_keywords(keywords_path)
@@ -1064,16 +1212,37 @@ def config(
 
     if show:
         console.print("[bold]Current Configuration:[/]\n")
-        console.print(f"API Base: {cfg.api_base}")
+
+        # API Keys
+        console.print("[cyan]API Keys:[/]")
         console.print(
-            f"API Key: {'*' * 20 + cfg.api_key[-8:] if cfg.api_key else '[red]NOT SET[/]'}"
+            f"  Main: {'*' * 16 + cfg.api_key[-8:] if cfg.api_key else '[red]NOT SET[/]'}"
         )
-        console.print(f"STT Model: {cfg.stt_model}")
-        console.print(f"LLM Model: {cfg.llm_model}")
-        console.print(f"Vision Model: {cfg.vision_model}")
-        console.print(f"Language: {cfg.language}")
-        console.print(f"Semantic Analysis: {cfg.use_semantic_analysis}")
-        console.print(f"Vision Analysis: {cfg.use_vision_analysis}")
+        if cfg.stt_api_key and cfg.stt_api_key != cfg.api_key:
+            console.print(f"  STT:  {'*' * 16 + cfg.stt_api_key[-8:]}")
+        if cfg.llm_api_key and cfg.llm_api_key != cfg.api_key:
+            console.print(f"  LLM:  {'*' * 16 + cfg.llm_api_key[-8:]}")
+        if cfg.vision_api_key and cfg.vision_api_key != cfg.api_key:
+            console.print(f"  Vision: {'*' * 16 + cfg.vision_api_key[-8:]}")
+
+        # Endpoints
+        console.print("\n[cyan]Endpoints:[/]")
+        console.print(f"  STT:    {cfg.stt_endpoint}")
+        console.print(f"  LLM:    {cfg.llm_endpoint}")
+        console.print(f"  Vision: {cfg.vision_endpoint}")
+        console.print(f"  [dim](Base fallback: {cfg.api_base})[/]")
+
+        # Models
+        console.print("\n[cyan]Models:[/]")
+        console.print(f"  STT:    {cfg.stt_model}")
+        console.print(f"  LLM:    {cfg.llm_model}")
+        console.print(f"  Vision: {cfg.vision_model}")
+
+        # Processing
+        console.print("\n[cyan]Processing:[/]")
+        console.print(f"  Language: {cfg.language}")
+        console.print(f"  Semantic: {cfg.use_semantic_analysis}")
+        console.print(f"  Vision:   {cfg.use_vision_analysis}")
         return
 
     # Default: show help

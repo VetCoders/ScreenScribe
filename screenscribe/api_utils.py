@@ -147,8 +147,12 @@ def make_api_request(
 
 
 def is_chat_completions_endpoint(endpoint: str) -> bool:
-    """Check if endpoint uses Chat Completions API format."""
-    return "chat/completions" in endpoint or "api.openai.com" in endpoint
+    """Check if endpoint uses Chat Completions API format.
+
+    Responses API (/v1/responses) is the new standard for both OpenAI and LibraxisAI.
+    Only use Chat Completions format if the endpoint explicitly contains 'chat/completions'.
+    """
+    return "chat/completions" in endpoint
 
 
 def build_llm_request_body(
@@ -185,11 +189,14 @@ def build_llm_request_body(
             "messages": [{"role": "user", "content": content}],
         }
     else:
-        # LibraxisAI Responses API format
+        # Responses API format (OpenAI + LibraxisAI)
         if image_base64:
             input_content: list[dict[str, Any]] = [
                 {"type": "input_text", "text": prompt},
-                {"type": "input_image", "image_url": f"data:image/jpeg;base64,{image_base64}"},
+                {
+                    "type": "input_image",
+                    "image_url": f"data:image/jpeg;base64,{image_base64}",
+                },
             ]
         else:
             input_content = [{"type": "input_text", "text": prompt}]

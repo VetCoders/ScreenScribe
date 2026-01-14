@@ -5,14 +5,18 @@ the entire transcript using LLM before frame extraction, allowing
 the vision model to analyze more potential findings.
 """
 
+import json
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Literal
 
 import httpx
 from rich.console import Console
+from rich.live import Live
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
-from .api_utils import build_llm_request_body, extract_llm_response_text, retry_request
+from .api_utils import build_llm_request_body
 from .config import ScreenScribeConfig
 from .transcribe import Segment, TranscriptionResult
 
@@ -53,6 +57,19 @@ class PointOfInterest:
     def midpoint(self) -> float:
         """Get the midpoint timestamp for screenshot extraction."""
         return (self.timestamp_start + self.timestamp_end) / 2
+
+
+@dataclass
+class SemanticFilterResult:
+    """Result of semantic pre-filtering with response_id for conversation chaining.
+
+    The response_id enables context chaining to VLM analysis - the vision model
+    will understand thematic context from the transcript analysis (e.g., knowing
+    the user discussed "UI bugs" helps VLM better interpret screenshots).
+    """
+
+    pois: list[PointOfInterest]
+    response_id: str = ""  # API response ID for conversation chaining to VLM
 
 
 # Prompts for semantic pre-filtering
@@ -146,7 +163,8 @@ def format_transcript_with_timestamps(transcription: TranscriptionResult) -> str
 def semantic_prefilter(
     transcription: TranscriptionResult,
     config: ScreenScribeConfig,
-) -> list[PointOfInterest]:
+    previous_response_id: str = "",
+) -> SemanticFilterResult:
     """
     Perform semantic pre-filtering on entire transcript.
 
@@ -157,13 +175,14 @@ def semantic_prefilter(
     Args:
         transcription: Full transcription result with segments
         config: ScreenScribe configuration
+        previous_response_id: Response ID from STT for conversation chaining
 
     Returns:
-        List of PointOfInterest objects for frame extraction
+        SemanticFilterResult with POIs and response_id for VLM context chaining
     """
     if not config.get_llm_api_key():
         console.print("[yellow]No API key - skipping semantic pre-filter[/]")
-        return []
+        return SemanticFilterResult(pois=[], response_id="")
 
     # Format transcript for analysis
     transcript_text = format_transcript_with_timestamps(transcription)
@@ -173,36 +192,135 @@ def semantic_prefilter(
     prompt = prompt_template.format(transcript_with_timestamps=transcript_text)
 
     console.print("[blue]Running semantic pre-filter on entire transcript...[/]")
-    console.print(f"[dim]Analyzing {len(transcription.segments)} segments[/]")
+
+    if config.verbose:
+        console.print(f"[dim]  Endpoint: {config.llm_endpoint}[/]")
+        console.print(f"[dim]  Model: {config.llm_model}[/]")
+        console.print(f"[dim]  Segments: {len(transcription.segments)}[/]")
+        console.print(f"[dim]  Transcript length: {len(transcript_text)} chars[/]")
 
     try:
+        # Build request with streaming enabled
+        request_body = build_llm_request_body(config.llm_model, prompt, config.llm_endpoint)
+        request_body["stream"] = True
+        # Enable reasoning summaries in stream (for thinking models)
+        request_body["reasoning"] = {"summary": "auto"}
+        # Chain from STT response for thematic context
+        if previous_response_id:
+            request_body["previous_response_id"] = previous_response_id
+            console.print(f"[dim]  Chaining from STT: {previous_response_id[:20]}...[/]")
 
-        def do_prefilter_request() -> httpx.Response:
-            with httpx.Client(timeout=120.0) as client:  # Longer timeout for full transcript
-                response = client.post(
+        content = ""
+        stream_preview = ""  # Last ~40 chars of output for live display
+        reasoning_text = ""
+        poi_count = 0
+        response_id = ""  # Capture for conversation chaining to VLM
+
+        # Create progress display with spinner + status + live stream
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[cyan]{task.description}"),
+            BarColumn(bar_width=15),
+            TextColumn("[dim]{task.fields[stream]}[/]"),
+            transient=True,
+        )
+
+        with Live(progress, console=console, refresh_per_second=15):
+            task_id = progress.add_task(
+                f"Analyzing {len(transcription.segments)} segments",
+                total=100,
+                stream="...",
+            )
+
+            with httpx.Client(timeout=120.0) as client:
+                with client.stream(
+                    "POST",
                     config.llm_endpoint,
                     headers={
                         "Authorization": f"Bearer {config.get_llm_api_key()}",
                         "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
                     },
-                    json=build_llm_request_body(config.llm_model, prompt, config.llm_endpoint),
-                )
-                response.raise_for_status()
-                return response
+                    json=request_body,
+                ) as response:
+                    response.raise_for_status()
 
-        response = retry_request(
-            do_prefilter_request,
-            max_retries=3,
-            operation_name="Semantic pre-filter",
-        )
+                    line_count = 0
+                    for line in response.iter_lines():
+                        line_count += 1
+                        if not line:
+                            continue
 
-        # Parse response (supports both API formats)
-        result = response.json()
-        content = extract_llm_response_text(result, config.llm_endpoint)
+                        # Verbose SSE logging - outside Live context
+                        # (disabled to not interfere with progress display)
+
+                        # Handle SSE format: "event: xxx" or "data: xxx"
+                        if line.startswith("event:"):
+                            continue  # Skip event lines, we parse data
+
+                        if line.startswith("data:"):
+                            data = line[5:].strip()  # Strip "data:" prefix
+                            if data == "[DONE]":
+                                progress.update(task_id, completed=100, stream="done")
+                                break
+
+                            try:
+                                chunk = json.loads(data)
+                                chunk_type = chunk.get("type", "")
+
+                                # Capture response_id for conversation chaining
+                                if chunk_type in ("response.created", "response.completed"):
+                                    chunk_id = chunk.get("response", {}).get("id", "")
+                                    if not chunk_id:
+                                        chunk_id = chunk.get("id", "")
+                                    if chunk_id:
+                                        response_id = chunk_id
+
+                                # Show reasoning summaries in real-time
+                                if chunk_type == "response.reasoning_summary_text.delta":
+                                    # Streaming reasoning summary delta
+                                    delta = chunk.get("delta", "")
+                                    if delta:
+                                        reasoning_text = (reasoning_text + delta)[-60:]
+                                        progress.update(task_id, stream=reasoning_text)
+                                elif chunk_type == "response.reasoning_summary_text.done":
+                                    # Full reasoning summary completed
+                                    full_text = chunk.get("text", "")
+                                    if full_text:
+                                        reasoning_text = full_text[-60:]
+                                        progress.update(task_id, stream=reasoning_text)
+
+                                # Extract delta text from streaming response
+                                delta_text = _extract_stream_delta(chunk, verbose=False)
+                                if delta_text:
+                                    content += delta_text
+                                    # Update stream preview with last chars
+                                    stream_preview = (stream_preview + delta_text)[-40:]
+                                    # Clean for display (remove newlines, JSON noise)
+                                    display_text = stream_preview.replace("\n", " ").replace(
+                                        '"', ""
+                                    )
+
+                                    # Count POIs found so far
+                                    new_poi_count = content.count('"timestamp_start"')
+                                    if new_poi_count != poi_count:
+                                        poi_count = new_poi_count
+                                        progress.update(
+                                            task_id,
+                                            description=f"Found {poi_count} POI",
+                                            completed=min(poi_count * 5, 95),
+                                            stream=f"...{display_text}",
+                                        )
+                                    else:
+                                        # Just update stream preview
+                                        progress.update(task_id, stream=f"...{display_text}")
+
+                            except json.JSONDecodeError:
+                                continue
 
         if not content:
             console.print("[yellow]Empty response from semantic pre-filter[/]")
-            return []
+            return SemanticFilterResult(pois=[], response_id=response_id)
 
         # Parse JSON from content
         pois = _parse_prefilter_response(content, transcription)
@@ -210,6 +328,8 @@ def semantic_prefilter(
         console.print(
             f"[green]Semantic pre-filter complete:[/] identified {len(pois)} points of interest"
         )
+        if response_id:
+            console.print(f"[dim]  Response ID for VLM chaining: {response_id[:20]}...[/]")
 
         # Summary by category
         categories: dict[str, int] = {}
@@ -219,11 +339,52 @@ def semantic_prefilter(
         for cat, count in sorted(categories.items()):
             console.print(f"[dim]  • {cat}: {count}[/]")
 
-        return pois
+        return SemanticFilterResult(pois=pois, response_id=response_id)
 
     except Exception as e:
         console.print(f"[yellow]Semantic pre-filter failed: {e}[/]")
-        return []
+        return SemanticFilterResult(pois=[], response_id="")
+
+
+def _extract_stream_delta(chunk: dict[str, Any], verbose: bool = False) -> str:
+    """Extract text delta from SSE streaming chunk.
+
+    Supports Responses API streaming formats from OpenAI/LibraxisAI.
+    """
+    chunk_type = chunk.get("type", "")
+
+    if verbose and chunk_type:
+        console.print(f"[dim]  chunk type: {chunk_type}[/]")
+
+    # Responses API: response.output_text.delta
+    if chunk_type == "response.output_text.delta":
+        return str(chunk.get("delta", ""))
+
+    # Responses API: response.content_part.delta (alternative format)
+    if chunk_type == "response.content_part.delta":
+        delta = chunk.get("delta", {})
+        if isinstance(delta, dict):
+            return str(delta.get("text", ""))
+        return str(delta) if delta else ""
+
+    # Responses API: content.delta
+    if chunk_type == "content.delta":
+        delta = chunk.get("delta", {})
+        if isinstance(delta, dict):
+            return str(delta.get("text", ""))
+        return str(delta) if delta else ""
+
+    # Responses API: response.text.delta (yet another variant)
+    if chunk_type == "response.text.delta":
+        return str(chunk.get("delta", "") or chunk.get("text", ""))
+
+    # Chat Completions API streaming format (legacy fallback)
+    choices = chunk.get("choices", [])
+    if choices:
+        delta = choices[0].get("delta", {})
+        return str(delta.get("content", ""))
+
+    return ""
 
 
 def _extract_content_from_response(result: dict[str, Any]) -> str:
@@ -246,9 +407,6 @@ def _parse_prefilter_response(
     content: str, transcription: TranscriptionResult
 ) -> list[PointOfInterest]:
     """Parse the pre-filter response into PointOfInterest objects."""
-    import json
-    import re
-
     # Strip model control tokens
     content = re.sub(r"<\|[^|]+\|>\w*\s*", "", content)
 

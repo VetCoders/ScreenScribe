@@ -8,19 +8,25 @@ Benefits:
 - VLM sees both image and full context simultaneously
 - Better understanding of user intent by combining visual and verbal cues
 - Reduced latency and API costs
+- Parallel processing with staggered starts for better throughput
 """
 
 from __future__ import annotations
 
 import json
 import re
+import threading
+import time
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.live import Live
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskID, TextColumn
 
 from .api_utils import extract_llm_response_text, is_chat_completions_endpoint, retry_request
 from .config import ScreenScribeConfig
@@ -32,6 +38,10 @@ if TYPE_CHECKING:
     pass
 
 console = Console()
+
+# Constants for parallel processing
+MAX_WORKERS = 5
+STAGGER_DELAY = 0.5  # seconds between task starts
 
 
 @dataclass
@@ -227,6 +237,243 @@ def extract_response_content(
     return content
 
 
+def _extract_stream_delta(chunk: dict[str, Any], verbose: bool = False) -> str:
+    """Extract text delta from SSE streaming chunk.
+
+    Supports Responses API streaming formats from OpenAI/LibraxisAI.
+    """
+    chunk_type = chunk.get("type", "")
+
+    if verbose and chunk_type:
+        console.print(f"[dim]  chunk type: {chunk_type}[/]")
+
+    # Responses API: response.output_text.delta
+    if chunk_type == "response.output_text.delta":
+        return str(chunk.get("delta", ""))
+
+    # Responses API: response.content_part.delta (alternative format)
+    if chunk_type == "response.content_part.delta":
+        delta = chunk.get("delta", {})
+        if isinstance(delta, dict):
+            return str(delta.get("text", ""))
+        return str(delta) if delta else ""
+
+    # Responses API: content.delta
+    if chunk_type == "content.delta":
+        delta = chunk.get("delta", {})
+        if isinstance(delta, dict):
+            return str(delta.get("text", ""))
+        return str(delta) if delta else ""
+
+    # Responses API: response.text.delta (yet another variant)
+    if chunk_type == "response.text.delta":
+        return str(chunk.get("delta", "") or chunk.get("text", ""))
+
+    # Chat Completions API streaming format (legacy fallback)
+    choices = chunk.get("choices", [])
+    if choices:
+        delta = choices[0].get("delta", {})
+        return str(delta.get("content", ""))
+
+    return ""
+
+
+def _extract_reasoning_delta(chunk: dict[str, Any]) -> str:
+    """Extract reasoning summary delta from SSE chunk."""
+    chunk_type = chunk.get("type", "")
+
+    if chunk_type == "response.reasoning_summary_text.delta":
+        return str(chunk.get("delta", ""))
+    elif chunk_type == "response.reasoning_summary_text.done":
+        return str(chunk.get("text", ""))
+
+    return ""
+
+
+def _extract_response_id_from_stream(chunk: dict[str, Any]) -> str:
+    """Extract response ID from streaming chunk."""
+    chunk_type = chunk.get("type", "")
+
+    # response.done contains the final response with ID
+    if chunk_type == "response.done":
+        response = chunk.get("response", {})
+        return str(response.get("id", ""))
+
+    # Some formats include ID at chunk level
+    return str(chunk.get("id", "") or chunk.get("response_id", ""))
+
+
+def analyze_finding_unified_streaming(
+    detection: Detection,
+    screenshot_path: Path | None,
+    config: ScreenScribeConfig,
+    previous_response_id: str | None = None,
+    on_reasoning: Callable[[str], None] | None = None,
+    on_content: Callable[[str], None] | None = None,
+) -> UnifiedFinding | None:
+    """
+    Analyze a single finding using VLM with streaming SSE response.
+
+    This is the streaming version that provides real-time feedback
+    via callbacks for reasoning and content deltas.
+
+    Args:
+        detection: The detection to analyze
+        screenshot_path: Path to screenshot (can be None if extraction failed)
+        config: ScreenScribe configuration
+        previous_response_id: Response ID from previous finding for context chaining
+        on_reasoning: Callback for reasoning summary deltas
+        on_content: Callback for content deltas
+
+    Returns:
+        UnifiedFinding result or None if analysis failed
+    """
+    if not config.get_vision_api_key():
+        return None
+
+    # Determine if we have a screenshot
+    has_screenshot = screenshot_path is not None and screenshot_path.exists()
+
+    # Get appropriate prompt (with or without image)
+    prompt_template = get_unified_analysis_prompt(config.language, text_only=not has_screenshot)
+
+    # Build prompt with FULL context
+    prompt = prompt_template.format(
+        transcript_context=detection.segment.text,
+        full_context=detection.context,
+        category=detection.category,
+    )
+
+    try:
+        # Build request body based on API format
+        use_chat_completions = is_chat_completions_endpoint(config.vision_endpoint)
+
+        if use_chat_completions:
+            # OpenAI Chat Completions format
+            content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+            if has_screenshot and screenshot_path:
+                image_base64 = encode_image_base64(screenshot_path)
+                media_type = get_media_type(screenshot_path)
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{media_type};base64,{image_base64}"},
+                    }
+                )
+            payload: dict[str, object] = {
+                "model": config.vision_model,
+                "messages": [{"role": "user", "content": content}],
+                "stream": True,
+            }
+        else:
+            # Responses API format (OpenAI + LibraxisAI)
+            content_responses: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
+            if has_screenshot and screenshot_path:
+                image_b64 = encode_image_base64(screenshot_path)
+                media_type = get_media_type(screenshot_path)
+                content_responses.append(
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:{media_type};base64,{image_b64}",
+                    }
+                )
+            payload = {
+                "model": config.vision_model,
+                "input": [{"role": "user", "content": content_responses}],
+                "reasoning": {"summary": "auto"},
+                "stream": True,
+            }
+            if previous_response_id:
+                payload["previous_response_id"] = previous_response_id
+
+        # Stream the response
+        collected_content = ""
+        response_id = ""
+
+        with httpx.Client(timeout=120.0) as client:
+            with client.stream(
+                "POST",
+                config.vision_endpoint,
+                headers={
+                    "Authorization": f"Bearer {config.get_vision_api_key()}",
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                },
+                json=payload,
+            ) as response:
+                response.raise_for_status()
+
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+
+                    # Handle SSE format
+                    if line.startswith("event:"):
+                        continue
+
+                    if line.startswith("data:"):
+                        line_data = line[5:].strip()
+                        if line_data == "[DONE]":
+                            break
+
+                        try:
+                            chunk = json.loads(line_data)
+
+                            # Extract reasoning delta
+                            reasoning_delta = _extract_reasoning_delta(chunk)
+                            if reasoning_delta and on_reasoning:
+                                on_reasoning(reasoning_delta)
+
+                            # Extract content delta
+                            content_delta = _extract_stream_delta(chunk)
+                            if content_delta:
+                                collected_content += content_delta
+                                if on_content:
+                                    on_content(content_delta)
+
+                            # Extract response ID
+                            chunk_response_id = _extract_response_id_from_stream(chunk)
+                            if chunk_response_id:
+                                response_id = chunk_response_id
+
+                        except json.JSONDecodeError:
+                            continue
+
+        if not collected_content:
+            return None
+
+        # Parse JSON from content
+        try:
+            data = parse_json_response(collected_content)
+        except json.JSONDecodeError:
+            return None
+
+        return UnifiedFinding(
+            detection_id=detection.segment.id,
+            screenshot_path=screenshot_path,
+            timestamp=detection.segment.start,
+            category=detection.category,
+            is_issue=data.get("is_issue", True),
+            sentiment=data.get("sentiment", "problem"),
+            severity=data.get("severity", "medium"),
+            summary=data.get("summary", ""),
+            action_items=data.get("action_items", []),
+            affected_components=data.get("affected_components", []),
+            suggested_fix=data.get("suggested_fix", ""),
+            ui_elements=data.get("ui_elements", []),
+            issues_detected=data.get("issues_detected", []),
+            accessibility_notes=data.get("accessibility_notes", []),
+            design_feedback=data.get("design_feedback", ""),
+            technical_observations=data.get("technical_observations", ""),
+            response_id=response_id,
+        )
+
+    except Exception as e:
+        if config.verbose:
+            console.print(f"[dim]Streaming analysis failed: {e}[/]")
+        return None
+
+
 def analyze_finding_unified(
     detection: Detection,
     screenshot_path: Path | None,
@@ -289,25 +536,26 @@ def analyze_finding_unified(
                         "messages": [{"role": "user", "content": content}],
                     }
                 else:
-                    # LibraxisAI Responses API format
-                    content_libraxis: list[dict[str, str]] = [
+                    # Responses API format (OpenAI + LibraxisAI)
+                    content_responses: list[dict[str, Any]] = [
                         {"type": "input_text", "text": prompt}
                     ]
                     if has_screenshot and screenshot_path:
-                        image_base64 = encode_image_base64(screenshot_path)
+                        image_b64 = encode_image_base64(screenshot_path)
                         media_type = get_media_type(screenshot_path)
-                        content_libraxis.append(
+                        # OpenAI Responses API uses image_url with data URI
+                        content_responses.append(
                             {
                                 "type": "input_image",
-                                "image_url": f"data:{media_type};base64,{image_base64}",
-                                "detail": "high",
+                                "image_url": f"data:{media_type};base64,{image_b64}",
                             }
                         )
                     payload = {
                         "model": config.vision_model,
-                        "input": [{"role": "user", "content": content_libraxis}],
+                        "input": [{"role": "user", "content": content_responses}],
+                        "reasoning": {"summary": "auto"},  # Enable reasoning summaries
                     }
-                    # Add conversation chaining if we have previous context (LibraxisAI only)
+                    # Add conversation chaining if we have previous context
                     if previous_response_id:
                         payload["previous_response_id"] = previous_response_id
 
@@ -389,16 +637,30 @@ def analyze_finding_unified(
         return None
 
 
+@dataclass
+class _TaskState:
+    """State for a parallel analysis task."""
+
+    idx: int
+    detection: Detection
+    screenshot_path: Path
+    status: str = "pending"  # pending, running, done, failed
+    reasoning_preview: str = ""
+    severity: str = ""
+    task_id: TaskID | None = None
+
+
 def analyze_all_findings_unified(
     screenshots: list[tuple[Detection, Path]],
     config: ScreenScribeConfig,
     previous_response_id: str = "",
 ) -> list[UnifiedFinding]:
     """
-    Analyze all findings using unified VLM pipeline.
+    Analyze all findings using unified VLM pipeline with parallel streaming.
 
-    Replaces the separate analyze_detections_semantically() + analyze_screenshots()
-    pipeline with a single pass that analyzes each finding with VLM.
+    Uses ThreadPoolExecutor to run up to MAX_WORKERS concurrent VLM requests,
+    with staggered starts (STAGGER_DELAY between each) to avoid rate limits.
+    Response IDs are chained between streams using a shared lock.
 
     Args:
         screenshots: List of (detection, screenshot_path) tuples
@@ -406,52 +668,172 @@ def analyze_all_findings_unified(
         previous_response_id: Optional response ID from previous batch for context chaining
 
     Returns:
-        List of UnifiedFinding results
+        List of UnifiedFinding results (ordered by original index)
     """
     if not config.get_vision_api_key():
         console.print("[yellow]No Vision API key - skipping unified analysis[/]")
         return []
 
-    results = []
-    console.print(f"[blue]Running unified VLM analysis on {len(screenshots)} findings...[/]")
+    if not screenshots:
+        return []
 
-    with Progress(
+    console.print(
+        f"[blue]Running parallel VLM analysis on {len(screenshots)} findings "
+        f"(max {MAX_WORKERS} concurrent, {STAGGER_DELAY}s stagger)...[/]"
+    )
+
+    # Shared state for response_id chaining
+    response_id_lock = threading.Lock()
+    shared_response_id = previous_response_id
+
+    # Track task states for display
+    task_states: dict[int, _TaskState] = {}
+    for idx, (detection, screenshot_path) in enumerate(screenshots):
+        task_states[idx] = _TaskState(idx=idx, detection=detection, screenshot_path=screenshot_path)
+
+    # Results storage (indexed by original position)
+    results_by_idx: dict[int, UnifiedFinding | None] = {}
+    completed_count = 0
+
+    def analyze_one(idx: int, delay: float) -> tuple[int, UnifiedFinding | None]:
+        """Analyze a single finding with staggered start and response_id chaining."""
+        nonlocal shared_response_id, completed_count
+
+        # Staggered start
+        if delay > 0:
+            time.sleep(delay)
+
+        state = task_states[idx]
+        state.status = "running"
+
+        # Get latest response_id for chaining
+        with response_id_lock:
+            prev_id = shared_response_id
+
+        # Create callbacks for live display
+        reasoning_buffer = ""
+
+        def on_reasoning(delta: str) -> None:
+            nonlocal reasoning_buffer
+            reasoning_buffer = (reasoning_buffer + delta)[-50:]
+            state.reasoning_preview = reasoning_buffer
+
+        # Run streaming analysis
+        finding = analyze_finding_unified_streaming(
+            state.detection,
+            state.screenshot_path,
+            config,
+            previous_response_id=prev_id,
+            on_reasoning=on_reasoning,
+        )
+
+        # Update shared response_id for next task
+        if finding and finding.response_id:
+            with response_id_lock:
+                shared_response_id = finding.response_id
+
+        # Update state
+        if finding:
+            state.status = "done"
+            state.severity = finding.severity if finding.is_issue else "ok"
+        else:
+            state.status = "failed"
+
+        completed_count += 1
+        return (idx, finding)
+
+    # Build progress display
+    progress = Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
+        BarColumn(bar_width=20),
+        TextColumn("{task.completed}/{task.total}"),
+        TextColumn("[dim]{task.fields[stream]}[/]"),
         console=console,
-    ) as progress:
-        task = progress.add_task("Analyzing findings...", total=len(screenshots))
+        transient=True,
+    )
 
-        # Chain context between findings
-        chain_response_id = previous_response_id
+    with Live(progress, console=console, refresh_per_second=10):
+        # Add main progress task
+        main_task = progress.add_task(
+            f"Analyzing {len(screenshots)} findings",
+            total=len(screenshots),
+            stream="starting...",
+        )
 
-        for i, (detection, screenshot_path) in enumerate(screenshots, 1):
+        # Submit all tasks with staggered delays
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures: dict[Future[tuple[int, UnifiedFinding | None]], int] = {}
+
+            for idx in range(len(screenshots)):
+                delay = idx * STAGGER_DELAY
+                future = executor.submit(analyze_one, idx, delay)
+                futures[future] = idx
+
+            # Process completions as they arrive
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    result_idx, finding = future.result()
+                    results_by_idx[result_idx] = finding
+
+                    # Update progress display
+                    state = task_states[result_idx]
+                    if finding:
+                        status_str = f"[green]ok[/] #{result_idx+1} [{state.severity}]"
+                    else:
+                        status_str = f"[yellow]x[/] #{result_idx+1} failed"
+
+                    # Show active tasks reasoning
+                    active_reasoning = ""
+                    for s in task_states.values():
+                        if s.status == "running" and s.reasoning_preview:
+                            active_reasoning = s.reasoning_preview[:30]
+                            break
+
+                    progress.update(
+                        main_task,
+                        advance=1,
+                        stream=active_reasoning or status_str,
+                    )
+
+                except Exception as e:
+                    results_by_idx[idx] = None
+                    progress.update(main_task, advance=1, stream=f"[red]error: {e}[/]")
+
+    # Collect results in original order
+    results: list[UnifiedFinding] = []
+    for idx in range(len(screenshots)):
+        finding = results_by_idx.get(idx)
+        if finding:
+            results.append(finding)
+
+    # Print completion status for each task
+    for idx in range(len(screenshots)):
+        state = task_states[idx]
+        finding = results_by_idx.get(idx)
+        timestamp = state.detection.segment.start
+
+        if finding:
+            chained = " [chained]" if finding.response_id else ""
+            severity_color = {
+                "critical": "red",
+                "high": "yellow",
+                "medium": "blue",
+                "low": "dim",
+                "ok": "green",
+            }.get(state.severity, "white")
             console.print(
-                f"[dim]  [{i}/{len(screenshots)}] "
-                f"{detection.category} @ {detection.segment.start:.1f}s...[/]"
+                f"[dim]  [{idx+1}/{len(screenshots)}][/] "
+                f"{state.detection.category} @ {timestamp:.1f}s "
+                f"[{severity_color}]{state.severity}[/]{chained}"
             )
-
-            finding = analyze_finding_unified(
-                detection,
-                screenshot_path,
-                config,
-                previous_response_id=chain_response_id,
+        else:
+            console.print(
+                f"[dim]  [{idx+1}/{len(screenshots)}][/] "
+                f"{state.detection.category} @ {timestamp:.1f}s "
+                f"[yellow]failed[/]"
             )
-
-            if finding:
-                results.append(finding)
-                # Update chain for next finding
-                if finding.response_id:
-                    chain_response_id = finding.response_id
-
-                # Show result indicator
-                severity = finding.severity if finding.is_issue else "ok"
-                chained = " [chained]" if chain_response_id else ""
-                console.print(f"[green]  ok[/] [{severity}]{chained}")
-            else:
-                console.print("[yellow]  x[/] failed")
-
-            progress.advance(task)
 
     # Summary
     issues = [f for f in results if f.is_issue]

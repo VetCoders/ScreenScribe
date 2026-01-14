@@ -1,0 +1,74 @@
+# Loctree CI - Codebase Health Analysis
+# Uses loctree 0.8.0+ for dead code detection, circular imports, and health scoring
+# Python project analysis
+#
+# Created by M&K (c)2025 The LibraxisAI Team
+# Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
+
+name: Loctree CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  HEALTH_THRESHOLD: 50
+
+jobs:
+  loctree-analysis:
+    name: Codebase Health Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: loctree-${{ runner.os }}
+          restore-keys: |
+            loctree-
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install loctree
+        run: cargo install mcp-server-loctree --locked
+
+      - name: Run Full Scan
+        id: scan
+        run: |
+          echo "## 🌳 Loctree Codebase Health (Python)" >> $GITHUB_STEP_SUMMARY
+          loct scan --force 2>/dev/null || true
+          loct health >> $GITHUB_STEP_SUMMARY 2>&1 || true
+
+          AGENT_JSON=$(find .loctree -name "agent.json" 2>/dev/null | head -1)
+          if [ -f "$AGENT_JSON" ]; then
+            HEALTH=$(jq -r '.summary.health_score // 50' "$AGENT_JSON")
+            echo "health=$HEALTH" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check Circular Imports
+        run: |
+          echo "### Circular Imports" >> $GITHUB_STEP_SUMMARY
+          loct cycles >> $GITHUB_STEP_SUMMARY 2>&1 || true
+
+      - name: Check Dead Exports
+        run: |
+          echo "### Dead Code" >> $GITHUB_STEP_SUMMARY
+          loct dead --top 10 >> $GITHUB_STEP_SUMMARY 2>&1 || true
+
+      - name: Upload Loctree Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: loctree-analysis
+          path: .loctree/
+          if-no-files-found: ignore
