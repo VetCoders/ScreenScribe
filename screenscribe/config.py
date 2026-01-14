@@ -71,16 +71,8 @@ class ScreenScribeConfig:
         warnings = []
 
         # Check for endpoint/provider mismatch
-        openai_endpoints = [
-            ep for ep in [self.llm_endpoint, self.vision_endpoint] if "api.openai.com" in ep
-        ]
-        for ep in openai_endpoints:
-            if "/v1/responses" in ep:
-                warnings.append(
-                    f"Invalid endpoint: {ep}\n"
-                    "  OpenAI does not support /v1/responses - use /v1/chat/completions\n"
-                    "  Fix in: ~/.config/screenscribe/config.env"
-                )
+        # Note: Both OpenAI and LibraxisAI support /v1/responses (Responses API)
+        # OpenAI added support in late 2024, LibraxisAI uses it natively
 
         libraxis_endpoints = [
             ep for ep in [self.llm_endpoint, self.vision_endpoint] if "libraxis" in ep
