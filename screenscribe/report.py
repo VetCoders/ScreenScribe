@@ -191,7 +191,8 @@ def save_enhanced_json_report(
         Path to saved report
     """
     # Use unified_findings for counts if available (respects deduplication)
-    count_source = unified_findings if unified_findings else detections
+    # Note: empty list is intentionally falsy - fallback to detections
+    count_source = unified_findings if unified_findings is not None else detections
     report: dict[str, Any] = {
         "video": str(video_path),
         "generated_at": datetime.now().isoformat(),

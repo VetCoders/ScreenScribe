@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 
 def _normalize_text_for_similarity(text: str) -> set[str]:
     """Normalize text for similarity comparison.
@@ -266,8 +268,6 @@ def _normalize_text_for_similarity(text: str) -> set[str]:
     }
 
     # Normalize: lowercase, remove punctuation, split
-    import re
-
     text_lower = text.lower()
     # Remove punctuation except numbers
     text_clean = re.sub(r"[^\w\s]", " ", text_lower)

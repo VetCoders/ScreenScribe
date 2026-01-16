@@ -66,6 +66,16 @@ jobs:
           echo "### Dead Code" >> $GITHUB_STEP_SUMMARY
           loct dead --top 10 >> $GITHUB_STEP_SUMMARY 2>&1 || true
 
+      - name: Verify Health Threshold
+        if: steps.scan.outputs.health != ''
+        run: |
+          HEALTH=${{ steps.scan.outputs.health }}
+          if [ "$HEALTH" -lt "$HEALTH_THRESHOLD" ]; then
+            echo "::error::Health score ($HEALTH) is below threshold ($HEALTH_THRESHOLD)"
+            exit 1
+          fi
+          echo "Health score ($HEALTH) meets threshold ($HEALTH_THRESHOLD)"
+
       - name: Upload Loctree Artifacts
         uses: actions/upload-artifact@v4
         with:

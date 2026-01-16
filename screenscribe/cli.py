@@ -67,6 +67,9 @@ from .validation import APIKeyError, ModelValidationError, validate_models
 
 console = Console()
 
+# Maximum number of auto-versioned review directories (video_review_2, _3, etc.)
+MAX_REVIEW_VERSIONS = 99
+
 
 def _find_next_review_path(base_path: Path) -> tuple[Path, int | None]:
     """Find next available review path, appending _2, _3, etc. if needed.
@@ -92,7 +95,7 @@ def _find_next_review_path(base_path: Path) -> tuple[Path, int | None]:
         if not versioned_path.exists() or not has_report(versioned_path):
             return versioned_path, version
         version += 1
-        if version > 99:  # Safety limit
+        if version > MAX_REVIEW_VERSIONS:
             raise RuntimeError(f"Too many review versions for {base_path.name}")
 
 
@@ -134,8 +137,8 @@ def _auto_review_if_video() -> None:
             "--config",
         ):
             return
-        # Check if it looks like a video file (path exists or has video extension)
-        if _is_video_file(first_arg) or (Path(first_arg).exists() and _is_video_file(first_arg)):
+        # Check if it looks like a video file (has video extension)
+        if _is_video_file(first_arg):
             # Inject 'review' command
             sys.argv.insert(1, "review")
 
@@ -702,6 +705,10 @@ def review(
     # Track context across videos for chaining
     batch_context_response_id: str = ""
 
+    # Track last processed video for --serve option
+    last_output: Path | None = None
+    last_video: Path | None = None
+
     # Process each video
     for video_idx, video in enumerate(videos):
         if len(videos) > 1:
@@ -1195,7 +1202,7 @@ def review(
         last_output = video_output
 
     # After all videos processed, optionally serve the last report
-    if serve and "last_output" in locals():
+    if serve and last_output is not None:
         _serve_report(last_output, last_video, port)
 
 

@@ -458,12 +458,13 @@ def _parse_prefilter_response(
 
 def _poi_similarity_text(poi: PointOfInterest) -> str:
     """Extract text for similarity comparison from a POI."""
-    parts = []
+    if poi.transcript_excerpt and poi.reasoning:
+        return f"{poi.transcript_excerpt} {poi.reasoning}"
     if poi.transcript_excerpt:
-        parts.append(poi.transcript_excerpt)
+        return poi.transcript_excerpt
     if poi.reasoning:
-        parts.append(poi.reasoning)
-    return " ".join(parts)
+        return poi.reasoning
+    return ""
 
 
 def deduplicate_pois(
@@ -523,11 +524,12 @@ def deduplicate_pois(
         for p in group:
             if not p.reasoning:
                 continue
-            key = p.reasoning.strip().lower()
+            stripped_reasoning = p.reasoning.strip()
+            key = stripped_reasoning.lower()
             if key in seen_reasoning:
                 continue
             seen_reasoning.add(key)
-            reasoning_parts.append(p.reasoning.strip())
+            reasoning_parts.append(stripped_reasoning)
 
         merged = PointOfInterest(
             timestamp_start=min(p.timestamp_start for p in group),

@@ -742,7 +742,8 @@ def analyze_all_findings_unified(
         else:
             state.status = "failed"
 
-        completed_count += 1
+        with response_id_lock:
+            completed_count += 1
         return (idx, finding)
 
     # Build progress display
@@ -1323,10 +1324,12 @@ def deduplicate_findings(
     if not findings or len(findings) <= 1:
         return findings
 
-    def normalize_summary(text: str) -> str:
+    def normalize_text(text: str) -> str:
+        """Normalize text for comparison: lowercase and collapse whitespace."""
         return " ".join(text.lower().split())
 
-    def similarity_text(finding: UnifiedFinding) -> str:
+    def extract_similarity_text(finding: UnifiedFinding) -> str:
+        """Extract text from finding for similarity comparison."""
         if finding.summary.strip():
             return finding.summary
         parts = []
@@ -1342,7 +1345,7 @@ def deduplicate_findings(
     # Stage 1: Group identical summaries first (stable, cross-category)
     summary_groups: dict[str, list[int]] = {}
     for idx, finding in enumerate(findings):
-        key = normalize_summary(finding.summary)
+        key = normalize_text(finding.summary)
         if key:
             summary_groups.setdefault(key, []).append(idx)
 
@@ -1352,7 +1355,7 @@ def deduplicate_findings(
 
     for i, finding in enumerate(findings):
         # Check if this finding has identical summary duplicates
-        key = normalize_summary(finding.summary)
+        key = normalize_text(finding.summary)
         if key and len(summary_groups.get(key, [])) > 1:
             if i in used:
                 continue
@@ -1377,7 +1380,9 @@ def deduplicate_findings(
             if finding.category == other.category:
                 if abs(finding.timestamp - other.timestamp) > 30:
                     continue
-                similarity = _text_similarity(similarity_text(finding), similarity_text(other))
+                similarity = _text_similarity(
+                    extract_similarity_text(finding), extract_similarity_text(other)
+                )
             else:
                 similarity = 0.0
 
@@ -1422,8 +1427,8 @@ def deduplicate_findings(
                     all_components.append(comp)
                     seen_components.add(comp_lower)
 
-        # Track all original (detection_id, timestamp) pairs from merged group
-        merged_ids = [(f.detection_id, f.timestamp) for f in group]
+        # Track original (detection_id, timestamp) pairs that were merged into base
+        merged_ids = [(f.detection_id, f.timestamp) for f in group if f is not base]
 
         # Create merged finding
         merged = UnifiedFinding(
