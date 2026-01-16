@@ -47,6 +47,7 @@ from .screenshots import extract_screenshots_for_detections
 from .semantic_filter import (
     SemanticFilterLevel,
     SemanticFilterResult,
+    deduplicate_pois,
     merge_pois_with_detections,
     pois_to_detections,
     semantic_prefilter,
@@ -893,6 +894,12 @@ def review(
                     transcription, config, previous_response_id=stt_context
                 )
                 pois = filter_result.pois
+                # Deduplicate similar POIs before VLM analysis
+                if pois and len(pois) > 1:
+                    original_count = len(pois)
+                    pois = deduplicate_pois(pois)
+                    if len(pois) < original_count:
+                        console.print(f"[dim]  POI dedup: {original_count} → {len(pois)}[/]")
                 # Chain semantic filter context to VLM analysis
                 if filter_result.response_id:
                     batch_context_response_id = filter_result.response_id
@@ -922,6 +929,12 @@ def review(
                     transcription, config, previous_response_id=stt_context
                 )
                 pois = filter_result.pois
+                # Deduplicate similar POIs before merging with keywords
+                if pois and len(pois) > 1:
+                    original_count = len(pois)
+                    pois = deduplicate_pois(pois)
+                    if len(pois) < original_count:
+                        console.print(f"[dim]  POI dedup: {original_count} → {len(pois)}[/]")
                 # Chain semantic filter context to VLM analysis
                 if filter_result.response_id:
                     batch_context_response_id = filter_result.response_id
@@ -1028,10 +1041,19 @@ def review(
                                 f"{len(unified_findings)} findings"
                             )
                             # Filter detections/screenshots to match deduplicated findings
-                            keep_ids = {f.detection_id for f in unified_findings}
-                            if keep_ids and len(keep_ids) < len(screenshots):
+                            # Include all merged_from_ids to keep screenshots from merged findings
+                            keep_keys: set[tuple[int, float]] = set()
+                            for f in unified_findings:
+                                # Add the finding's own ID
+                                keep_keys.add((f.detection_id, f.timestamp))
+                                # Add all IDs from merged findings
+                                for orig_id, orig_ts in f.merged_from_ids:
+                                    keep_keys.add((orig_id, orig_ts))
+                            if keep_keys and len(keep_keys) < len(screenshots):
                                 screenshots = [
-                                    (d, p) for (d, p) in screenshots if d.segment.id in keep_ids
+                                    (d, p)
+                                    for (d, p) in screenshots
+                                    if (d.segment.id, d.segment.start) in keep_keys
                                 ]
                                 detections = [d for (d, _) in screenshots]
                     checkpoint.unified_findings = [

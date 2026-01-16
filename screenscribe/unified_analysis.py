@@ -19,7 +19,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -76,6 +76,9 @@ class UnifiedFinding:
 
     # API response tracking
     response_id: str = ""  # For conversation chaining between findings
+
+    # Deduplication tracking - stores (detection_id, timestamp) of merged findings
+    merged_from_ids: list[tuple[int, float]] = field(default_factory=list)
 
 
 def parse_json_response(content: str) -> dict[str, Any]:
@@ -1296,11 +1299,14 @@ def _text_similarity(text1: str, text2: str) -> float:
 
 def deduplicate_findings(
     findings: list[UnifiedFinding],
-    similarity_threshold: float = 0.45,
+    similarity_threshold: float = 0.4,
 ) -> list[UnifiedFinding]:
     """Deduplicate similar findings by merging them.
 
-    Findings with similar summaries (above threshold) are merged into one.
+    Two-stage deduplication:
+    1. Group findings with IDENTICAL summaries (cross-category, always merge)
+    2. Group SIMILAR findings only if same category AND within 30s timestamp
+
     The merged finding keeps:
     - Highest severity
     - Combined action items (deduplicated)
@@ -1317,14 +1323,44 @@ def deduplicate_findings(
     if not findings or len(findings) <= 1:
         return findings
 
+    def normalize_summary(text: str) -> str:
+        return " ".join(text.lower().split())
+
+    def similarity_text(finding: UnifiedFinding) -> str:
+        if finding.summary.strip():
+            return finding.summary
+        parts = []
+        parts.extend(finding.action_items or [])
+        parts.extend(finding.affected_components or [])
+        parts.extend(finding.issues_detected or [])
+        parts.extend(finding.ui_elements or [])
+        return " ".join(part.strip() for part in parts if part and part.strip())
+
     # Severity ranking for comparison
     severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "none": 0}
 
-    # Group similar findings
+    # Stage 1: Group identical summaries first (stable, cross-category)
+    summary_groups: dict[str, list[int]] = {}
+    for idx, finding in enumerate(findings):
+        key = normalize_summary(finding.summary)
+        if key:
+            summary_groups.setdefault(key, []).append(idx)
+
+    # Stage 2: Group similar findings
     groups: list[list[UnifiedFinding]] = []
     used: set[int] = set()
 
     for i, finding in enumerate(findings):
+        # Check if this finding has identical summary duplicates
+        key = normalize_summary(finding.summary)
+        if key and len(summary_groups.get(key, [])) > 1:
+            if i in used:
+                continue
+            group = [findings[idx] for idx in summary_groups[key]]
+            groups.append(group)
+            used.update(summary_groups[key])
+            continue
+
         if i in used:
             continue
 
@@ -1332,12 +1368,19 @@ def deduplicate_findings(
         group = [finding]
         used.add(i)
 
-        # Find similar findings
+        # Find similar findings (same category + close timestamp)
         for j, other in enumerate(findings):
             if j in used:
                 continue
 
-            similarity = _text_similarity(finding.summary, other.summary)
+            # Only compare within same category and 30s window
+            if finding.category == other.category:
+                if abs(finding.timestamp - other.timestamp) > 30:
+                    continue
+                similarity = _text_similarity(similarity_text(finding), similarity_text(other))
+            else:
+                similarity = 0.0
+
             if similarity >= similarity_threshold:
                 group.append(other)
                 used.add(j)
@@ -1379,6 +1422,9 @@ def deduplicate_findings(
                     all_components.append(comp)
                     seen_components.add(comp_lower)
 
+        # Track all original (detection_id, timestamp) pairs from merged group
+        merged_ids = [(f.detection_id, f.timestamp) for f in group]
+
         # Create merged finding
         merged = UnifiedFinding(
             detection_id=base.detection_id,
@@ -1400,6 +1446,8 @@ def deduplicate_findings(
             design_feedback=base.design_feedback,
             technical_observations=base.technical_observations,
             response_id=base.response_id,
+            # Track all original IDs for screenshot filtering
+            merged_from_ids=merged_ids,
         )
 
         result.append(merged)
