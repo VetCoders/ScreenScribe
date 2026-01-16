@@ -296,10 +296,12 @@ def save_enhanced_markdown_report(
     executive_summary: str = "",
     visual_summary: str = "",
     errors: list[dict[str, str]] | None = None,
+    transcript: str = "",
 ) -> Path:
     """Save enhanced report with unified VLM analysis as Markdown.
 
     Format optimized for AI consumption:
+    - Transcript at the top for full context
     - Sorted by severity (critical first)
     - Consolidated action items at top
     - No emoji clutter
@@ -314,6 +316,7 @@ def save_enhanced_markdown_report(
         executive_summary: Executive summary text
         visual_summary: Visual summary text
         errors: List of pipeline errors
+        transcript: Full transcript text (embedded at start for AI context)
 
     Returns:
         Path to saved report
@@ -390,6 +393,10 @@ def save_enhanced_markdown_report(
             f"**Stats:** {len(detections)} findings | {bug_count} bugs, {change_count} changes, {ui_count} UI"
         )
     lines.append("")
+
+    # Transcript (at the top for AI context)
+    if transcript:
+        lines.extend(["## Transcript", "", transcript, ""])
 
     # Executive Summary
     if executive_summary:

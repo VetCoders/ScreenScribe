@@ -828,14 +828,7 @@ def review(
             checkpoint.transcription = serialize_transcription(transcription)
             checkpoint.mark_stage_complete("transcription")
             save_checkpoint(checkpoint, video_output)
-
-            # Save full transcript
-            transcript_path = video_output / f"{video_stem}_transcript.txt"
-            with open(transcript_path, "w", encoding="utf-8") as f:
-                f.write(transcription.text)
-            console.print(
-                f"[dim]Saved transcript:[/] [link=file://{transcript_path}]{transcript_path}[/link]\n"
-            )
+            # Transcript is now embedded in the MD report (no separate file)
         else:
             console.print("[dim]Step 2: Transcription - skipped (cached)[/]")
             if transcription is None and checkpoint.transcription:
@@ -1124,6 +1117,7 @@ def review(
                 executive_summary=executive_summary,
                 visual_summary=visual_summary,
                 errors=pipeline_errors,
+                transcript=transcription.text if transcription else "",
             )
 
         if html_report:
