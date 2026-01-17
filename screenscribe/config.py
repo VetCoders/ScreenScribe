@@ -52,7 +52,7 @@ class ScreenScribeConfig:
     language: str = "pl"
     use_semantic_analysis: bool = True
     use_vision_analysis: bool = True
-    max_tokens: int = 4096
+    verbose: bool = False
 
     def get_stt_api_key(self) -> str:
         """Get API key for STT endpoint."""
@@ -71,16 +71,8 @@ class ScreenScribeConfig:
         warnings = []
 
         # Check for endpoint/provider mismatch
-        openai_endpoints = [
-            ep for ep in [self.llm_endpoint, self.vision_endpoint] if "api.openai.com" in ep
-        ]
-        for ep in openai_endpoints:
-            if "/v1/responses" in ep:
-                warnings.append(
-                    f"Invalid endpoint: {ep}\n"
-                    "  OpenAI does not support /v1/responses - use /v1/chat/completions\n"
-                    "  Fix in: ~/.config/screenscribe/config.env"
-                )
+        # Note: Both OpenAI and LibraxisAI support /v1/responses (Responses API)
+        # OpenAI added support in late 2024, LibraxisAI uses it natively
 
         libraxis_endpoints = [
             ep for ep in [self.llm_endpoint, self.vision_endpoint] if "libraxis" in ep
@@ -128,12 +120,12 @@ class ScreenScribeConfig:
             # Generic API Key (fallback for all endpoints)
             "SCREENSCRIBE_API_KEY": "api_key",
             # Per-provider keys (set appropriate per-endpoint key)
-            "LIBRAXIS_API_KEY": "stt_api_key",  # LibraxisAI typically for STT
-            "OPENAI_API_KEY": "llm_api_key",  # OpenAI typically for LLM/Vision
+            "LIBRAXIS_API_KEY": "stt_api_key",  # pragma: allowlist secret
+            "OPENAI_API_KEY": "llm_api_key",  # pragma: allowlist secret
             # Explicit per-endpoint keys (highest priority)
-            "SCREENSCRIBE_STT_API_KEY": "stt_api_key",
-            "SCREENSCRIBE_LLM_API_KEY": "llm_api_key",
-            "SCREENSCRIBE_VISION_API_KEY": "vision_api_key",
+            "SCREENSCRIBE_STT_API_KEY": "stt_api_key",  # pragma: allowlist secret
+            "SCREENSCRIBE_LLM_API_KEY": "llm_api_key",  # pragma: allowlist secret
+            "SCREENSCRIBE_VISION_API_KEY": "vision_api_key",  # pragma: allowlist secret
             # Base URL (auto-derives endpoints if explicit not set)
             "SCREENSCRIBE_API_BASE": "api_base",
             "LIBRAXIS_API_BASE": "api_base",

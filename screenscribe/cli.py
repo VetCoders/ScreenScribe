@@ -1,5 +1,10 @@
 """CLI interface for ScreenScribe video review automation."""
 
+import os
+import shutil
+import subprocess
+import sys
+import webbrowser
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -41,6 +46,8 @@ from .screenshots import extract_screenshots_for_detections
 # from .semantic import analyze_detections_semantically, generate_executive_summary
 from .semantic_filter import (
     SemanticFilterLevel,
+    SemanticFilterResult,
+    deduplicate_pois,
     merge_pois_with_detections,
     pois_to_detections,
     semantic_prefilter,
@@ -60,6 +67,37 @@ from .validation import APIKeyError, ModelValidationError, validate_models
 
 console = Console()
 
+# Maximum number of auto-versioned review directories (video_review_2, _3, etc.)
+MAX_REVIEW_VERSIONS = 99
+
+
+def _find_next_review_path(base_path: Path) -> tuple[Path, int | None]:
+    """Find next available review path, appending _2, _3, etc. if needed.
+
+    Args:
+        base_path: The initial desired output path (e.g., video_review)
+
+    Returns:
+        Tuple of (available_path, version_number or None if first)
+    """
+
+    # Check if base path has a report (not just empty dir or checkpoint)
+    def has_report(p: Path) -> bool:
+        return (p / "report.html").exists() or (p / "report.json").exists()
+
+    if not base_path.exists() or not has_report(base_path):
+        return base_path, None
+
+    # Find next available number
+    version = 2
+    while True:
+        versioned_path = base_path.parent / f"{base_path.name}_{version}"
+        if not versioned_path.exists() or not has_report(versioned_path):
+            return versioned_path, version
+        version += 1
+        if version > MAX_REVIEW_VERSIONS:
+            raise RuntimeError(f"Too many review versions for {base_path.name}")
+
 
 def version_callback(value: bool) -> None:
     """Show version and exit."""
@@ -70,9 +108,43 @@ def version_callback(value: bool) -> None:
 
 app = typer.Typer(
     name="screenscribe",
-    help="Video review automation - extract bugs and changes from screencast commentary.",
+    help="Video review automation with AI-powered analysis. STT→LLM→VLM pipeline.",
     add_completion=False,
+    invoke_without_command=True,
 )
+
+
+def _is_video_file(path: str) -> bool:
+    """Check if path looks like a video file."""
+    video_extensions = {".mov", ".mp4", ".avi", ".mkv", ".webm", ".m4v", ".wmv"}
+    return Path(path).suffix.lower() in video_extensions
+
+
+def _auto_review_if_video() -> None:
+    """If first positional arg is a video file, inject 'review' command."""
+    if len(sys.argv) > 1:
+        first_arg = sys.argv[1]
+        # Skip if it's already a command or flag
+        if first_arg in (
+            "review",
+            "transcribe",
+            "config",
+            "version",
+            "--help",
+            "-h",
+            "--version",
+            "-V",
+            "--config",
+        ):
+            return
+        # Check if it looks like a video file (has video extension)
+        if _is_video_file(first_arg):
+            # Inject 'review' command
+            sys.argv.insert(1, "review")
+
+
+# Auto-detect video files and inject review command
+_auto_review_if_video()
 
 
 def _interactive_mode() -> None:
@@ -111,9 +183,6 @@ def _interactive_mode() -> None:
 
     if selected_cmd == "config":
         console.print("\n[dim]Running:[/] screenscribe config --show")
-        import subprocess
-        import sys
-
         subprocess.run([sys.executable, "-m", "screenscribe", "config", "--show"])
         raise typer.Exit()
 
@@ -133,7 +202,7 @@ def _interactive_mode() -> None:
     video = Path(video_path)
 
     if not video.exists():
-        console.print(f"[red]File not found:[/] {video}")
+        console.print(f"[red]File not found:[/] [link=file://{video}]{video}[/link]")
         raise typer.Exit(1)
 
     console.print()
@@ -141,11 +210,99 @@ def _interactive_mode() -> None:
     console.print()
 
     # Use subprocess to call commands (avoids forward reference issues)
-    import subprocess
-    import sys
-
     run_cmd = [sys.executable, "-m", "screenscribe", selected_cmd, str(video)]
     subprocess.run(run_cmd)
+
+
+def _serve_report(output_dir: Path, video_path: Path, port: int = 8765) -> None:
+    """Start HTTP server and open report in browser.
+
+    Creates a symlink to the video in output_dir so the server can serve it,
+    then starts a simple HTTP server and opens the report in the default browser.
+
+    Args:
+        output_dir: Directory containing report.html
+        video_path: Path to the source video file
+        port: Port for the HTTP server (default: 8765)
+    """
+    report_filename = f"{video_path.stem}_report.html"
+    report_file = output_dir / report_filename
+    if not report_file.exists():
+        console.print(f"[yellow]No {report_filename} found, skipping server.[/]")
+        return
+
+    # Create symlink to video in output dir if not already there
+    video_link = output_dir / video_path.name
+    if not video_link.exists() and video_path.exists():
+        try:
+            video_link.symlink_to(video_path.resolve())
+            console.print(
+                f"[dim]Created symlink to video: [link=file://{video_link}]{video_link.name}[/link][/]"
+            )
+        except OSError as e:
+            console.print(f"[yellow]Could not create video symlink: {e}[/]")
+
+    # Start HTTP server in background
+    console.print()
+    console.rule("[bold cyan]Starting Review Server[/]")
+    console.print(f"[dim]Serving from:[/] [link=file://{output_dir}]{output_dir}[/link]")
+    console.print(f"[bold green]Report URL:[/] http://localhost:{port}/{report_filename}")
+    console.print()
+    console.print("[dim]Press Ctrl+C to stop the server and exit[/]")
+    console.print()
+
+    # Open browser
+    url = f"http://localhost:{port}/{report_filename}"
+    webbrowser.open(url)
+
+    # Start server (blocking)
+    try:
+        # Change to output directory and start server
+        original_dir = os.getcwd()
+        os.chdir(output_dir)
+
+        # Use subprocess for cleaner handling
+        server_process = subprocess.Popen(
+            [sys.executable, "-m", "http.server", str(port)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        console.print(f"[green]Server running on port {port}[/]")
+
+        # Wait for Ctrl+C
+        try:
+            server_process.wait()
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Stopping server...[/]")
+            server_process.terminate()
+            server_process.wait(timeout=5)
+
+    finally:
+        os.chdir(original_dir)
+        # Clean up symlink
+        if video_link.exists() and video_link.is_symlink():
+            try:
+                video_link.unlink()
+            except OSError:
+                pass
+
+
+def _open_config_callback(value: bool) -> None:
+    """Open config file in editor."""
+    if value:
+        config_path = Path.home() / ".config" / "screenscribe" / "config.env"
+        if not config_path.exists():
+            # Create default config
+            cfg = ScreenScribeConfig.load()
+            cfg.save_default_config()
+            console.print(f"[green]Created default config:[/] {config_path}")
+
+        # Open in default editor
+        editor = os.environ.get("EDITOR", "open" if sys.platform == "darwin" else "nano")
+        console.print(f"[dim]Opening config in {editor}...[/]")
+        subprocess.run([editor, str(config_path)])
+        raise typer.Exit()
 
 
 @app.callback(invoke_without_command=True)
@@ -161,8 +318,17 @@ def main(
             help="Show version and exit.",
         ),
     ] = False,
+    config: Annotated[
+        bool,
+        typer.Option(
+            "--config",
+            callback=_open_config_callback,
+            is_eager=True,
+            help="Open config file in editor (creates default if missing).",
+        ),
+    ] = False,
 ) -> None:
-    """ScreenScribe - Video review automation."""
+    """ScreenScribe - Video review automation with AI. STT→LLM→VLM pipeline."""
     # If no subcommand given, launch interactive mode
     if ctx.invoked_subcommand is None:
         _interactive_mode()
@@ -384,6 +550,13 @@ def review(
             help="Resume from previous checkpoint if available",
         ),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Force reprocessing, ignore existing checkpoint",
+        ),
+    ] = False,
     estimate: Annotated[
         bool,
         typer.Option(
@@ -412,36 +585,65 @@ def review(
             help="Skip model availability check (faster start, may fail mid-pipeline)",
         ),
     ] = False,
+    serve: Annotated[
+        bool,
+        typer.Option(
+            "--serve/--no-serve",
+            help="Start HTTP server and open report in browser after processing",
+        ),
+    ] = True,
+    port: Annotated[
+        int,
+        typer.Option(
+            "--port",
+            "-p",
+            help="Port for the HTTP server (default: 8765)",
+        ),
+    ] = 8765,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Show detailed progress and debug information",
+        ),
+    ] = False,
 ) -> None:
     """
-    Analyze screencast video(s) for bugs and change requests.
+    Analyze screencast video(s) and generate interactive review reports.
 
-    Extracts audio, transcribes it, detects issues mentioned in commentary,
-    captures screenshots, and optionally analyzes with AI models.
+    Pipeline: Audio → STT → Semantic Analysis → Screenshots → VLM → Report
 
-    Supports batch mode: pass multiple videos and they will be processed
-    sequentially with shared context (each video "remembers" previous ones).
+    Features:
+    • Response ID chaining: STT→LLM→VLM share context for better analysis
+    • Auto-versioning: existing reviews preserved as video_review_2, _3, etc.
+    • Interactive HTML report with video player, subtitle sync, and annotations
+    • Batch mode: multiple videos with shared context across files
 
-    By default, uses semantic pre-filtering (LLM analyzes entire transcript)
-    for comprehensive issue detection. Use --keywords-only for faster,
-    keyword-based detection.
+    Detection modes:
+    • Default: Semantic pre-filter (LLM analyzes entire transcript)
+    • --keywords-only: Fast regex-based detection
 
-    Use --resume to continue from a previous interrupted run.
-    Use --estimate to see time estimates without processing.
-    Use --dry-run to run only transcription and detection (no AI, no screenshots).
+    Output options:
+    • --serve/--no-serve: Start HTTP server and open report in browser
+    • --force: Overwrite existing review instead of versioning
+    • --resume: Continue from checkpoint if interrupted
 
     Examples:
         screenscribe review video.mov
         screenscribe review video1.mov video2.mov video3.mov
-        screenscribe review ./recordings/*.mov
+        screenscribe review ./recordings/*.mov --no-serve
+        screenscribe review video.mov --force --keywords-only
     """
     # Validate video paths exist
     for video in videos:
         if not video.exists():
-            console.print(f"[red]Error:[/] Video not found: {video}")
+            console.print(f"[red]Error:[/] Video not found: [link=file://{video}]{video}[/link]")
             raise typer.Exit(1)
         if video.is_dir():
-            console.print(f"[red]Error:[/] Path is a directory: {video}")
+            console.print(
+                f"[red]Error:[/] Path is a directory: [link=file://{video}]{video}[/link]"
+            )
             raise typer.Exit(1)
 
     console.print(
@@ -464,6 +666,7 @@ def review(
     config.language = language
     config.use_semantic_analysis = semantic
     config.use_vision_analysis = vision
+    config.verbose = verbose
 
     # Validate endpoint configuration (fail fast on common mistakes)
     config_warnings = config.validate()
@@ -502,6 +705,10 @@ def review(
     # Track context across videos for chaining
     batch_context_response_id: str = ""
 
+    # Track last processed video for --serve option
+    last_output: Path | None = None
+    last_video: Path | None = None
+
     # Process each video
     for video_idx, video in enumerate(videos):
         if len(videos) > 1:
@@ -510,16 +717,32 @@ def review(
         # Setup output directory (per-video in batch mode)
         video_stem = video.stem  # Video name without extension for file naming
         if output is None:
-            video_output = video.parent / f"{video_stem}_review"
+            base_output = video.parent / f"{video_stem}_review"
         elif len(videos) > 1:
             # Batch mode with -o: use subdirectories
-            video_output = output / f"{video_stem}_review"
+            base_output = output / f"{video_stem}_review"
         else:
-            video_output = output
+            base_output = output
+
+        # Handle existing reviews: append _2, _3, etc. unless --force
+        if force:
+            video_output = base_output
+        else:
+            video_output, version = _find_next_review_path(base_output)
+            if version:
+                console.print(
+                    Panel(
+                        f"[yellow]Found previous review at:[/] {base_output.name}\n"
+                        f"[green]Creating new version:[/] {video_output.name}",
+                        title="[bold]Found Previous Review[/]",
+                        border_style="yellow",
+                    )
+                )
+
         video_output.mkdir(parents=True, exist_ok=True)
 
-        console.print(f"\n[blue]Video:[/] {video}")
-        console.print(f"[blue]Output:[/] {video_output}")
+        console.print(f"\n[blue]Video:[/] [link=file://{video}]{video}[/link]")
+        console.print(f"[blue]Output:[/] [link=file://{video_output}]{video_output}[/link]")
         console.print(
             f"[blue]AI Analysis:[/] Semantic={'✓' if semantic else '✗'} Vision={'✓' if vision else '✗'}"
         )
@@ -540,9 +763,18 @@ def review(
             _show_estimate(duration, semantic, vision, filter_level=semantic_filter_level.value)
             continue  # Continue to next video in batch mode
 
+        # Handle --force: delete existing checkpoint
+        if force:
+            cache_dir = video_output / ".screenscribe_cache"
+            if cache_dir.exists():
+                shutil.rmtree(cache_dir)
+                console.print(
+                    "[yellow]Force mode:[/] Deleted existing checkpoint, starting fresh\n"
+                )
+
         # Check for existing checkpoint
         checkpoint: PipelineCheckpoint | None = None
-        if resume:
+        if resume and not force:
             checkpoint = load_checkpoint(video_output)
             if checkpoint and checkpoint_valid_for_video(checkpoint, video, video_output, language):
                 console.print(
@@ -603,12 +835,7 @@ def review(
             checkpoint.transcription = serialize_transcription(transcription)
             checkpoint.mark_stage_complete("transcription")
             save_checkpoint(checkpoint, video_output)
-
-            # Save full transcript
-            transcript_path = video_output / f"{video_stem}_transcript.txt"
-            with open(transcript_path, "w", encoding="utf-8") as f:
-                f.write(transcription.text)
-            console.print(f"[dim]Saved transcript: {transcript_path}[/]\n")
+            # Transcript is now embedded in the MD report (no separate file)
         else:
             console.print("[dim]Step 2: Transcription - skipped (cached)[/]")
             if transcription is None and checkpoint.transcription:
@@ -661,7 +888,21 @@ def review(
             elif semantic_filter_level == SemanticFilterLevel.BASE:
                 # Level 1: Semantic pre-filter on entire transcript
                 console.print("[cyan]Using semantic pre-filter (analyzing entire transcript)[/]")
-                pois = semantic_prefilter(transcription, config)
+                # Chain from STT → semantic filter → VLM
+                stt_context = transcription.response_id or batch_context_response_id
+                filter_result: SemanticFilterResult = semantic_prefilter(
+                    transcription, config, previous_response_id=stt_context
+                )
+                pois = filter_result.pois
+                # Deduplicate similar POIs before VLM analysis
+                if pois and len(pois) > 1:
+                    original_count = len(pois)
+                    pois = deduplicate_pois(pois)
+                    if len(pois) < original_count:
+                        console.print(f"[dim]  POI dedup: {original_count} → {len(pois)}[/]")
+                # Chain semantic filter context to VLM analysis
+                if filter_result.response_id:
+                    batch_context_response_id = filter_result.response_id
                 if pois:
                     # Convert POIs to Detection objects for compatibility
                     detections = pois_to_detections(pois, transcription)
@@ -682,8 +923,21 @@ def review(
                 # First: keyword detection
                 keyword_detections = detect_issues(transcription, keywords_file=keywords_file)
 
-                # Second: semantic pre-filter
-                pois = semantic_prefilter(transcription, config)
+                # Second: semantic pre-filter (chain from STT)
+                stt_context = transcription.response_id or batch_context_response_id
+                filter_result = semantic_prefilter(
+                    transcription, config, previous_response_id=stt_context
+                )
+                pois = filter_result.pois
+                # Deduplicate similar POIs before merging with keywords
+                if pois and len(pois) > 1:
+                    original_count = len(pois)
+                    pois = deduplicate_pois(pois)
+                    if len(pois) < original_count:
+                        console.print(f"[dim]  POI dedup: {original_count} → {len(pois)}[/]")
+                # Chain semantic filter context to VLM analysis
+                if filter_result.response_id:
+                    batch_context_response_id = filter_result.response_id
 
                 if pois:
                     # Merge semantic POIs with keyword detections
@@ -787,10 +1041,19 @@ def review(
                                 f"{len(unified_findings)} findings"
                             )
                             # Filter detections/screenshots to match deduplicated findings
-                            keep_ids = {f.detection_id for f in unified_findings}
-                            if keep_ids and len(keep_ids) < len(screenshots):
+                            # Include all merged_from_ids to keep screenshots from merged findings
+                            keep_keys: set[tuple[int, float]] = set()
+                            for f in unified_findings:
+                                # Add the finding's own ID
+                                keep_keys.add((f.detection_id, f.timestamp))
+                                # Add all IDs from merged findings
+                                for orig_id, orig_ts in f.merged_from_ids:
+                                    keep_keys.add((orig_id, orig_ts))
+                            if keep_keys and len(keep_keys) < len(screenshots):
                                 screenshots = [
-                                    (d, p) for (d, p) in screenshots if d.segment.id in keep_ids
+                                    (d, p)
+                                    for (d, p) in screenshots
+                                    if (d.segment.id, d.segment.start) in keep_keys
                                 ]
                                 detections = [d for (d, _) in screenshots]
                     checkpoint.unified_findings = [
@@ -861,6 +1124,7 @@ def review(
                 executive_summary=executive_summary,
                 visual_summary=visual_summary,
                 errors=pipeline_errors,
+                transcript=transcription.text if transcription else "",
             )
 
         if html_report:
@@ -912,14 +1176,17 @@ def review(
         # Final success output
         console.rule("[bold green]Finished successfully![/]")
         console.print()
+        json_path = video_output / f"{video_stem}_report.json"
+        md_path = video_output / f"{video_stem}_report.md"
+        html_path = video_output / f"{video_stem}_report.html"
         console.print(
-            f"[green]Enhanced report saved:[/] {video_output / f'{video_stem}_report.json'}"
+            f"[green]Enhanced report saved:[/]\n[link=file://{json_path}]{json_path}[/link]"
         )
         console.print(
-            f"[green]Enhanced Markdown report saved:[/] {video_output / f'{video_stem}_report.md'}"
+            f"[green]Enhanced Markdown report saved:[/]\n[link=file://{md_path}]{md_path}[/link]"
         )
         console.print(
-            f"[green]HTML Pro report saved:[/] {video_output / f'{video_stem}_report.html'}"
+            f"[green]HTML Pro report saved:[/]\n[link=file://{html_path}]{html_path}[/link]"
         )
         console.print()
         console.rule(f"[dim]ScreenScribe v{__version__} by VetCoders[/]")
@@ -929,6 +1196,14 @@ def review(
             last_finding = unified_findings[-1]
             if hasattr(last_finding, "response_id") and last_finding.response_id:
                 batch_context_response_id = last_finding.response_id
+
+        # Store last video info for serve
+        last_video = video
+        last_output = video_output
+
+    # After all videos processed, optionally serve the last report
+    if serve and last_output is not None:
+        _serve_report(last_output, last_video, port)
 
 
 @app.command()
@@ -966,9 +1241,15 @@ def transcribe(
     ] = False,
 ) -> None:
     """
-    Transcribe a video file without full analysis.
+    Transcribe video audio to text (no analysis).
 
-    Useful for getting just the transcript text.
+    Quick transcription using LibraxisAI STT or local Whisper.
+    Outputs plain text transcript to stdout or file.
+
+    Examples:
+        screenscribe transcribe video.mov
+        screenscribe transcribe video.mov -o transcript.txt
+        screenscribe transcribe video.mov --local --lang en
     """
     config = ScreenScribeConfig.load()
 
@@ -989,7 +1270,7 @@ def transcribe(
     if output:
         with open(output, "w", encoding="utf-8") as f:
             f.write(result.text)
-        console.print(f"[green]Transcript saved:[/] {output}")
+        console.print(f"[green]Transcript saved:[/] [link=file://{output}]{output}[/link]")
     else:
         console.print()
         console.print(result.text)
@@ -1029,33 +1310,48 @@ def config(
     """
     Manage ScreenScribe configuration.
 
-    Config is stored in ~/.config/screenscribe/config.env
+    Config file: ~/.config/screenscribe/config.env
+
+    Options:
+        --show         Display current config values
+        --init         Create default config file
+        --init-keywords Create keywords.yaml for custom detection
+        --set-key KEY  Save API key to config
+
+    Examples:
+        screenscribe config --show
+        screenscribe config --init
+        screenscribe config --set-key sk-xxx
     """
     cfg = ScreenScribeConfig.load()
 
     if set_key:
         cfg.api_key = set_key
         path = cfg.save_default_config()
-        console.print(f"[green]API key saved to:[/] {path}")
+        console.print(f"[green]API key saved to:[/] [link=file://{path}]{path}[/link]")
         return
 
     if init:
         config_path = Path.home() / ".config" / "screenscribe" / "config.env"
         if config_path.exists():
-            console.print(f"[yellow]Config already exists:[/] {config_path}")
+            console.print(
+                f"[yellow]Config already exists:[/] [link=file://{config_path}]{config_path}[/link]"
+            )
             console.print("[dim]Use --show to view current config[/]")
             if not typer.confirm("Overwrite existing config?", default=False):
                 console.print("[dim]Aborted. Existing config preserved.[/]")
                 return
         path = cfg.save_default_config()
-        console.print(f"[green]Config created:[/] {path}")
+        console.print(f"[green]Config created:[/] [link=file://{path}]{path}[/link]")
         console.print("[dim]Edit this file to customize settings[/]")
         return
 
     if init_keywords:
         keywords_path = Path.cwd() / "keywords.yaml"
         if keywords_path.exists():
-            console.print(f"[yellow]Keywords file already exists:[/] {keywords_path}")
+            console.print(
+                f"[yellow]Keywords file already exists:[/] [link=file://{keywords_path}]{keywords_path}[/link]"
+            )
             console.print("[dim]Delete it first if you want to reset to defaults[/]")
             return
         save_default_keywords(keywords_path)
@@ -1063,17 +1359,54 @@ def config(
         return
 
     if show:
-        console.print("[bold]Current Configuration:[/]\n")
-        console.print(f"API Base: {cfg.api_base}")
+        # Find which config file is being used
+        from .config import CONFIG_PATHS
+
+        config_source = None
+        for cp in CONFIG_PATHS:
+            if cp.exists():
+                config_source = cp
+                break
+
+        if config_source:
+            console.print(
+                f"[bold]Current Configuration[/] [dim](from [link=file://{config_source}]{config_source}[/link]):[/]\n"
+            )
+        else:
+            console.print(
+                "[bold]Current Configuration[/] [dim](defaults, no config file found):[/]\n"
+            )
+
+        # API Keys
+        console.print("[cyan]API Keys:[/]")
         console.print(
-            f"API Key: {'*' * 20 + cfg.api_key[-8:] if cfg.api_key else '[red]NOT SET[/]'}"
+            f"  Main: {'*' * 16 + cfg.api_key[-8:] if cfg.api_key else '[red]NOT SET[/]'}"
         )
-        console.print(f"STT Model: {cfg.stt_model}")
-        console.print(f"LLM Model: {cfg.llm_model}")
-        console.print(f"Vision Model: {cfg.vision_model}")
-        console.print(f"Language: {cfg.language}")
-        console.print(f"Semantic Analysis: {cfg.use_semantic_analysis}")
-        console.print(f"Vision Analysis: {cfg.use_vision_analysis}")
+        if cfg.stt_api_key and cfg.stt_api_key != cfg.api_key:
+            console.print(f"  STT:  {'*' * 16 + cfg.stt_api_key[-8:]}")
+        if cfg.llm_api_key and cfg.llm_api_key != cfg.api_key:
+            console.print(f"  LLM:  {'*' * 16 + cfg.llm_api_key[-8:]}")
+        if cfg.vision_api_key and cfg.vision_api_key != cfg.api_key:
+            console.print(f"  Vision: {'*' * 16 + cfg.vision_api_key[-8:]}")
+
+        # Endpoints
+        console.print("\n[cyan]Endpoints:[/]")
+        console.print(f"  STT:    {cfg.stt_endpoint}")
+        console.print(f"  LLM:    {cfg.llm_endpoint}")
+        console.print(f"  Vision: {cfg.vision_endpoint}")
+        console.print(f"  [dim](Base fallback: {cfg.api_base})[/]")
+
+        # Models
+        console.print("\n[cyan]Models:[/]")
+        console.print(f"  STT:    {cfg.stt_model}")
+        console.print(f"  LLM:    {cfg.llm_model}")
+        console.print(f"  Vision: {cfg.vision_model}")
+
+        # Processing
+        console.print("\n[cyan]Processing:[/]")
+        console.print(f"  Language: {cfg.language}")
+        console.print(f"  Semantic: {cfg.use_semantic_analysis}")
+        console.print(f"  Vision:   {cfg.use_vision_analysis}")
         return
 
     # Default: show help
