@@ -74,6 +74,12 @@
     --motion-medium: 250ms;
     --motion-slow: 400ms;
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+    /* Layout Tokens (responsive) */
+    --header-height: 80px;
+    --sidebar-width: clamp(320px, 30vw, 480px);
+    --sidebar-min: 280px;
+    --content-gap: var(--space-lg);
 }
 
 /* Reset */
@@ -130,22 +136,30 @@ body::after {
 
 .app-container {
     display: block;
-    max-width: calc(100vw - 480px - 3 * var(--space-lg));  /* Leave space for fixed sidebar */
+    max-width: calc(100vw - var(--sidebar-width) - 3 * var(--content-gap));
     margin: 0;
-    margin-left: var(--space-lg);
-    padding-top: 80px;  /* Space for fixed header */
-    padding-bottom: 80px;  /* Space for fixed footer */
+    margin-left: var(--content-gap);
+    padding-top: var(--header-height);
+    padding-bottom: var(--header-height);
     min-height: 100vh;
     box-sizing: border-box;
 }
 
-@media (max-width: 1200px) {
+/* Tablet: sidebar becomes narrower */
+@media (max-width: 1200px) and (min-width: 901px) {
+    :root {
+        --sidebar-width: clamp(280px, 35vw, 400px);
+    }
+}
+
+/* Mobile: single column layout */
+@media (max-width: 900px) {
     .app-container {
         max-width: 100%;
         margin: 0;
         padding: var(--space-md);
-        padding-top: 80px;
-        padding-bottom: 80px;
+        padding-top: var(--header-height);
+        padding-bottom: var(--header-height);
     }
     .sidebar {
         position: static !important;
@@ -154,7 +168,14 @@ body::after {
         right: auto !important;
         top: auto !important;
         bottom: auto !important;
-        margin-top: var(--space-lg);
+        margin-top: var(--content-gap);
+    }
+}
+
+/* Wide screens: wider sidebar */
+@media (min-width: 1600px) {
+    :root {
+        --sidebar-width: clamp(400px, 25vw, 560px);
     }
 }
 
@@ -382,14 +403,15 @@ body::after {
 
 .video-section {
     position: sticky;
-    top: calc(var(--space-lg) + 60px); /* Below sticky header */
+    top: calc(var(--header-height) + var(--content-gap));
     align-self: start;
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
     contain: layout;
     overflow: hidden;
-    max-height: calc(100vh - 180px); /* Leave room for header + export bar */
+    /* Responsive max-height: header + footer + margins */
+    max-height: clamp(300px, calc(100vh - 2 * var(--header-height) - var(--content-gap)), 85vh);
 }
 
 .video-container {
@@ -471,10 +493,11 @@ body::after {
 
 .sidebar {
     position: fixed;
-    top: 80px;  /* Below fixed header */
-    right: var(--space-lg);
-    bottom: 80px;  /* Above fixed footer */
-    width: 480px;
+    top: var(--header-height);
+    right: var(--content-gap);
+    bottom: var(--header-height);
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-min);
     display: flex;
     flex-direction: column;
     overflow: hidden;
