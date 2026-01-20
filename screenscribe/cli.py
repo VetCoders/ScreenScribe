@@ -127,6 +127,7 @@ def _auto_review_if_video() -> None:
         # Skip if it's already a command or flag
         if first_arg in (
             "review",
+            "analyze",
             "transcribe",
             "config",
             "version",
@@ -1202,8 +1203,93 @@ def review(
         last_output = video_output
 
     # After all videos processed, optionally serve the last report
-    if serve and last_output is not None:
+    if serve and last_output is not None and last_video is not None:
         _serve_report(last_output, last_video, port)
+
+
+@app.command()
+def analyze(
+    video: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to video file for interactive analysis",
+            exists=True,
+            dir_okay=False,
+        ),
+    ],
+    port: Annotated[
+        int,
+        typer.Option(
+            "--port",
+            "-p",
+            help="Port for the analysis server",
+        ),
+    ] = 8766,
+    language: Annotated[
+        str,
+        typer.Option(
+            "--lang",
+            "-l",
+            help="Language code for voice transcription",
+        ),
+    ] = "pl",
+) -> None:
+    """
+    Start interactive video analysis (reversed flow).
+
+    Opens a browser with video player where you can:
+    - Watch the video and pause at interesting moments
+    - Record voice comments describing issues
+    - Mark frames for AI analysis
+    - Get real-time VLM analysis results
+
+    This is the "human-first" mode: you guide the AI by pointing
+    out what matters, instead of letting AI process everything blindly.
+
+    Examples:
+        screenscribe analyze video.mov
+        screenscribe analyze video.mov --port 9000
+        screenscribe analyze video.mov --lang en
+    """
+    import uvicorn
+
+    from .analyze_server import create_analyze_app
+
+    config = ScreenScribeConfig.load()
+    config.language = language
+
+    # Validate API key
+    if not config.get_vision_api_key():
+        console.print("[red]Error:[/] API key required for VLM analysis")
+        console.print("[dim]Set LIBRAXIS_API_KEY in your environment or config[/]")
+        raise typer.Exit(1)
+
+    console.print()
+    console.print(
+        Panel(
+            f"[bold cyan]ScreenScribe Analyze[/]\n"
+            f"[dim]Interactive video analysis - human-first mode[/]\n\n"
+            f"Video: [link=file://{video.resolve()}]{video.name}[/link]\n"
+            f"Server: [bold]http://localhost:{port}[/]",
+            border_style="cyan",
+        )
+    )
+
+    app_instance = create_analyze_app(video.resolve(), config)
+
+    # Open browser
+    url = f"http://localhost:{port}"
+    webbrowser.open(url)
+
+    console.print()
+    console.print("[dim]Press Ctrl+C to stop the server and exit[/]")
+    console.print()
+
+    # Start server
+    try:
+        uvicorn.run(app_instance, host="127.0.0.1", port=port, log_level="warning")
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Server stopped.[/]")
 
 
 @app.command()
