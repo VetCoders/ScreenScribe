@@ -43,7 +43,8 @@ help:
 # ============================================================================
 
 install: setup-hooks
-	uv tool install .
+	-uv tool uninstall screenscribe 2>/dev/null
+	uv tool install . --reinstall --force
 
 dev: setup-hooks
 	uv sync --dev

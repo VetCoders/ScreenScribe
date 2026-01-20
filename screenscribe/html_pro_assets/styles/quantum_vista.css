@@ -406,6 +406,17 @@ body::after {
     display: block;
     aspect-ratio: 16 / 9;
     object-fit: contain;
+    cursor: pointer;
+}
+
+/* Ensure native video controls are always visible */
+.video-container video::-webkit-media-controls {
+    opacity: 1 !important;
+    display: flex !important;
+}
+
+.video-container video::-webkit-media-controls-panel {
+    opacity: 1 !important;
 }
 
 /* Current subtitle display below video */

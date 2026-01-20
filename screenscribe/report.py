@@ -190,15 +190,18 @@ def save_enhanced_json_report(
     Returns:
         Path to saved report
     """
+    # Use unified_findings for counts if available (respects deduplication)
+    # Note: empty list is intentionally falsy - fallback to detections
+    count_source = unified_findings if unified_findings is not None else detections
     report: dict[str, Any] = {
         "video": str(video_path),
         "generated_at": datetime.now().isoformat(),
         "executive_summary": executive_summary,
         "summary": {
-            "total": len(detections),
-            "bugs": sum(1 for d in detections if d.category == "bug"),
-            "changes": sum(1 for d in detections if d.category == "change"),
-            "ui": sum(1 for d in detections if d.category == "ui"),
+            "total": len(count_source),
+            "bugs": sum(1 for d in count_source if d.category == "bug"),
+            "changes": sum(1 for d in count_source if d.category == "change"),
+            "ui": sum(1 for d in count_source if d.category in ("ui", "accessibility")),
         },
         "severity_breakdown": {},
         "errors": errors or [],
@@ -211,46 +214,72 @@ def save_enhanced_json_report(
             count = sum(1 for f in unified_findings if f.is_issue and f.severity == severity)
             report["severity_breakdown"][severity] = count
 
-    # Build findings lookup from unified analysis
-    findings_by_id = {f.detection_id: f for f in (unified_findings or [])}
+    # Build screenshot lookup by (detection_id, timestamp)
+    screenshots_by_key = {(d.segment.id, d.segment.start): (d, p) for d, p in screenshots}
 
-    for detection, screenshot_path in screenshots:
-        finding = {
-            "id": detection.segment.id,
-            "category": detection.category,
-            "timestamp_start": detection.segment.start,
-            "timestamp_end": detection.segment.end,
-            "timestamp_formatted": format_timestamp(detection.segment.start),
-            "text": detection.segment.text,
-            "context": detection.context,
-            "keywords": detection.keywords_found,
-            "screenshot": str(screenshot_path),
-        }
+    # If unified_findings provided, use them as source of truth (respects deduplication)
+    if unified_findings:
+        for uf in unified_findings:
+            # Get detection and screenshot for this finding
+            key = (uf.detection_id, uf.timestamp)
+            detection, screenshot_path = screenshots_by_key.get(key, (None, None))
 
-        # Add unified analysis if available
-        if detection.segment.id in findings_by_id:
-            uf = findings_by_id[detection.segment.id]
-            # Combined analysis (semantic + vision in one)
-            finding["unified_analysis"] = {
-                # Semantic fields
-                "is_issue": uf.is_issue,
-                "sentiment": uf.sentiment,
-                "severity": uf.severity,
-                "summary": uf.summary,
-                "action_items": uf.action_items,
-                "affected_components": uf.affected_components,
-                "suggested_fix": uf.suggested_fix,
-                # Vision fields
-                "ui_elements": uf.ui_elements,
-                "issues_detected": uf.issues_detected,
-                "accessibility_notes": uf.accessibility_notes,
-                "design_feedback": uf.design_feedback,
-                "technical_observations": uf.technical_observations,
-                # API tracking
-                "response_id": uf.response_id or None,
+            if detection is None:
+                # Fallback: find by detection_id only (shouldn't happen normally)
+                for d, p in screenshots:
+                    if d.segment.id == uf.detection_id:
+                        detection, screenshot_path = d, p
+                        break
+
+            if detection is None:
+                continue  # Skip if no matching detection found
+
+            finding = {
+                "id": detection.segment.id,
+                "category": detection.category,
+                "timestamp_start": detection.segment.start,
+                "timestamp_end": detection.segment.end,
+                "timestamp_formatted": format_timestamp(detection.segment.start),
+                "text": detection.segment.text,
+                "context": detection.context,
+                "keywords": detection.keywords_found,
+                "screenshot": str(screenshot_path) if screenshot_path else None,
+                # Combined analysis (semantic + vision in one)
+                "unified_analysis": {
+                    # Semantic fields
+                    "is_issue": uf.is_issue,
+                    "sentiment": uf.sentiment,
+                    "severity": uf.severity,
+                    "summary": uf.summary,
+                    "action_items": uf.action_items,
+                    "affected_components": uf.affected_components,
+                    "suggested_fix": uf.suggested_fix,
+                    # Vision fields
+                    "ui_elements": uf.ui_elements,
+                    "issues_detected": uf.issues_detected,
+                    "accessibility_notes": uf.accessibility_notes,
+                    "design_feedback": uf.design_feedback,
+                    "technical_observations": uf.technical_observations,
+                    # API tracking
+                    "response_id": uf.response_id or None,
+                },
             }
-
-        report["findings"].append(finding)
+            report["findings"].append(finding)
+    else:
+        # Fallback: no unified analysis, just use screenshots/detections
+        for detection, screenshot_path in screenshots:
+            finding = {
+                "id": detection.segment.id,
+                "category": detection.category,
+                "timestamp_start": detection.segment.start,
+                "timestamp_end": detection.segment.end,
+                "timestamp_formatted": format_timestamp(detection.segment.start),
+                "text": detection.segment.text,
+                "context": detection.context,
+                "keywords": detection.keywords_found,
+                "screenshot": str(screenshot_path),
+            }
+            report["findings"].append(finding)
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
@@ -268,10 +297,12 @@ def save_enhanced_markdown_report(
     executive_summary: str = "",
     visual_summary: str = "",
     errors: list[dict[str, str]] | None = None,
+    transcript: str = "",
 ) -> Path:
     """Save enhanced report with unified VLM analysis as Markdown.
 
     Format optimized for AI consumption:
+    - Transcript at the top for full context
     - Sorted by severity (critical first)
     - Consolidated action items at top
     - No emoji clutter
@@ -286,6 +317,7 @@ def save_enhanced_markdown_report(
         executive_summary: Executive summary text
         visual_summary: Visual summary text
         errors: List of pipeline errors
+        transcript: Full transcript text (embedded at start for AI context)
 
     Returns:
         Path to saved report
@@ -362,6 +394,10 @@ def save_enhanced_markdown_report(
             f"**Stats:** {len(detections)} findings | {bug_count} bugs, {change_count} changes, {ui_count} UI"
         )
     lines.append("")
+
+    # Transcript (at the top for AI context)
+    if transcript:
+        lines.extend(["## Transcript", "", transcript, ""])
 
     # Executive Summary
     if executive_summary:

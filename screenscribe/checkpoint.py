@@ -309,6 +309,8 @@ def serialize_unified_finding(finding: Any) -> dict[str, Any]:
         "technical_observations": finding.technical_observations,
         # API tracking
         "response_id": finding.response_id,
+        # Deduplication tracking
+        "merged_from_ids": finding.merged_from_ids,
     }
 
 
@@ -345,4 +347,6 @@ def deserialize_unified_finding(data: dict[str, Any]) -> Any:
         technical_observations=data.get("technical_observations", ""),
         # API tracking
         response_id=data.get("response_id", ""),
+        # Deduplication tracking
+        merged_from_ids=[tuple(x) for x in data.get("merged_from_ids", [])],
     )
