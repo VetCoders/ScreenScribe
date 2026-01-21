@@ -1,7 +1,7 @@
 # ScreenScribe Makefile
 # Uses uv as package manager
 
-.PHONY: help install dev setup-hooks lint format test test-unit test-integration test-all typecheck security clean version version-patch version-minor version-major
+.PHONY: help install dev setup-hooks lint format test test-unit test-integration test-all typecheck security clean version version-patch version-minor version-major analyze
 
 # Default target
 help:
@@ -24,9 +24,12 @@ help:
 	@echo "Testing:"
 	@echo "  test             Run unit tests (default)"
 	@echo "  test-unit        Run unit tests only"
-	@echo "  test-integration Run integration tests (requires LIBRAXIS_API_KEY)"
+	@echo "  test-integration Run integration tests (uses config or LIBRAXIS_API_KEY)"
 	@echo "  test-all         Run all tests including integration"
 	@echo "  test-cov         Run tests with coverage report"
+	@echo ""
+	@echo "Commands:"
+	@echo "  analyze          Start interactive video analysis server"
 	@echo ""
 	@echo "Versioning:"
 	@echo "  version          Show current version"
@@ -96,20 +99,10 @@ test-unit:
 	uv run pytest tests/ -v -m "not integration" --tb=short
 
 test-integration:
-	@if [ -z "$$LIBRAXIS_API_KEY" ]; then \
-		echo "Error: LIBRAXIS_API_KEY environment variable is required"; \
-		echo "Usage: LIBRAXIS_API_KEY=xxx make test-integration"; \
-		exit 1; \
-	fi
 	uv run pytest tests/ -v -m "integration" --tb=short
 
 test-all:
-	@if [ -z "$$LIBRAXIS_API_KEY" ]; then \
-		echo "Warning: LIBRAXIS_API_KEY not set, skipping integration tests"; \
-		uv run pytest tests/ -v -m "not integration" --tb=short; \
-	else \
-		uv run pytest tests/ -v --tb=short; \
-	fi
+	uv run pytest tests/ -v --tb=short
 
 test-cov:
 	uv run pytest tests/ -v -m "not integration" --cov=screenscribe --cov-report=term-missing --cov-report=html
@@ -120,6 +113,13 @@ test-cov:
 
 run:
 	uv run screenscribe --help
+
+analyze:
+	@if [ -z "$(VIDEO)" ]; then \
+		echo "Usage: make analyze VIDEO=path/to/video.mov [PORT=8766]"; \
+		exit 1; \
+	fi
+	uv run screenscribe analyze "$(VIDEO)" --port $(or $(PORT),8766)
 
 clean:
 	rm -rf .pytest_cache

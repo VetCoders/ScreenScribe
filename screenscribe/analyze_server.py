@@ -101,8 +101,9 @@ def create_analyze_app(video_path: Path, config: ScreenScribeConfig) -> FastAPI:
         js_video = load_js_video_player()
 
         # Build analyze page (simplified version of report.html)
+        lang = config.language[:2].lower()  # "pl" or "en"
         html = f"""<!DOCTYPE html>
-<html lang="pl">
+<html lang="{lang}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
