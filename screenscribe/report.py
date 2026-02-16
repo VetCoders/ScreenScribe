@@ -1,6 +1,7 @@
 """Report generation for video review results."""
 
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,56 @@ from .image_utils import encode_image_base64
 from .transcribe import Segment
 
 console = Console()
+
+
+def _prepare_html_video_source(video_path: Path, output_path: Path) -> str:
+    """Ensure report can load video via relative path (file:// and http:// friendly)."""
+    if not video_path.exists():
+        return str(video_path)
+
+    output_dir = output_path.parent
+    target_video = output_dir / video_path.name
+
+    if target_video.exists():
+        return target_video.name
+
+    try:
+        if video_path.resolve() == target_video.resolve():
+            return target_video.name
+    except OSError:
+        # If resolve fails, continue with symlink/copy attempts below.
+        pass
+
+    try:
+        target_video.symlink_to(video_path.resolve())
+    except OSError:
+        shutil.copy2(video_path, target_video)
+
+    return target_video.name
+
+
+def _serialize_transcript_segments(segments: list[Segment] | None) -> list[dict[str, Any]]:
+    """Serialize transcript segments for report artifacts."""
+    if not segments:
+        return []
+    return [
+        {
+            "id": s.id,
+            "start": s.start,
+            "end": s.end,
+            "text": s.text,
+        }
+        for s in segments
+    ]
+
+
+def _format_timestamped_transcript(segments: list[Segment] | None) -> str:
+    """Format transcript into stable timestamped lines."""
+    if not segments:
+        return ""
+    return "\n".join(
+        f"[{segment.start:.1f}s - {segment.end:.1f}s] {segment.text}" for segment in segments
+    )
 
 
 def print_report(
@@ -175,6 +226,8 @@ def save_enhanced_json_report(
     unified_findings: list[Any] | None = None,
     executive_summary: str = "",
     errors: list[dict[str, str]] | None = None,
+    transcript: str = "",
+    transcript_segments: list[Segment] | None = None,
 ) -> Path:
     """Save enhanced report with unified VLM analysis as JSON.
 
@@ -197,6 +250,9 @@ def save_enhanced_json_report(
         "video": str(video_path),
         "generated_at": datetime.now().isoformat(),
         "executive_summary": executive_summary,
+        "transcript": transcript,
+        "transcript_timestamped": _format_timestamped_transcript(transcript_segments),
+        "transcript_segments": _serialize_transcript_segments(transcript_segments),
         "summary": {
             "total": len(count_source),
             "bugs": sum(1 for d in count_source if d.category == "bug"),
@@ -298,6 +354,7 @@ def save_enhanced_markdown_report(
     visual_summary: str = "",
     errors: list[dict[str, str]] | None = None,
     transcript: str = "",
+    transcript_segments: list[Segment] | None = None,
 ) -> Path:
     """Save enhanced report with unified VLM analysis as Markdown.
 
@@ -398,6 +455,10 @@ def save_enhanced_markdown_report(
     # Transcript (at the top for AI context)
     if transcript:
         lines.extend(["## Transcript", "", transcript, ""])
+
+    timestamped_transcript = _format_timestamped_transcript(transcript_segments)
+    if timestamped_transcript:
+        lines.extend(["## Timestamped Transcript", "", timestamped_transcript, ""])
 
     # Executive Summary
     if executive_summary:
@@ -712,9 +773,10 @@ def save_html_report_pro(
     )
 
     # Render HTML using Pro template
+    report_video_source = _prepare_html_video_source(video_path, output_path)
     html_content = render_html_report_pro(
         video_name=video_path.name,
-        video_path=str(video_path),
+        video_path=report_video_source,
         generated_at=datetime.now().isoformat(),
         executive_summary=executive_summary,
         findings=findings_data,

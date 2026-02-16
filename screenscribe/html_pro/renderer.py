@@ -176,6 +176,16 @@ def _render_finding(f: dict[str, Any], index: int) -> str:
             <div class="review-field notes">
                 <label data-i18n="notes">Notatki / Akcje</label>
                 {f'<div class="ai-suggestions"><strong data-i18n="aiSuggestions">Sugestie AI:</strong> {html.escape(action_items_display)}</div>' if action_items_display else ''}
+                <div class="notes-toolbar">
+                    <button type="button"
+                            class="notes-mic-btn"
+                            data-action="voice-note"
+                            data-finding-id="{finding_id}"
+                            data-i18n="voiceNote">
+                        🎤 Notatka głosowa
+                    </button>
+                    <span class="notes-mic-status" data-finding-id="{finding_id}"></span>
+                </div>
                 <textarea placeholder="Twoje uwagi, akcje do podjęcia..." data-i18n="notesPlaceholder"></textarea>
             </div>
         </div>
@@ -230,12 +240,23 @@ def render_html_report_pro(
             if size_mb < 50:  # Only embed if < 50MB
                 with open(video_path_obj, "rb") as vf:
                     video_b64 = base64.b64encode(vf.read()).decode("ascii")
-                video_src = f"data:video/mp4;base64,{video_b64}"
+                media_type = {
+                    ".mp4": "video/mp4",
+                    ".m4v": "video/mp4",
+                    ".mov": "video/quicktime",
+                    ".webm": "video/webm",
+                    ".ogv": "video/ogg",
+                }.get(video_path_obj.suffix.lower(), "video/mp4")
+                video_src = f"data:{media_type};base64,{video_b64}"
             else:
-                video_src = f"file://{video_path_obj.resolve()}"
+                video_src = (
+                    video_path_obj.name if video_path_obj.is_absolute() else str(video_path_obj)
+                )
         else:
             if video_path_obj.exists():
-                video_src = f"file://{video_path_obj.resolve()}"
+                video_src = (
+                    video_path_obj.name if video_path_obj.is_absolute() else str(video_path_obj)
+                )
             else:
                 video_src = video_path
 

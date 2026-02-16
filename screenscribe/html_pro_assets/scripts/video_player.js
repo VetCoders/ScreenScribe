@@ -4,9 +4,18 @@ class ScreenScribePlayer {
         this.subtitleDisplay = document.getElementById('currentSubtitle');
         this.subtitleList = document.getElementById('subtitleList');
         this.searchBox = document.getElementById('subtitleSearch');
+        this.playPauseBtn = document.getElementById('playPauseBtn');
+        this.stepBackBtn = document.getElementById('stepBackBtn');
+        this.stepForwardBtn = document.getElementById('stepForwardBtn');
+        this.jumpBackBtn = document.getElementById('jumpBackBtn');
+        this.jumpForwardBtn = document.getElementById('jumpForwardBtn');
+        this.frameSweep = document.getElementById('frameSweep');
+        this.currentTimeLabel = document.getElementById('currentTimeLabel');
 
         this.segments = window.TRANSCRIPT_SEGMENTS || [];
         this.currentSegmentId = null;
+        this.frameStepSeconds = 1 / 30;
+        this.isDraggingSweep = false;
 
         this.init();
     }
@@ -14,19 +23,19 @@ class ScreenScribePlayer {
     init() {
         if (!this.video) return;
 
-        // Video time update handler
         this.video.addEventListener('timeupdate', () => this.onTimeUpdate());
         this.video.addEventListener('loadedmetadata', () => this.onMetadataLoaded());
+        this.video.addEventListener('play', () => this.updatePlayPauseButton());
+        this.video.addEventListener('pause', () => this.updatePlayPauseButton());
+        this.video.addEventListener('error', () => this.showVideoPlaybackError());
 
-        // Click on video to toggle play/pause
         this.video.addEventListener('click', () => {
-            this.video.paused ? this.video.play() : this.video.pause();
+            this.video.paused ? this.safePlay() : this.video.pause();
         });
 
-        // Render subtitle list
+        this.bindPrecisionControls();
         this.renderSubtitleList(this.segments);
 
-        // Search functionality
         if (this.searchBox) {
             this.searchBox.addEventListener('input', (e) => {
                 const query = e.target.value.toLowerCase();
@@ -37,27 +46,78 @@ class ScreenScribePlayer {
             });
         }
 
-        // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
             if (e.code === 'Space') {
                 e.preventDefault();
-                this.video.paused ? this.video.play() : this.video.pause();
+                this.video.paused ? this.safePlay() : this.video.pause();
             }
             if (e.code === 'ArrowLeft') {
                 e.preventDefault();
-                this.video.currentTime -= 5;
+                this.jumpSeconds(-5);
             }
             if (e.code === 'ArrowRight') {
                 e.preventDefault();
-                this.video.currentTime += 5;
+                this.jumpSeconds(5);
+            }
+            if (e.code === 'Comma') {
+                e.preventDefault();
+                this.stepFrames(-1);
+            }
+            if (e.code === 'Period') {
+                e.preventDefault();
+                this.stepFrames(1);
             }
         });
     }
 
+    bindPrecisionControls() {
+        if (this.playPauseBtn) {
+            this.playPauseBtn.addEventListener('click', () => {
+                this.video.paused ? this.safePlay() : this.video.pause();
+            });
+        }
+        if (this.stepBackBtn) {
+            this.stepBackBtn.addEventListener('click', () => this.stepFrames(-1));
+        }
+        if (this.stepForwardBtn) {
+            this.stepForwardBtn.addEventListener('click', () => this.stepFrames(1));
+        }
+        if (this.jumpBackBtn) {
+            this.jumpBackBtn.addEventListener('click', () => this.jumpSeconds(-5));
+        }
+        if (this.jumpForwardBtn) {
+            this.jumpForwardBtn.addEventListener('click', () => this.jumpSeconds(5));
+        }
+        if (this.frameSweep) {
+            this.frameSweep.addEventListener('pointerdown', () => {
+                this.isDraggingSweep = true;
+            });
+            this.frameSweep.addEventListener('pointerup', () => {
+                this.isDraggingSweep = false;
+            });
+            this.frameSweep.addEventListener('input', (e) => {
+                const target = e.target;
+                const nextTime = Number(target.value);
+                this.setCurrentTimeSafe(nextTime);
+                this.updateControlState();
+            });
+            this.frameSweep.addEventListener('change', (e) => {
+                const target = e.target;
+                this.setCurrentTimeSafe(Number(target.value));
+                this.updateControlState();
+            });
+        }
+    }
+
     onMetadataLoaded() {
-        console.log('Video loaded, duration:', this.video.duration);
+        const duration = Number(this.video.duration) || 0;
+        if (this.frameSweep) {
+            this.frameSweep.max = String(duration);
+            this.frameSweep.step = String(this.frameStepSeconds);
+        }
+        this.updateControlState();
     }
 
     onTimeUpdate() {
@@ -80,6 +140,8 @@ class ScreenScribePlayer {
             this.clearActiveHighlight();
             this.updateSubtitleDisplay(null);
         }
+
+        this.updateControlState();
     }
 
     updateSubtitleDisplay(text) {
@@ -114,21 +176,92 @@ class ScreenScribePlayer {
 
     renderSubtitleList(segments) {
         if (!this.subtitleList) return;
+        this.subtitleList.replaceChildren();
 
-        // Text is escaped via escapeHtml(), IDs and timestamps are numbers from trusted data
-        // nosemgrep: insecure-document-method
-        this.subtitleList.innerHTML = segments.map(s => `
-            <div class="subtitle-item" data-segment-id="${s.id}" onclick="player.seekTo(${s.start})">
-                <div class="timestamp">${this.formatTime(s.start)} - ${this.formatTime(s.end)}</div>
-                <div class="text">${this.escapeHtml(s.text)}</div>
-            </div>
-        `).join('');
+        segments.forEach((segment) => {
+            const item = document.createElement('div');
+            item.className = 'subtitle-item';
+            item.dataset.segmentId = String(segment.id);
+            item.addEventListener('click', () => this.seekTo(segment.start, false));
+
+            const timestamp = document.createElement('div');
+            timestamp.className = 'timestamp';
+            timestamp.textContent =
+                `${this.formatTime(segment.start)} - ${this.formatTime(segment.end)} (${this.formatTimePrecise(segment.start)})`;
+
+            const text = document.createElement('div');
+            text.className = 'text';
+            text.textContent = segment.text;
+
+            item.appendChild(timestamp);
+            item.appendChild(text);
+            this.subtitleList.appendChild(item);
+        });
     }
 
-    seekTo(time) {
+    seekTo(time, autoplay = true) {
         if (!this.video) return;
-        this.video.currentTime = time;
-        this.video.play();
+        this.setCurrentTimeSafe(time);
+        this.updateControlState();
+        if (autoplay) this.safePlay();
+    }
+
+    safePlay() {
+        const playPromise = this.video.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch((error) => {
+                if (error?.name === 'AbortError') return;
+                console.warn('Video playback failed:', error);
+                this.showVideoPlaybackError(error);
+            });
+        }
+    }
+
+    showVideoPlaybackError(error = null) {
+        if (!this.subtitleDisplay) return;
+        const unsupported = error?.name === 'NotSupportedError';
+        this.subtitleDisplay.textContent = unsupported
+            ? 'Nie można odtworzyć tego pliku wideo (sprawdź format lub źródło).'
+            : 'Nie udało się uruchomić odtwarzania wideo.';
+        this.subtitleDisplay.classList.remove('empty');
+    }
+
+    jumpSeconds(deltaSeconds) {
+        if (!this.video) return;
+        this.setCurrentTimeSafe(this.video.currentTime + deltaSeconds);
+        this.updateControlState();
+    }
+
+    stepFrames(direction) {
+        if (!this.video) return;
+        this.video.pause();
+        this.setCurrentTimeSafe(this.video.currentTime + (this.frameStepSeconds * direction));
+        this.updateControlState();
+    }
+
+    setCurrentTimeSafe(nextTime) {
+        const duration = Number(this.video.duration) || 0;
+        const bounded = Math.max(0, Math.min(duration || nextTime, nextTime));
+        this.video.currentTime = bounded;
+    }
+
+    updatePlayPauseButton() {
+        if (!this.playPauseBtn) return;
+        this.playPauseBtn.textContent = this.video.paused ? 'Play' : 'Pause';
+    }
+
+    updateControlState() {
+        if (!this.video) return;
+        const currentTime = Number(this.video.currentTime) || 0;
+        const duration = Number(this.video.duration) || 0;
+        if (this.frameSweep && !this.isDraggingSweep) {
+            this.frameSweep.value = String(currentTime);
+        }
+        if (this.currentTimeLabel) {
+            this.currentTimeLabel.textContent =
+                `${this.formatTimePrecise(currentTime)} / ${this.formatTimePrecise(duration)}`;
+        }
+        this.updatePlayPauseButton();
     }
 
     formatTime(seconds) {
@@ -138,6 +271,14 @@ class ScreenScribePlayer {
         return h > 0
             ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
             : `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    formatTimePrecise(seconds) {
+        const safe = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+        const m = Math.floor(safe / 60);
+        const s = Math.floor(safe % 60);
+        const ms = Math.floor((safe % 1) * 1000);
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
     }
 
     escapeHtml(text) {
