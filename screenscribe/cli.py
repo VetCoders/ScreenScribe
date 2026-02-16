@@ -2,8 +2,10 @@
 
 import os
 import shutil
+import socket
 import subprocess
 import sys
+import time
 import webbrowser
 from pathlib import Path
 from typing import Annotated, Any
@@ -244,18 +246,30 @@ def _serve_report(output_dir: Path, video_path: Path, port: int = 8765) -> None:
         except OSError as e:
             console.print(f"[yellow]Could not create video symlink: {e}[/]")
 
+    def _find_available_port(preferred_port: int, max_tries: int = 25) -> int:
+        candidate = preferred_port
+        for _ in range(max_tries):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                if sock.connect_ex(("127.0.0.1", candidate)) != 0:
+                    return candidate
+            candidate += 1
+        return preferred_port
+
+    selected_port = _find_available_port(port)
+    if selected_port != port:
+        console.print(
+            f"[yellow]Port {port} is busy, using {selected_port} for this review server.[/]"
+        )
+
     # Start HTTP server in background
     console.print()
     console.rule("[bold cyan]Starting Review Server[/]")
     console.print(f"[dim]Serving from:[/] [link=file://{output_dir}]{output_dir}[/link]")
-    console.print(f"[bold green]Report URL:[/] http://localhost:{port}/{report_filename}")
+    console.print(f"[bold green]Report URL:[/] http://localhost:{selected_port}/{report_filename}")
     console.print()
     console.print("[dim]Press Ctrl+C to stop the server and exit[/]")
     console.print()
-
-    # Open browser
-    url = f"http://localhost:{port}/{report_filename}"
-    webbrowser.open(url)
 
     # Start server (blocking)
     try:
@@ -265,12 +279,29 @@ def _serve_report(output_dir: Path, video_path: Path, port: int = 8765) -> None:
 
         # Use subprocess for cleaner handling
         server_process = subprocess.Popen(
-            [sys.executable, "-m", "http.server", str(port)],
+            [sys.executable, "-m", "http.server", str(selected_port)],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
         )
 
-        console.print(f"[green]Server running on port {port}[/]")
+        # Confirm the server did not exit immediately (port conflict, etc.)
+        time.sleep(0.25)
+        return_code = server_process.poll()
+        if return_code is not None and return_code != 0:
+            stderr_output = (
+                (server_process.stderr.read() or "").strip() if server_process.stderr else ""
+            )
+            console.print("[red]Failed to start review server.[/]")
+            if stderr_output:
+                console.print(f"[dim]{stderr_output}[/]")
+            return
+
+        console.print(f"[green]Server running on port {selected_port}[/]")
+
+        # Open browser only after server is confirmed to be up.
+        url = f"http://localhost:{selected_port}/{report_filename}"
+        webbrowser.open(url)
 
         # Wait for Ctrl+C
         try:
