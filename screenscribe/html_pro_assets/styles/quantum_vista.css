@@ -441,6 +441,56 @@ body::after {
     opacity: 1 !important;
 }
 
+/* Precision player controls (frame sweep + step) */
+.video-controls-pro {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+}
+
+.video-controls-buttons {
+    display: flex;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.player-btn {
+    border: 1px solid var(--border-default);
+    background: var(--surface-card);
+    color: var(--text-primary);
+    border-radius: var(--radius-full);
+    padding: 0.35rem 0.7rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--motion-fast) var(--ease-out);
+}
+
+.player-btn:hover {
+    border-color: var(--vista-mint);
+    color: var(--quantum-cyan);
+}
+
+.player-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--vista-mint) 25%, transparent);
+}
+
+.frame-sweep {
+    width: 100%;
+    accent-color: var(--vista-mint);
+}
+
+.current-time-label {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
 /* Current subtitle display below video */
 .subtitle-display {
     padding: var(--space-md) var(--space-lg);
@@ -902,6 +952,41 @@ body::after {
 .review-field textarea {
     min-height: 80px;
     resize: vertical;
+}
+
+.notes-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-sm);
+}
+
+.notes-mic-btn {
+    border: 1px solid var(--border-default);
+    background: var(--surface-card);
+    color: var(--text-secondary);
+    border-radius: var(--radius-full);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.35rem 0.7rem;
+    cursor: pointer;
+    transition: all var(--motion-fast) var(--ease-out);
+}
+
+.notes-mic-btn:hover {
+    border-color: var(--vista-mint);
+    color: var(--quantum-cyan);
+}
+
+.notes-mic-btn.recording {
+    border-color: var(--color-critical);
+    color: #fecaca;
+    background: color-mix(in srgb, var(--color-critical) 20%, transparent);
+}
+
+.notes-mic-status {
+    font-size: 0.75rem;
+    color: var(--text-muted);
 }
 
 .ai-suggestions {

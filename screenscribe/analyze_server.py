@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import base64
 import tempfile
+import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -70,6 +72,25 @@ class AnalyzeSession:
     markers: dict[str, FrameMarker] = field(default_factory=dict)
     results: dict[str, AnalysisResult] = field(default_factory=dict)
     last_response_id: str = ""
+    finalize_jobs: dict[str, FinalizeJob] = field(default_factory=dict)
+    lock: threading.RLock = field(default_factory=threading.RLock)
+
+
+@dataclass
+class FinalizeJob:
+    """Background job state for finalize/analyze-all flow."""
+
+    job_id: str
+    total: int = 0
+    processed: int = 0
+    completed: int = 0
+    errors: int = 0
+    skipped: int = 0
+    status: str = "running"  # running, completed, error
+    last_error: str = ""
+    started_at: float = field(default_factory=time.time)
+    finished_at: float | None = None
+    export_payload: dict[str, Any] | None = None
 
 
 def create_analyze_app(video_path: Path, config: ScreenScribeConfig) -> FastAPI:
@@ -90,6 +111,246 @@ def create_analyze_app(video_path: Path, config: ScreenScribeConfig) -> FastAPI:
 
     # Session state (in-memory, single user)
     session = AnalyzeSession(video_path=video_path)
+
+    def build_markers_payload() -> list[dict[str, Any]]:
+        """Build current marker list enriched with analysis results."""
+        markers_data: list[dict[str, Any]] = []
+        with session.lock:
+            markers = list(session.markers.values())
+        for marker in markers:
+            marker_data: dict[str, Any] = {
+                "marker_id": marker.marker_id,
+                "timestamp": marker.timestamp,
+                "transcript": marker.transcript,
+                "notes": marker.notes,
+                "status": marker.status,
+            }
+            with session.lock:
+                result = session.results.get(marker.marker_id)
+            if result:
+                marker_data["result"] = {
+                    "category": result.category,
+                    "severity": result.severity,
+                    "summary": result.summary,
+                    "issues_detected": result.issues_detected,
+                    "suggested_fix": result.suggested_fix,
+                }
+            markers_data.append(marker_data)
+        return markers_data
+
+    def build_export_payload() -> dict[str, Any]:
+        """Build exported JSON payload for all markers."""
+        markers_list: list[dict[str, Any]] = []
+        export_data: dict[str, Any] = {
+            "video": str(video_path),
+            "markers": markers_list,
+        }
+        with session.lock:
+            markers = list(session.markers.values())
+        for marker in markers:
+            marker_data: dict[str, Any] = {
+                "marker_id": marker.marker_id,
+                "timestamp": marker.timestamp,
+                "transcript": marker.transcript,
+                "notes": marker.notes,
+            }
+            with session.lock:
+                result = session.results.get(marker.marker_id)
+            if result:
+                marker_data["analysis"] = {
+                    "category": result.category,
+                    "severity": result.severity,
+                    "summary": result.summary,
+                    "issues_detected": result.issues_detected,
+                    "suggested_fix": result.suggested_fix,
+                    "affected_components": result.affected_components,
+                }
+            markers_list.append(marker_data)
+        return export_data
+
+    def analyze_single_marker(marker_id: str) -> dict[str, Any]:
+        """Run unified AI analysis for one marker and persist status/result."""
+        from .detect import Detection
+        from .transcribe import Segment
+        from .unified_analysis import analyze_finding_unified
+
+        with session.lock:
+            if marker_id not in session.markers:
+                raise HTTPException(status_code=404, detail="Marker not found")
+            marker = session.markers[marker_id]
+            marker.status = "analyzing"
+
+        segment = Segment(
+            id=0,
+            start=marker.timestamp,
+            end=marker.timestamp + 1.0,
+            text=marker.transcript or marker.notes or "User marked this frame",
+        )
+        detection = Detection(
+            segment=segment,
+            category="user_marked",
+            keywords_found=[],
+            context=f"User comment: {marker.transcript}\nNotes: {marker.notes}",
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            frame_bytes = base64.b64decode(marker.frame_base64)
+            tmp.write(frame_bytes)
+            screenshot_path = Path(tmp.name)
+
+        try:
+            with session.lock:
+                previous_response_id = session.last_response_id
+
+            finding = analyze_finding_unified(
+                detection=detection,
+                screenshot_path=screenshot_path,
+                config=config,
+                previous_response_id=previous_response_id,
+            )
+
+            if not finding:
+                with session.lock:
+                    marker.status = "error"
+                return {"marker_id": marker_id, "status": "error", "error": "Analysis failed"}
+
+            result = AnalysisResult(
+                marker_id=marker_id,
+                timestamp=marker.timestamp,
+                category=finding.category,
+                severity=finding.severity,
+                summary=finding.summary,
+                issues_detected=finding.issues_detected,
+                suggested_fix=finding.suggested_fix,
+                affected_components=finding.affected_components,
+                response_id=finding.response_id,
+            )
+            with session.lock:
+                session.results[marker_id] = result
+                session.last_response_id = finding.response_id
+                marker.status = "completed"
+
+            return {
+                "marker_id": marker_id,
+                "status": "completed",
+                "result": {
+                    "category": result.category,
+                    "severity": result.severity,
+                    "summary": result.summary,
+                    "issues_detected": result.issues_detected,
+                    "suggested_fix": result.suggested_fix,
+                },
+            }
+        except Exception as exc:  # defensive guard for batch finalize
+            with session.lock:
+                marker.status = "error"
+            return {"marker_id": marker_id, "status": "error", "error": str(exc)}
+        finally:
+            screenshot_path.unlink(missing_ok=True)
+
+    def analyze_all_pending_markers(job: FinalizeJob | None = None) -> dict[str, Any]:
+        """Analyze all markers that are pending/error/no-result."""
+        with session.lock:
+            markers = list(session.markers.values())
+            result_ids = set(session.results.keys())
+
+        marker_ids = [
+            marker.marker_id
+            for marker in markers
+            if marker.status in {"pending", "error"} or marker.marker_id not in result_ids
+        ]
+
+        completed = 0
+        errors = 0
+        skipped = max(0, len(markers) - len(marker_ids))
+        results: list[dict[str, Any]] = []
+
+        if job:
+            with session.lock:
+                job.total = len(marker_ids)
+                job.skipped = skipped
+
+        for marker_id in marker_ids:
+            outcome = analyze_single_marker(marker_id)
+            results.append(outcome)
+            if outcome.get("status") == "completed":
+                completed += 1
+            elif outcome.get("status") == "error":
+                errors += 1
+            if job:
+                with session.lock:
+                    job.processed += 1
+                    job.completed = completed
+                    job.errors = errors
+
+        return {
+            "total_markers": len(markers),
+            "processed": len(marker_ids),
+            "completed": completed,
+            "errors": errors,
+            "skipped": skipped,
+            "results": results,
+        }
+
+    def get_finalize_job(job_id: str) -> FinalizeJob:
+        """Get finalize job by id or raise HTTP 404."""
+        with session.lock:
+            job = session.finalize_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Finalize job not found")
+        return job
+
+    def serialize_finalize_job(job: FinalizeJob) -> dict[str, Any]:
+        """Serialize finalize job for frontend polling."""
+        with session.lock:
+            total = job.total
+            processed = job.processed
+            status = job.status
+            completed = job.completed
+            errors = job.errors
+            skipped = job.skipped
+            finished_at = job.finished_at
+            started_at = job.started_at
+            last_error = job.last_error
+
+        progress = (
+            1.0
+            if total == 0 and status == "completed"
+            else ((processed / total) if total > 0 else 0.0)
+        )
+        return {
+            "job_id": job.job_id,
+            "status": status,
+            "total": total,
+            "processed": processed,
+            "completed": completed,
+            "errors": errors,
+            "skipped": skipped,
+            "progress": progress,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "last_error": last_error,
+        }
+
+    def run_finalize_job(job_id: str) -> None:
+        """Run async finalize job in background thread."""
+        job = get_finalize_job(job_id)
+        try:
+            analysis_summary = analyze_all_pending_markers(job=job)
+            payload = {
+                "analysis": analysis_summary,
+                "markers": build_markers_payload(),
+                "export": build_export_payload(),
+            }
+            with session.lock:
+                job.status = "completed"
+                job.finished_at = time.time()
+                job.export_payload = payload
+        except Exception as exc:  # pragma: no cover - defensive
+            with session.lock:
+                job.status = "error"
+                job.last_error = str(exc)
+                job.finished_at = time.time()
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:
@@ -314,6 +575,41 @@ def create_analyze_app(video_path: Path, config: ScreenScribeConfig) -> FastAPI:
             padding: var(--space-xl);
             color: var(--text-muted);
         }}
+
+        .finalize-progress {{
+            min-width: 280px;
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-xs);
+        }}
+
+        .finalize-progress[hidden] {{
+            display: none;
+        }}
+
+        .finalize-progress-meta {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+        }}
+
+        .finalize-progress-track {{
+            width: 100%;
+            height: 8px;
+            border-radius: 999px;
+            background: var(--surface-hover);
+            overflow: hidden;
+            border: 1px solid var(--border-default);
+        }}
+
+        .finalize-progress-fill {{
+            width: 0%;
+            height: 100%;
+            background: var(--quantum-green);
+            transition: width var(--motion-fast);
+        }}
     </style>
 </head>
 <body data-mode="analyze" data-video-name="{video_path.name}">
@@ -387,10 +683,19 @@ def create_analyze_app(video_path: Path, config: ScreenScribeConfig) -> FastAPI:
     <div class="export-bar">
         <div class="export-options">
             <span id="statusText">Ready</span>
+            <div id="finalizeProgress" class="finalize-progress" hidden>
+                <div class="finalize-progress-meta">
+                    <span id="finalizeProgressLabel">0/0</span>
+                    <span id="finalizeProgressErrors">0 errors</span>
+                </div>
+                <div class="finalize-progress-track">
+                    <div id="finalizeProgressFill" class="finalize-progress-fill"></div>
+                </div>
+            </div>
         </div>
         <div class="export-buttons">
             <button onclick="exportFindings()" class="btn-secondary">Export JSON</button>
-            <button onclick="generateFullReport()" class="btn-primary">Generate Full Report</button>
+            <button id="finalizeBtn" onclick="generateFullReport()" class="btn-primary">Generate Full Report</button>
         </div>
     </div>
 
@@ -616,20 +921,106 @@ async function analyzeMarker(markerId) {{
 // Export findings as JSON
 async function exportFindings() {{
     const response = await fetch('/api/export');
+    if (!response.ok) {{
+        document.getElementById('statusText').textContent = 'Export failed';
+        return;
+    }}
     const data = await response.json();
+    downloadJson(data, 'analyze_findings.json');
+}}
 
+function downloadJson(data, filename) {{
     const blob = new Blob([JSON.stringify(data, null, 2)], {{ type: 'application/json' }});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'analyze_findings.json';
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
 }}
 
-// Generate full report (placeholder)
-function generateFullReport() {{
-    alert('Full report generation will process all marked frames through the complete pipeline.');
+function updateFinalizeProgress(state) {{
+    const wrap = document.getElementById('finalizeProgress');
+    const fill = document.getElementById('finalizeProgressFill');
+    const label = document.getElementById('finalizeProgressLabel');
+    const errors = document.getElementById('finalizeProgressErrors');
+
+    if (!wrap || !fill || !label || !errors) return;
+
+    wrap.hidden = false;
+    const total = Number(state.total || 0);
+    const processed = Number(state.processed || 0);
+    const ratio = total > 0 ? (processed / total) : (state.status === 'completed' ? 1 : 0);
+
+    fill.style.width = `${{Math.max(0, Math.min(100, ratio * 100))}}%`;
+    label.textContent = `${{processed}}/${{total}}`;
+    errors.textContent = `${{Number(state.errors || 0)}} errors`;
+}}
+
+function hideFinalizeProgress() {{
+    const wrap = document.getElementById('finalizeProgress');
+    if (wrap) wrap.hidden = true;
+}}
+
+function sleep(ms) {{
+    return new Promise(resolve => setTimeout(resolve, ms));
+}}
+
+// Finalize annotations -> analyze all -> export JSON
+async function generateFullReport() {{
+    const statusEl = document.getElementById('statusText');
+    const finalizeBtn = document.getElementById('finalizeBtn');
+    if (finalizeBtn) finalizeBtn.disabled = true;
+    hideFinalizeProgress();
+
+    statusEl.textContent = 'Finalizing annotations...';
+    try {{
+        const startResponse = await fetch('/api/finalize/start', {{
+            method: 'POST'
+        }});
+        if (!startResponse.ok) {{
+            throw new Error('Finalize start failed: ' + startResponse.status);
+        }}
+
+        let state = await startResponse.json();
+        const jobId = state.job_id;
+        if (!jobId) {{
+            throw new Error('Finalize job id missing');
+        }}
+
+        updateFinalizeProgress(state);
+
+        while (state.status === 'running') {{
+            await sleep(250);
+            const statusResponse = await fetch('/api/finalize/status/' + jobId);
+            if (!statusResponse.ok) {{
+                throw new Error('Finalize status failed: ' + statusResponse.status);
+            }}
+            state = await statusResponse.json();
+            updateFinalizeProgress(state);
+            statusEl.textContent = `Finalizing... ${{state.processed || 0}}/${{state.total || 0}}`;
+        }}
+
+        if (state.status !== 'completed') {{
+            throw new Error(state.last_error || 'Finalize failed');
+        }}
+
+        const resultResponse = await fetch('/api/finalize/result/' + jobId);
+        if (!resultResponse.ok) {{
+            throw new Error('Finalize result failed: ' + resultResponse.status);
+        }}
+        const payload = await resultResponse.json();
+        await refreshMarkers();
+        downloadJson(payload.export, 'analyze_findings.json');
+
+        const summary = payload.analysis || {{}};
+        statusEl.textContent = `Done: ${{summary.completed || 0}} completed, ${{summary.errors || 0}} errors`;
+    }} catch (error) {{
+        console.error(error);
+        statusEl.textContent = 'Finalize failed';
+    }} finally {{
+        if (finalizeBtn) finalizeBtn.disabled = false;
+    }}
 }}
 
 // Initialize
@@ -736,7 +1127,8 @@ document.addEventListener('DOMContentLoaded', () => {{
                 stt_endpoint=config.stt_endpoint,
                 stt_model=config.stt_model,
             )
-            session.last_response_id = result.response_id
+            with session.lock:
+                session.last_response_id = result.response_id
             return JSONResponse(
                 content={
                     "text": result.text,
@@ -761,140 +1153,81 @@ document.addEventListener('DOMContentLoaded', () => {{
             notes=request.notes,
             status="pending",
         )
-        session.markers[marker_id] = marker
+        with session.lock:
+            session.markers[marker_id] = marker
         return JSONResponse(content={"marker_id": marker_id, "status": "pending"})
 
     @app.get("/api/markers")
     async def get_markers() -> JSONResponse:
         """Get all markers with their results."""
-        markers_data = []
-        for m in session.markers.values():
-            data = {
-                "marker_id": m.marker_id,
-                "timestamp": m.timestamp,
-                "transcript": m.transcript,
-                "notes": m.notes,
-                "status": m.status,
-            }
-            if m.marker_id in session.results:
-                r = session.results[m.marker_id]
-                data["result"] = {
-                    "category": r.category,
-                    "severity": r.severity,
-                    "summary": r.summary,
-                    "issues_detected": r.issues_detected,
-                    "suggested_fix": r.suggested_fix,
-                }
-            markers_data.append(data)
-        return JSONResponse(content=markers_data)
+        return JSONResponse(content=build_markers_payload())
 
     @app.post("/api/analyze/{marker_id}")
     async def analyze_marked_frame(marker_id: str) -> JSONResponse:
         """Run VLM analysis on a marked frame."""
-        from .detect import Detection
-        from .transcribe import Segment
-        from .unified_analysis import analyze_finding_unified
+        return JSONResponse(content=analyze_single_marker(marker_id))
 
-        if marker_id not in session.markers:
-            raise HTTPException(status_code=404, detail="Marker not found")
+    @app.post("/api/analyze-all")
+    async def analyze_all_marked_frames() -> JSONResponse:
+        """Run VLM analysis for all pending markers."""
+        return JSONResponse(content=analyze_all_pending_markers())
 
-        marker = session.markers[marker_id]
-        marker.status = "analyzing"
-
-        # Create a Detection object for the unified analysis
-        segment = Segment(
-            id=0,
-            start=marker.timestamp,
-            end=marker.timestamp + 1.0,
-            text=marker.transcript or marker.notes or "User marked this frame",
-        )
-        detection = Detection(
-            segment=segment,
-            category="user_marked",
-            keywords_found=[],
-            context=f"User comment: {marker.transcript}\nNotes: {marker.notes}",
-        )
-
-        # Save frame to temp file
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-            frame_bytes = base64.b64decode(marker.frame_base64)
-            tmp.write(frame_bytes)
-            screenshot_path = Path(tmp.name)
-
-        try:
-            # Run VLM analysis
-            finding = analyze_finding_unified(
-                detection=detection,
-                screenshot_path=screenshot_path,
-                config=config,
-                previous_response_id=session.last_response_id,
+    @app.post("/api/finalize/start")
+    async def start_finalize_job() -> JSONResponse:
+        """Start async finalize job and return job metadata for polling."""
+        with session.lock:
+            running_job = next(
+                (job for job in session.finalize_jobs.values() if job.status == "running"),
+                None,
             )
+            if running_job:
+                return JSONResponse(content=serialize_finalize_job(running_job))
 
-            if finding:
-                result = AnalysisResult(
-                    marker_id=marker_id,
-                    timestamp=marker.timestamp,
-                    category=finding.category,
-                    severity=finding.severity,
-                    summary=finding.summary,
-                    issues_detected=finding.issues_detected,
-                    suggested_fix=finding.suggested_fix,
-                    affected_components=finding.affected_components,
-                    response_id=finding.response_id,
-                )
-                session.results[marker_id] = result
-                session.last_response_id = finding.response_id
-                marker.status = "completed"
+            job_id = str(uuid.uuid4())[:12]
+            job = FinalizeJob(job_id=job_id)
+            session.finalize_jobs[job_id] = job
 
-                return JSONResponse(
-                    content={
-                        "marker_id": marker_id,
-                        "status": "completed",
-                        "result": {
-                            "category": result.category,
-                            "severity": result.severity,
-                            "summary": result.summary,
-                            "issues_detected": result.issues_detected,
-                            "suggested_fix": result.suggested_fix,
-                        },
-                    }
-                )
-            else:
-                marker.status = "error"
-                return JSONResponse(
-                    content={"marker_id": marker_id, "status": "error", "error": "Analysis failed"}
-                )
-        finally:
-            screenshot_path.unlink(missing_ok=True)
+        thread = threading.Thread(target=run_finalize_job, args=(job_id,), daemon=True)
+        thread.start()
+        return JSONResponse(content=serialize_finalize_job(job))
+
+    @app.get("/api/finalize/status/{job_id}")
+    async def get_finalize_job_status(job_id: str) -> JSONResponse:
+        """Get current async finalize job status/progress."""
+        job = get_finalize_job(job_id)
+        return JSONResponse(content=serialize_finalize_job(job))
+
+    @app.get("/api/finalize/result/{job_id}")
+    async def get_finalize_job_result(job_id: str) -> JSONResponse:
+        """Get final payload for completed finalize job."""
+        job = get_finalize_job(job_id)
+        with session.lock:
+            status = job.status
+            payload = job.export_payload
+            last_error = job.last_error
+
+        if status == "running":
+            raise HTTPException(status_code=409, detail="Finalize job still running")
+        if status == "error":
+            raise HTTPException(status_code=500, detail=last_error or "Finalize job failed")
+        if not payload:
+            raise HTTPException(status_code=500, detail="Finalize result missing")
+        return JSONResponse(content=payload)
+
+    @app.post("/api/finalize")
+    async def finalize_marked_frames() -> JSONResponse:
+        """Finalize annotation session: analyze all markers and return export payload."""
+        analysis_summary = analyze_all_pending_markers()
+        payload = {
+            "analysis": analysis_summary,
+            "markers": build_markers_payload(),
+            "export": build_export_payload(),
+        }
+        return JSONResponse(content=payload)
 
     @app.get("/api/export")
     async def export_findings() -> JSONResponse:
         """Export all findings as JSON."""
-        markers_list: list[dict[str, Any]] = []
-        export_data: dict[str, Any] = {
-            "video": str(video_path),
-            "markers": markers_list,
-        }
-
-        for m in session.markers.values():
-            marker_data = {
-                "marker_id": m.marker_id,
-                "timestamp": m.timestamp,
-                "transcript": m.transcript,
-                "notes": m.notes,
-            }
-            if m.marker_id in session.results:
-                r = session.results[m.marker_id]
-                marker_data["analysis"] = {
-                    "category": r.category,
-                    "severity": r.severity,
-                    "summary": r.summary,
-                    "issues_detected": r.issues_detected,
-                    "suggested_fix": r.suggested_fix,
-                    "affected_components": r.affected_components,
-                }
-            export_data["markers"].append(marker_data)
-
-        return JSONResponse(content=export_data)
+        return JSONResponse(content=build_export_payload())
 
     return app

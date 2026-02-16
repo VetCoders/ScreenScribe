@@ -8,6 +8,7 @@ These tests require:
 Run with: make test-integration
 """
 
+import time
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ from screenscribe.semantic_filter import (
     semantic_prefilter,
 )
 from screenscribe.transcribe import Segment, TranscriptionResult
+from screenscribe.unified_analysis import UnifiedFinding
 
 # Skip all tests if no API key
 pytestmark = pytest.mark.integration
@@ -528,3 +530,168 @@ class TestAnalyzeServer:
         # VoiceRecorder class and MediaRecorder API usage
         assert "VoiceRecorder" in html
         assert "MediaRecorder" in html
+
+    def test_analyze_page_has_finalize_trigger(
+        self, config_with_api: ScreenScribeConfig, sample_video: Path
+    ) -> None:
+        """Page wires finalize flow button and API call."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        response = client.get("/")
+        html = response.text
+
+        assert 'id="finalizeBtn"' in html
+        assert "fetch('/api/finalize/start'" in html
+        assert "fetch('/api/finalize/status/' + jobId)" in html
+
+    def test_finalize_analyzes_all_markers_and_returns_export(
+        self,
+        config_with_api: ScreenScribeConfig,
+        sample_video: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Finalize endpoint processes pending markers and returns exported payload."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        def fake_analyze_finding_unified(*args: object, **kwargs: object) -> UnifiedFinding:
+            return UnifiedFinding(
+                detection_id=1,
+                screenshot_path=None,
+                timestamp=5.0,
+                category="ui",
+                is_issue=True,
+                sentiment="problem",
+                severity="high",
+                summary="Mock summary",
+                action_items=["Mock action"],
+                affected_components=["Capture controls"],
+                suggested_fix="Mock fix",
+                ui_elements=["button"],
+                issues_detected=["alignment"],
+                accessibility_notes=[],
+                design_feedback="ok",
+                technical_observations="ok",
+                response_id="resp_mock_1",
+            )
+
+        monkeypatch.setattr(
+            "screenscribe.unified_analysis.analyze_finding_unified", fake_analyze_finding_unified
+        )
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        frame_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+        for timestamp in (5.0, 9.0):
+            response = client.post(
+                "/api/mark",
+                json={
+                    "timestamp": timestamp,
+                    "frame_base64": frame_base64,
+                    "transcript": f"Marker {timestamp}",
+                    "notes": "Test note",
+                },
+            )
+            assert response.status_code == 200
+
+        finalize_response = client.post("/api/finalize")
+        assert finalize_response.status_code == 200
+        payload = finalize_response.json()
+
+        assert payload["analysis"]["processed"] == 2
+        assert payload["analysis"]["completed"] == 2
+        assert payload["analysis"]["errors"] == 0
+
+        assert len(payload["markers"]) == 2
+        assert all(marker["status"] == "completed" for marker in payload["markers"])
+
+        exported = payload["export"]
+        assert "video" in exported
+        assert len(exported["markers"]) == 2
+        assert all("analysis" in marker for marker in exported["markers"])
+
+    def test_finalize_async_job_status_and_result(
+        self,
+        config_with_api: ScreenScribeConfig,
+        sample_video: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Async finalize endpoints expose x/y progress and final export payload."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        def fake_analyze_finding_unified(*args: object, **kwargs: object) -> UnifiedFinding:
+            return UnifiedFinding(
+                detection_id=1,
+                screenshot_path=None,
+                timestamp=2.0,
+                category="ui",
+                is_issue=True,
+                sentiment="problem",
+                severity="medium",
+                summary="Async mock summary",
+                action_items=["Mock action"],
+                affected_components=["Marker panel"],
+                suggested_fix="Mock fix",
+                ui_elements=["panel"],
+                issues_detected=["contrast"],
+                accessibility_notes=[],
+                design_feedback="ok",
+                technical_observations="ok",
+                response_id="resp_mock_async",
+            )
+
+        monkeypatch.setattr(
+            "screenscribe.unified_analysis.analyze_finding_unified", fake_analyze_finding_unified
+        )
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        frame_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        for timestamp in (2.0, 4.0, 6.0):
+            response = client.post(
+                "/api/mark",
+                json={
+                    "timestamp": timestamp,
+                    "frame_base64": frame_base64,
+                    "transcript": f"Marker {timestamp}",
+                    "notes": "Async note",
+                },
+            )
+            assert response.status_code == 200
+
+        start_response = client.post("/api/finalize/start")
+        assert start_response.status_code == 200
+        start_payload = start_response.json()
+        assert "job_id" in start_payload
+        job_id = start_payload["job_id"]
+
+        status_payload = start_payload
+        for _ in range(100):
+            status_response = client.get(f"/api/finalize/status/{job_id}")
+            assert status_response.status_code == 200
+            status_payload = status_response.json()
+            if status_payload["status"] != "running":
+                break
+            time.sleep(0.01)
+
+        assert status_payload["status"] == "completed"
+        assert status_payload["processed"] == 3
+        assert status_payload["completed"] == 3
+        assert status_payload["errors"] == 0
+
+        result_response = client.get(f"/api/finalize/result/{job_id}")
+        assert result_response.status_code == 200
+        result_payload = result_response.json()
+        assert result_payload["analysis"]["processed"] == 3
+        assert len(result_payload["export"]["markers"]) == 3

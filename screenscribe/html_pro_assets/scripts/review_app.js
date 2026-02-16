@@ -506,6 +506,133 @@ function showNotification(msg) {
     }, 3000);
 }
 
+const voiceNoteRuntime = {
+    recognition: null,
+    activeButton: null,
+    activeFindingId: null,
+};
+
+function getSpeechRecognitionCtor() {
+    return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function setVoiceNoteUi(button, findingId, recording, statusText = '') {
+    if (!button) return;
+    button.classList.toggle('recording', recording);
+    button.textContent = recording
+        ? `🎤 ${i18n[currentLang].voiceRecording}`
+        : `🎤 ${i18n[currentLang].voiceNote}`;
+
+    const statusEl = document.querySelector(`.notes-mic-status[data-finding-id="${findingId}"]`);
+    if (statusEl) {
+        statusEl.textContent = statusText;
+    }
+}
+
+function appendVoiceTextToNotes(findingId, text) {
+    const article = document.querySelector(`[data-finding-id="${findingId}"]`);
+    if (!article) return;
+    const textarea = article.querySelector('.notes textarea');
+    if (!textarea) return;
+
+    const sanitized = String(text || '').trim();
+    if (!sanitized) return;
+
+    textarea.value = textarea.value.trim()
+        ? `${textarea.value.trim()}\n${sanitized}`
+        : sanitized;
+
+    if (!reportState.findings[findingId]) {
+        reportState.findings[findingId] = {
+            confirmed: null,
+            severity: null,
+            notes: '',
+            actionItems: '',
+        };
+    }
+    reportState.findings[findingId].notes = textarea.value;
+    reportState.modified = true;
+}
+
+function stopVoiceNoteCapture() {
+    if (!voiceNoteRuntime.recognition) return;
+    try {
+        voiceNoteRuntime.recognition.stop();
+    } catch (e) {
+        // noop
+    }
+}
+
+function startVoiceNoteCapture(button, findingId) {
+    const Recognition = getSpeechRecognitionCtor();
+    if (!Recognition) {
+        showNotification(i18n[currentLang].voiceNotSupported);
+        return;
+    }
+
+    // Stop previous capture if another note is active
+    if (voiceNoteRuntime.activeButton && voiceNoteRuntime.activeButton !== button) {
+        stopVoiceNoteCapture();
+    }
+
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = currentLang === 'pl' ? 'pl-PL' : 'en-US';
+
+    voiceNoteRuntime.recognition = recognition;
+    voiceNoteRuntime.activeButton = button;
+    voiceNoteRuntime.activeFindingId = findingId;
+
+    setVoiceNoteUi(button, findingId, true, i18n[currentLang].voiceRecording);
+
+    recognition.onresult = (event) => {
+        const finalChunks = [];
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+            const result = event.results[i];
+            if (result.isFinal && result[0] && result[0].transcript) {
+                finalChunks.push(result[0].transcript);
+            }
+        }
+        if (finalChunks.length > 0) {
+            appendVoiceTextToNotes(findingId, finalChunks.join(' ').trim());
+            setVoiceNoteUi(button, findingId, true, i18n[currentLang].voiceReady);
+        }
+    };
+
+    recognition.onerror = (event) => {
+        const message = event.error === 'not-allowed'
+            ? i18n[currentLang].voiceDenied
+            : `${i18n[currentLang].voiceError}: ${event.error}`;
+        setVoiceNoteUi(button, findingId, false, message);
+        showNotification(message);
+    };
+
+    recognition.onend = () => {
+        setVoiceNoteUi(button, findingId, false, '');
+        voiceNoteRuntime.recognition = null;
+        voiceNoteRuntime.activeButton = null;
+        voiceNoteRuntime.activeFindingId = null;
+    };
+
+    recognition.start();
+}
+
+function initVoiceNotes() {
+    document.querySelectorAll('.notes-mic-btn[data-action="voice-note"]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const findingId = button.dataset.findingId;
+            if (!findingId) return;
+
+            if (voiceNoteRuntime.activeButton === button && voiceNoteRuntime.recognition) {
+                stopVoiceNoteCapture();
+                return;
+            }
+            startVoiceNoteCapture(button, findingId);
+        });
+    });
+}
+
 // Tab switching
 function initTabs() {
     const tabBtns = document.querySelectorAll('.tab-btn');
@@ -586,7 +713,13 @@ const i18n = {
         exportZipTitle: 'ZIP z adnotowanymi zdjeciami',
         generatingZip: 'Generowanie ZIP...',
         zipExported: 'ZIP wyeksportowany:',
-        zipError: 'Blad eksportu ZIP:'
+        zipError: 'Blad eksportu ZIP:',
+        voiceNote: 'Notatka głosowa',
+        voiceRecording: 'Nagrywanie...',
+        voiceReady: 'Mowa dodana do notatki',
+        voiceNotSupported: 'Ta przeglądarka nie wspiera rozpoznawania mowy',
+        voiceDenied: 'Dostęp do mikrofonu został zablokowany',
+        voiceError: 'Błąd rozpoznawania mowy'
     },
     en: {
         summary: 'Summary',
@@ -631,7 +764,13 @@ const i18n = {
         exportZipTitle: 'ZIP with annotated screenshots',
         generatingZip: 'Generating ZIP...',
         zipExported: 'ZIP exported:',
-        zipError: 'ZIP export error:'
+        zipError: 'ZIP export error:',
+        voiceNote: 'Voice note',
+        voiceRecording: 'Recording...',
+        voiceReady: 'Speech added to notes',
+        voiceNotSupported: 'This browser does not support speech recognition',
+        voiceDenied: 'Microphone access was denied',
+        voiceError: 'Speech recognition error'
     }
 };
 
@@ -652,6 +791,8 @@ function setLanguage(lang) {
         if (i18n[lang][key]) {
             if (el.tagName === 'INPUT' && el.placeholder) {
                 el.placeholder = i18n[lang][key];
+            } else if (key === 'voiceNote' && el.classList.contains('notes-mic-btn')) {
+                el.textContent = `🎤 ${i18n[lang][key]}`;
             } else {
                 el.textContent = i18n[lang][key];
             }
@@ -1402,4 +1543,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     initLanguage();
     initAnnotationTools();
+    initVoiceNotes();
+    window.addEventListener('beforeunload', () => stopVoiceNoteCapture());
 });

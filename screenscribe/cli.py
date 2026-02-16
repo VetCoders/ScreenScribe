@@ -69,6 +69,7 @@ console = Console()
 
 # Maximum number of auto-versioned review directories (video_review_2, _3, etc.)
 MAX_REVIEW_VERSIONS = 99
+BOOTSTRAP_BANNER_SHOWN_ENV = "SCREENSCRIBE_BOOTSTRAP_BANNER_SHOWN"
 
 
 def _find_next_review_path(base_path: Path) -> tuple[Path, int | None]:
@@ -647,13 +648,15 @@ def review(
             )
             raise typer.Exit(1)
 
-    console.print(
-        Panel(
-            f"[bold cyan]ScreenScribe v{__version__}[/]\n"
-            "[dim]Video review automation powered by LibraxisAI[/]",
-            border_style="cyan",
+    # Bootstrap prints an immediate banner before heavy imports; avoid duplicate header.
+    if os.environ.get(BOOTSTRAP_BANNER_SHOWN_ENV) != "1":
+        console.print(
+            Panel(
+                f"[bold cyan]ScreenScribe v{__version__}[/]\n"
+                "[dim]Video review automation powered by LibraxisAI[/]",
+                border_style="cyan",
+            )
         )
-    )
 
     # Check FFmpeg is installed
     try:
@@ -911,11 +914,12 @@ def review(
                         f"[green]Semantic pre-filter identified {len(detections)} findings[/]"
                     )
                 else:
-                    # Fallback to keywords if semantic fails
+                    # Keep BASE mode semantic-only to avoid keyword-driven frame picks.
+                    console.print("[yellow]Semantic pre-filter returned no results in BASE mode[/]")
                     console.print(
-                        "[yellow]Semantic pre-filter returned no results, falling back to keywords[/]"
+                        "[dim]Tip: use --keywords-only for strict keyword detection fallback[/]"
                     )
-                    detections = detect_issues(transcription, keywords_file=keywords_file)
+                    detections = []
 
             elif semantic_filter_level == SemanticFilterLevel.COMBINED:
                 # Level 2: Keywords + semantic pre-filter
@@ -1017,6 +1021,8 @@ def review(
                 unified_findings=[],
                 executive_summary="",
                 errors=[],
+                transcript=transcription.text if transcription else "",
+                transcript_segments=transcription.segments if transcription else None,
             )
             console.print("[dim]Basic JSON report saved (AI analysis pending)[/]")
 
@@ -1113,6 +1119,8 @@ def review(
                 unified_findings=unified_findings,
                 executive_summary=executive_summary,
                 errors=pipeline_errors,
+                transcript=transcription.text if transcription else "",
+                transcript_segments=transcription.segments if transcription else None,
             )
 
         if markdown_report:
@@ -1126,6 +1134,7 @@ def review(
                 visual_summary=visual_summary,
                 errors=pipeline_errors,
                 transcript=transcription.text if transcription else "",
+                transcript_segments=transcription.segments if transcription else None,
             )
 
         if html_report:

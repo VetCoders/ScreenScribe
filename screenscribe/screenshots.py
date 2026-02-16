@@ -10,6 +10,19 @@ from .detect import Detection, format_timestamp
 console = Console()
 
 
+def _select_capture_timestamp(detection: Detection, offset: float = 0.5) -> float:
+    """Select screenshot timestamp for a detection.
+
+    Uses segment midpoint for ranged detections (semantic POIs), and falls back
+    to start+offset for point-like detections.
+    """
+    start = detection.segment.start
+    end = detection.segment.end
+    if end > start:
+        return start + ((end - start) / 2.0)
+    return max(0.0, start + max(0.0, offset))
+
+
 def extract_screenshot(video_path: Path, timestamp: float, output_path: Path) -> Path:
     """
     Extract a single screenshot from video at timestamp.
@@ -65,8 +78,7 @@ def extract_screenshots_for_detections(
     console.print(f"[blue]Extracting {len(detections)} screenshots...[/]")
 
     for i, detection in enumerate(detections, 1):
-        # Calculate timestamp (start + offset, but not past end)
-        timestamp = min(detection.segment.start + offset, detection.segment.end)
+        timestamp = _select_capture_timestamp(detection, offset=offset)
 
         # Generate filename
         ts_str = format_timestamp(timestamp).replace(":", "-")
