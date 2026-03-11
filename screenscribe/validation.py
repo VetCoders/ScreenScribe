@@ -35,7 +35,7 @@ def _check_llm_model(config: ScreenScribeConfig, model: str, model_type: str) ->
             response = client.post(
                 config.llm_endpoint,
                 headers={
-                    "x-api-key": config.api_key,
+                    "Authorization": f"Bearer {config.get_llm_api_key()}",
                     "Content-Type": "application/json",
                 },
                 json={
@@ -109,10 +109,14 @@ def _check_stt_model(config: ScreenScribeConfig) -> bool:
     """
     try:
         with httpx.Client(timeout=VALIDATION_TIMEOUT) as client:
+            # Don't send auth to localhost endpoints
+            is_local = config.stt_endpoint.startswith("http://127.0.0.1") or config.stt_endpoint.startswith("http://localhost")
+            headers = {} if is_local else {"Authorization": f"Bearer {config.get_stt_api_key()}"}
+
             # POST with empty file to check endpoint responds (400 expected)
             response = client.post(
                 config.stt_endpoint,
-                headers={"Authorization": f"Bearer {config.api_key}"},
+                headers=headers,
                 data={"model": config.stt_model},
                 files={"file": ("test.mp3", b"", "audio/mpeg")},
             )
@@ -162,11 +166,14 @@ def validate_models(
     """
     console.print("[dim]Validating configuration...[/]")
 
-    # Check API key presence
-    if not config.api_key:
+    # Check API key presence - at least one key must be configured
+    has_any_key = (
+        config.api_key or config.stt_api_key or config.llm_api_key or config.vision_api_key
+    )
+    if not has_any_key:
         raise APIKeyError(
-            "API key not configured. "
-            "Set LIBRAXIS_API_KEY or run: screenscribe config --set-key YOUR_KEY"
+            "No API key configured. "
+            "Set LIBRAXIS_API_KEY (or per-endpoint keys) or run: screenscribe config --set-key YOUR_KEY"
         )
 
     validation_results: list[tuple[str, str, bool]] = []

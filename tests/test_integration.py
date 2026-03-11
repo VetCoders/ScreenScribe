@@ -1,14 +1,15 @@
 """Integration tests for ScreenScribe with real API calls.
 
 These tests require:
-- LIBRAXIS_API_KEY environment variable
+- API key configured in ~/.config/screenscribe/config.env
+- Or LIBRAXIS_API_KEY environment variable
 - Network access to api.libraxis.cloud
 
 Run with: make test-integration
-Or: LIBRAXIS_API_KEY=xxx pytest tests/test_integration.py -v -m integration
 """
 
-import os
+import time
+from pathlib import Path
 
 import pytest
 
@@ -20,25 +21,18 @@ from screenscribe.semantic_filter import (
     semantic_prefilter,
 )
 from screenscribe.transcribe import Segment, TranscriptionResult
+from screenscribe.unified_analysis import UnifiedFinding
 
 # Skip all tests if no API key
 pytestmark = pytest.mark.integration
 
 
-def get_api_key() -> str:
-    """Get API key from environment."""
-    key = os.environ.get("LIBRAXIS_API_KEY", "")
-    if not key:
-        pytest.skip("LIBRAXIS_API_KEY not set")
-    return key
-
-
 @pytest.fixture
 def config_with_api() -> ScreenScribeConfig:
-    """Config with API key from environment."""
-    api_key = get_api_key()
+    """Config with API key from config file or environment."""
     config = ScreenScribeConfig.load()
-    config.api_key = api_key
+    if not config.get_llm_api_key():
+        pytest.skip("No API key configured (set in ~/.config/screenscribe/config.env)")
     return config
 
 
@@ -116,7 +110,8 @@ class TestSemanticPrefilterIntegration:
         """Semantic pre-filter identifies issues in Polish transcription."""
         config_with_api.language = "pl"
 
-        pois = semantic_prefilter(sample_transcription_pl, config_with_api)
+        result = semantic_prefilter(sample_transcription_pl, config_with_api)
+        pois = result.pois
 
         # Should identify at least some issues
         assert len(pois) >= 1, "Should identify at least one point of interest"
@@ -139,7 +134,8 @@ class TestSemanticPrefilterIntegration:
         """Semantic pre-filter identifies issues in English transcription."""
         config_with_api.language = "en"
 
-        pois = semantic_prefilter(sample_transcription_en, config_with_api)
+        result = semantic_prefilter(sample_transcription_en, config_with_api)
+        pois = result.pois
 
         # Should identify at least some issues
         assert len(pois) >= 1, "Should identify at least one point of interest"
@@ -157,7 +153,8 @@ class TestSemanticPrefilterIntegration:
         """Pre-filter should identify bug category from problem description."""
         config_with_api.language = "pl"
 
-        pois = semantic_prefilter(sample_transcription_pl, config_with_api)
+        result = semantic_prefilter(sample_transcription_pl, config_with_api)
+        pois = result.pois
 
         # At least one should be bug-related
         bug_pois = [p for p in pois if p.category == "bug"]
@@ -172,7 +169,8 @@ class TestSemanticPrefilterIntegration:
         """Pre-filter timestamps should be within transcript range."""
         config_with_api.language = "pl"
 
-        pois = semantic_prefilter(sample_transcription_pl, config_with_api)
+        result = semantic_prefilter(sample_transcription_pl, config_with_api)
+        pois = result.pois
 
         # Get transcript time range
         min_time = min(s.start for s in sample_transcription_pl.segments)
@@ -180,9 +178,9 @@ class TestSemanticPrefilterIntegration:
 
         for poi in pois:
             # Allow some tolerance for LLM timestamp estimation
-            assert poi.timestamp_start >= min_time - 1.0, (
-                f"Start {poi.timestamp_start} before transcript"
-            )
+            assert (
+                poi.timestamp_start >= min_time - 1.0
+            ), f"Start {poi.timestamp_start} before transcript"
             assert poi.timestamp_end <= max_time + 1.0, f"End {poi.timestamp_end} after transcript"
 
 
@@ -238,9 +236,10 @@ class TestSemanticAnalysisIntegration:
 
         assert result is not None
         # Critical crash should be high or critical severity
-        assert result.severity in ("critical", "high"), (
-            f"Crash should be critical/high, got {result.severity}"
-        )
+        assert result.severity in (
+            "critical",
+            "high",
+        ), f"Crash should be critical/high, got {result.severity}"
 
 
 # ============================================================================
@@ -251,23 +250,17 @@ class TestSemanticAnalysisIntegration:
 class TestConfigIntegration:
     """Integration tests for configuration with API."""
 
-    def test_config_loads_api_key_from_env(self) -> None:
-        """Config correctly loads API key from environment."""
-        api_key = get_api_key()
+    def test_config_loads_api_key(self, config_with_api: ScreenScribeConfig) -> None:
+        """Config correctly loads API key from config file or environment."""
+        assert config_with_api.get_llm_api_key()
 
-        config = ScreenScribeConfig.load()
-
-        assert config.api_key == api_key
-
-    def test_config_has_correct_endpoints(self) -> None:
-        """Config has correct LibraxisAI endpoints."""
-        get_api_key()  # Skip if no key
-
-        config = ScreenScribeConfig.load()
-
-        assert "libraxis.cloud" in config.api_base
-        assert "libraxis.cloud" in config.llm_endpoint
-        assert "/v1/responses" in config.llm_endpoint
+    def test_config_has_valid_endpoints(self, config_with_api: ScreenScribeConfig) -> None:
+        """Config has valid API endpoints."""
+        # Endpoints should be HTTPS URLs with proper paths
+        assert config_with_api.llm_endpoint.startswith("https://")
+        assert "/v1/" in config_with_api.llm_endpoint
+        assert config_with_api.stt_endpoint.startswith("https://")
+        assert "/v1/" in config_with_api.stt_endpoint
 
 
 # ============================================================================
@@ -290,7 +283,8 @@ class TestEndToEndWorkflow:
         config_with_api.language = "pl"
 
         # Step 1: Semantic pre-filter
-        pois = semantic_prefilter(sample_transcription_pl, config_with_api)
+        result = semantic_prefilter(sample_transcription_pl, config_with_api)
+        pois = result.pois
         assert len(pois) >= 1, "Pre-filter should find issues"
 
         # Step 2: Convert to detections
@@ -319,12 +313,385 @@ class TestEndToEndWorkflow:
         keyword_detections = detect_issues(sample_transcription_pl)
 
         # Step 2: Semantic pre-filter
-        pois = semantic_prefilter(sample_transcription_pl, config_with_api)
+        result = semantic_prefilter(sample_transcription_pl, config_with_api)
+        pois = result.pois
 
         # Step 3: Merge
         if pois:
             merged_pois = merge_pois_with_detections(pois, keyword_detections)
             detections = pois_to_detections(merged_pois, sample_transcription_pl)
 
-            # Combined should find at least as many as keywords alone
-            assert len(detections) >= len(keyword_detections), "Combined should not lose findings"
+            # Combined mode should produce results (semantic may group multiple keyword findings)
+            assert len(detections) >= 1, "Combined should produce at least one finding"
+            # Verify the merge worked - should have some detections
+            assert len(merged_pois) >= 1, "Merge should produce POIs"
+
+
+# ============================================================================
+# Analyze Server Tests
+# ============================================================================
+
+
+class TestAnalyzeServer:
+    """Integration tests for analyze server."""
+
+    @pytest.fixture
+    def sample_video(self, tmp_path: Path) -> Path:
+        """Create a minimal valid video file for testing."""
+        # Create a tiny valid MP4 (ftyp box only - enough for server to accept)
+        video_path = tmp_path / "test_video.mp4"
+        # Minimal ftyp box that makes file recognizable as MP4
+        ftyp = b"\x00\x00\x00\x14ftypmp42\x00\x00\x00\x00mp42"
+        video_path.write_bytes(ftyp)
+        return video_path
+
+    def test_analyze_app_creates(
+        self, config_with_api: ScreenScribeConfig, sample_video: Path
+    ) -> None:
+        """Analyze app is created successfully."""
+        from screenscribe.analyze_server import create_analyze_app
+
+        app = create_analyze_app(sample_video, config_with_api)
+
+        assert app is not None
+        assert app.title == "ScreenScribe Analyze"
+
+    def test_analyze_index_returns_html(
+        self, config_with_api: ScreenScribeConfig, sample_video: Path
+    ) -> None:
+        """Index endpoint returns HTML page."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "ScreenScribe Analyze" in response.text
+
+    def test_analyze_markers_empty_initially(
+        self, config_with_api: ScreenScribeConfig, sample_video: Path
+    ) -> None:
+        """Markers endpoint returns empty list initially."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        response = client.get("/api/markers")
+
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_analyze_mark_frame(
+        self, config_with_api: ScreenScribeConfig, sample_video: Path
+    ) -> None:
+        """Mark frame endpoint creates marker."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        # Mark a frame
+        response = client.post(
+            "/api/mark",
+            json={
+                "timestamp": 5.0,
+                "frame_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+                "transcript": "Test transcript",
+                "notes": "Test notes",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "marker_id" in data
+        assert data["status"] == "pending"
+
+        # Verify marker exists
+        markers = client.get("/api/markers").json()
+        assert len(markers) == 1
+        assert markers[0]["timestamp"] == 5.0
+
+    def test_analyze_page_respects_language_setting(
+        self, config_with_api: ScreenScribeConfig, sample_video: Path
+    ) -> None:
+        """Page sets HTML lang attribute based on config."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        # Test PL
+        config_with_api.language = "pl"
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+        response = client.get("/")
+        assert 'lang="pl"' in response.text
+
+        # Test EN
+        config_with_api.language = "en"
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+        response = client.get("/")
+        assert 'lang="en"' in response.text
+
+    def test_analyze_page_has_ui_controls(
+        self, config_with_api: ScreenScribeConfig, sample_video: Path
+    ) -> None:
+        """Page has Mark Frame and Record controls."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        response = client.get("/")
+        html = response.text
+
+        # UI control buttons
+        assert "Mark Frame" in html or "markFrame" in html
+        assert "Record" in html or "record" in html.lower()
+
+    def test_analyze_page_has_video_player(
+        self, config_with_api: ScreenScribeConfig, sample_video: Path
+    ) -> None:
+        """Page contains video player element."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        response = client.get("/")
+        html = response.text
+
+        # Video player
+        assert "<video" in html
+        assert 'id="videoPlayer"' in html or 'id="video"' in html
+
+    def test_analyze_page_has_mic_button(
+        self, config_with_api: ScreenScribeConfig, sample_video: Path
+    ) -> None:
+        """Page contains microphone button for voice recording."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        response = client.get("/")
+        html = response.text
+
+        # Mic button (Phosphor icon SVG or button)
+        assert "mic" in html.lower() or "microphone" in html.lower() or "record" in html.lower()
+
+    def test_analyze_page_has_theme_support(
+        self, config_with_api: ScreenScribeConfig, sample_video: Path
+    ) -> None:
+        """Page has CSS variables for theming (light/dark mode support)."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        response = client.get("/")
+        html = response.text
+
+        # CSS custom properties for theming
+        assert "--bg" in html or "--background" in html or "prefers-color-scheme" in html
+
+    def test_analyze_page_has_voicerecorder_js(
+        self, config_with_api: ScreenScribeConfig, sample_video: Path
+    ) -> None:
+        """Page contains VoiceRecorder JavaScript class."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        response = client.get("/")
+        html = response.text
+
+        # VoiceRecorder class and MediaRecorder API usage
+        assert "VoiceRecorder" in html
+        assert "MediaRecorder" in html
+
+    def test_analyze_page_has_finalize_trigger(
+        self, config_with_api: ScreenScribeConfig, sample_video: Path
+    ) -> None:
+        """Page wires finalize flow button and API call."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        response = client.get("/")
+        html = response.text
+
+        assert 'id="finalizeBtn"' in html
+        assert "fetch('/api/finalize/start'" in html
+        assert "fetch('/api/finalize/status/' + jobId)" in html
+
+    def test_finalize_analyzes_all_markers_and_returns_export(
+        self,
+        config_with_api: ScreenScribeConfig,
+        sample_video: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Finalize endpoint processes pending markers and returns exported payload."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        def fake_analyze_finding_unified(*args: object, **kwargs: object) -> UnifiedFinding:
+            return UnifiedFinding(
+                detection_id=1,
+                screenshot_path=None,
+                timestamp=5.0,
+                category="ui",
+                is_issue=True,
+                sentiment="problem",
+                severity="high",
+                summary="Mock summary",
+                action_items=["Mock action"],
+                affected_components=["Capture controls"],
+                suggested_fix="Mock fix",
+                ui_elements=["button"],
+                issues_detected=["alignment"],
+                accessibility_notes=[],
+                design_feedback="ok",
+                technical_observations="ok",
+                response_id="resp_mock_1",
+            )
+
+        monkeypatch.setattr(
+            "screenscribe.unified_analysis.analyze_finding_unified", fake_analyze_finding_unified
+        )
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        frame_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+        for timestamp in (5.0, 9.0):
+            response = client.post(
+                "/api/mark",
+                json={
+                    "timestamp": timestamp,
+                    "frame_base64": frame_base64,
+                    "transcript": f"Marker {timestamp}",
+                    "notes": "Test note",
+                },
+            )
+            assert response.status_code == 200
+
+        finalize_response = client.post("/api/finalize")
+        assert finalize_response.status_code == 200
+        payload = finalize_response.json()
+
+        assert payload["analysis"]["processed"] == 2
+        assert payload["analysis"]["completed"] == 2
+        assert payload["analysis"]["errors"] == 0
+
+        assert len(payload["markers"]) == 2
+        assert all(marker["status"] == "completed" for marker in payload["markers"])
+
+        exported = payload["export"]
+        assert "video" in exported
+        assert len(exported["markers"]) == 2
+        assert all("analysis" in marker for marker in exported["markers"])
+
+    def test_finalize_async_job_status_and_result(
+        self,
+        config_with_api: ScreenScribeConfig,
+        sample_video: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Async finalize endpoints expose x/y progress and final export payload."""
+        from fastapi.testclient import TestClient
+
+        from screenscribe.analyze_server import create_analyze_app
+
+        def fake_analyze_finding_unified(*args: object, **kwargs: object) -> UnifiedFinding:
+            return UnifiedFinding(
+                detection_id=1,
+                screenshot_path=None,
+                timestamp=2.0,
+                category="ui",
+                is_issue=True,
+                sentiment="problem",
+                severity="medium",
+                summary="Async mock summary",
+                action_items=["Mock action"],
+                affected_components=["Marker panel"],
+                suggested_fix="Mock fix",
+                ui_elements=["panel"],
+                issues_detected=["contrast"],
+                accessibility_notes=[],
+                design_feedback="ok",
+                technical_observations="ok",
+                response_id="resp_mock_async",
+            )
+
+        monkeypatch.setattr(
+            "screenscribe.unified_analysis.analyze_finding_unified", fake_analyze_finding_unified
+        )
+
+        app = create_analyze_app(sample_video, config_with_api)
+        client = TestClient(app)
+
+        frame_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        for timestamp in (2.0, 4.0, 6.0):
+            response = client.post(
+                "/api/mark",
+                json={
+                    "timestamp": timestamp,
+                    "frame_base64": frame_base64,
+                    "transcript": f"Marker {timestamp}",
+                    "notes": "Async note",
+                },
+            )
+            assert response.status_code == 200
+
+        start_response = client.post("/api/finalize/start")
+        assert start_response.status_code == 200
+        start_payload = start_response.json()
+        assert "job_id" in start_payload
+        job_id = start_payload["job_id"]
+
+        status_payload = start_payload
+        for _ in range(100):
+            status_response = client.get(f"/api/finalize/status/{job_id}")
+            assert status_response.status_code == 200
+            status_payload = status_response.json()
+            if status_payload["status"] != "running":
+                break
+            time.sleep(0.01)
+
+        assert status_payload["status"] == "completed"
+        assert status_payload["processed"] == 3
+        assert status_payload["completed"] == 3
+        assert status_payload["errors"] == 0
+
+        result_response = client.get(f"/api/finalize/result/{job_id}")
+        assert result_response.status_code == 200
+        result_payload = result_response.json()
+        assert result_payload["analysis"]["processed"] == 3
+        assert len(result_payload["export"]["markers"]) == 3

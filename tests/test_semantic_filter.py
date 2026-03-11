@@ -1,6 +1,7 @@
 """Tests for semantic filtering pipeline."""
 
 import json
+from typing import Literal, get_args
 
 import pytest
 
@@ -17,6 +18,9 @@ from screenscribe.semantic_filter import (
     pois_to_detections,
 )
 from screenscribe.transcribe import Segment, TranscriptionResult
+
+# Mirror of PointOfInterest.category type for parametrized testing
+CategoryType = Literal["bug", "change", "ui", "performance", "accessibility", "other"]
 
 # --- Fixtures ---
 
@@ -130,19 +134,18 @@ class TestPointOfInterest:
         )
         assert poi.midpoint == 15.0
 
-    def test_category_types(self) -> None:
+    @pytest.mark.parametrize("category", get_args(CategoryType))
+    def test_category_types(self, category: CategoryType) -> None:
         """All category types are valid."""
-        categories = ["bug", "change", "ui", "performance", "accessibility", "other"]
-        for cat in categories:
-            poi = PointOfInterest(
-                timestamp_start=0.0,
-                timestamp_end=1.0,
-                category=cat,
-                confidence=0.5,
-                reasoning="Test",
-                transcript_excerpt="Test",
-            )
-            assert poi.category == cat
+        poi = PointOfInterest(
+            timestamp_start=0.0,
+            timestamp_end=1.0,
+            category=category,
+            confidence=0.5,
+            reasoning="Test",
+            transcript_excerpt="Test",
+        )
+        assert poi.category == category
 
     def test_default_segment_ids(self) -> None:
         """Segment IDs default to empty list."""

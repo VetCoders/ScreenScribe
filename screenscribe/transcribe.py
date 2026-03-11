@@ -13,7 +13,7 @@ console = Console()
 
 # Default LibraxisAI STT endpoint (used if not configured otherwise)
 DEFAULT_STT_URL = "https://api.libraxis.cloud/v1/audio/transcriptions"
-LOCAL_STT_URL = "http://localhost:8237/transcribe"
+LOCAL_STT_URL = "http://localhost:7237/transcribe"
 
 
 @dataclass
@@ -34,6 +34,7 @@ class TranscriptionResult:
     text: str
     segments: list[Segment]
     language: str
+    response_id: str = ""  # API response ID for conversation chaining to LLM
 
 
 def transcribe_audio(
@@ -87,14 +88,27 @@ def transcribe_audio(
         with open(audio_path, "rb") as f:
             audio_content = f.read()
 
-        files = {"file": (audio_path.name, audio_content, "audio/mpeg")}
+        # Detect MIME type from file extension
+        mime_types = {
+            ".mp3": "audio/mpeg",
+            ".wav": "audio/wav",
+            ".m4a": "audio/mp4",
+            ".ogg": "audio/ogg",
+            ".flac": "audio/flac",
+            ".webm": "audio/webm",
+        }
+        mime_type = mime_types.get(audio_path.suffix.lower(), "audio/mpeg")
+        # Local endpoints use 'audio' field, OpenAI-compatible use 'file'
+        is_local_endpoint = url.startswith("http://127.0.0.1") or url.startswith("http://localhost")
+        field_name = "audio" if is_local_endpoint else "file"
+        files = {field_name: (audio_path.name, audio_content, mime_type)}
         data = {
             "model": stt_model,
             "language": language,
             "response_format": "verbose_json",
         }
         headers = {}
-        if api_key and not use_local:
+        if api_key and not use_local and not is_local_endpoint:
             headers["Authorization"] = f"Bearer {api_key}"
 
         def do_transcribe() -> httpx.Response:
@@ -125,14 +139,40 @@ def transcribe_audio(
             )
         )
 
+    # Fallback: if API returns text but no segments, create a single segment
+    # This handles APIs that don't support verbose segment output
+    full_text = result.get("text", "").strip()
+    if not segments and full_text:
+        console.print("[yellow]API returned text without segments, creating synthetic segment[/]")
+        # Estimate duration from text length (~150 words/min in Polish)
+        word_count = len(full_text.split())
+        estimated_duration = (word_count / 150) * 60  # seconds
+        segments.append(
+            Segment(
+                id=0,
+                start=0.0,
+                end=estimated_duration,
+                text=full_text,
+                no_speech_prob=0.0,
+            )
+        )
+
+    # Capture response_id for conversation chaining to LLM
+    stt_response_id = result.get("response_id", "")
+    if stt_response_id:
+        console.print(f"[dim]  STT response_id for LLM chaining: {stt_response_id[:20]}...[/]")
+
     console.print(f"[green]Transcription complete:[/] {len(segments)} segments")
 
     return TranscriptionResult(
-        text=result.get("text", ""), segments=segments, language=result.get("language", language)
+        text=result.get("text", ""),
+        segments=segments,
+        language=result.get("language", language),
+        response_id=stt_response_id,
     )
 
 
-def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | None]:
+def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | None, bool]:
     """
     Validate that audio actually contains speech.
 
@@ -143,20 +183,34 @@ def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | Non
         result: TranscriptionResult from transcribe_audio()
 
     Returns:
-        Tuple of (is_valid, error_message).
-        If is_valid is False, error_message contains user-friendly feedback.
+        Tuple of (is_valid, message, is_warning).
+        If is_valid is False, message contains user-friendly feedback.
+        If is_warning is True, pipeline should continue after showing the warning.
     """
     if not result.segments:
-        return False, (
-            "⚠️  No audio segments detected!\n   The audio file appears to be empty or corrupted."
+        return (
+            False,
+            "⚠️  No audio segments detected!\n   The audio file appears to be empty or corrupted.",
+            False,
         )
 
     # Calculate average no_speech probability
     avg_no_speech = sum(s.no_speech_prob for s in result.segments) / len(result.segments)
 
-    # Check for high no_speech probability (silent audio)
-    if avg_no_speech > 0.6:
-        return False, (
+    transcript_text = result.text.strip()
+    if not transcript_text:
+        transcript_text = " ".join(s.text for s in result.segments if s.text)
+    word_count = len(transcript_text.split())
+
+    suppress_warning_words = 150
+    stop_words_threshold = 40
+    stop_no_speech_threshold = 0.85
+    warn_no_speech_threshold = 0.75
+
+    # Only stop on very high no_speech + very short transcript.
+    if avg_no_speech > stop_no_speech_threshold and word_count < stop_words_threshold:
+        return (
+            False,
             f"⚠️  Audio appears to contain little or no speech!\n"
             f"   Average no-speech probability: {avg_no_speech:.0%}\n"
             f"\n"
@@ -165,7 +219,23 @@ def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | Non
             f"   • Microphone input volume is too low (check System Settings > Sound > Input)\n"
             f"   • Wrong audio input device selected\n"
             f"\n"
-            f"   Tip: When using Cmd+Shift+5, click 'Options' and select your microphone."
+            f"   Tip: When using Cmd+Shift+5, click 'Options' and select your microphone.",
+            False,
+        )
+
+    # Suppress warning if transcript is long enough to be meaningful.
+    if word_count >= suppress_warning_words:
+        return True, None, False
+
+    if avg_no_speech >= warn_no_speech_threshold:
+        return (
+            True,
+            f"⚠️  High no-speech score detected, but transcript has content.\n"
+            f"   Average no-speech probability: {avg_no_speech:.0%}\n"
+            f"   Word count: {word_count}\n"
+            f"\n"
+            f"   Continuing anyway. If results look wrong, check mic settings.",
+            True,
         )
 
     # Check for repetitive hallucinations (Whisper hallucinates on silence)
@@ -175,12 +245,14 @@ def validate_audio_quality(result: TranscriptionResult) -> tuple[bool, str | Non
         if unique_ratio < 0.3 and len(texts) > 3:
             # More than 70% duplicates with multiple segments = likely hallucination
             most_common = max(set(texts), key=texts.count)
-            return False, (
+            return (
+                False,
                 f"⚠️  Detected repetitive transcription (likely silent audio)!\n"
                 f"   The same phrase '{most_common}' appears repeatedly.\n"
                 f"   This typically happens when Whisper hallucinates on silent input.\n"
                 f"\n"
-                f"   Please check your microphone settings and re-record."
+                f"   Please check your microphone settings and re-record.",
+                False,
             )
 
-    return True, None
+    return True, None, False

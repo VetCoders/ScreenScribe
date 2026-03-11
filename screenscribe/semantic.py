@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import httpx
 from rich.console import Console
 
-from .api_utils import retry_request
+from .api_utils import build_llm_request_body, extract_llm_response_text, retry_request
 from .config import ScreenScribeConfig
 from .detect import Detection
 from .prompts import get_executive_summary_prompt, get_semantic_analysis_prompt
@@ -42,7 +42,7 @@ def analyze_detection_semantically(
     Returns:
         SemanticAnalysis result or None if failed
     """
-    if not config.api_key:
+    if not config.get_llm_api_key():
         return None
 
     # Get localized prompt template
@@ -58,15 +58,10 @@ def analyze_detection_semantically(
                 response = client.post(
                     config.llm_endpoint,
                     headers={
-                        "x-api-key": config.api_key,
+                        "Authorization": f"Bearer {config.get_llm_api_key()}",
                         "Content-Type": "application/json",
                     },
-                    json={
-                        "model": config.llm_model,
-                        "input": [
-                            {"role": "user", "content": [{"type": "input_text", "text": prompt}]}
-                        ],
-                    },
+                    json=build_llm_request_body(config.llm_model, prompt, config.llm_endpoint),
                 )
                 response.raise_for_status()
                 return response
@@ -88,34 +83,12 @@ def analyze_detection_semantically(
         except Exception as e:
             console.print(f"[yellow]Failed to parse API response: {e}. Raw: {raw_text[:300]}...[/]")
             return None
-        # v1/responses format - handle both reasoning and message outputs
-        content = ""
-        for item in result.get("output", []):
-            item_type = item.get("type", "")
-            # Handle reasoning blocks (new format with thinking)
-            if item_type == "reasoning":
-                for part in item.get("content", []):
-                    if part.get("type") == "reasoning_text":
-                        # Skip reasoning, look for actual output
-                        pass
-            # Handle message blocks
-            elif item_type == "message":
-                for part in item.get("content", []):
-                    if part.get("type") == "output_text":
-                        content += part.get("text", "")
-                    elif part.get("type") == "text":
-                        content += part.get("text", "")
-            # Handle direct output_text
-            elif item_type == "output_text":
-                content += item.get("text", "")
-            # Handle direct text
-            elif item_type == "text":
-                content += item.get("text", "")
+
+        # Extract content using unified helper (supports both API formats)
+        content = extract_llm_response_text(result, config.llm_endpoint)
 
         if not content:
-            console.print(
-                f"[yellow]No content found in response. Output types: {[i.get('type') for i in result.get('output', [])]}[/]"
-            )
+            console.print("[yellow]No content found in API response[/]")
             return None
 
         # Parse JSON from response
@@ -176,7 +149,9 @@ def analyze_detection_semantically(
 
 
 def analyze_detections_semantically(
-    detections: list[Detection], config: ScreenScribeConfig
+    detections: list[Detection],
+    config: ScreenScribeConfig,
+    previous_response_id: str = "",
 ) -> list[SemanticAnalysis]:
     """
     Analyze all detections using LLM.
@@ -184,15 +159,20 @@ def analyze_detections_semantically(
     Args:
         detections: List of detections
         config: ScreenScribe configuration
+        previous_response_id: Optional response ID from previous batch for context chaining
+            (reserved for future use - enables cross-video context in batch mode)
 
     Returns:
         List of semantic analyses
     """
+    # Note: previous_response_id is currently reserved for future conversation chaining
+    # across videos in batch mode. Individual detections chain via response_id field.
+    _ = previous_response_id  # Acknowledge parameter for future use
     if not config.use_semantic_analysis:
         console.print("[dim]Semantic analysis disabled[/]")
         return []
 
-    if not config.api_key:
+    if not config.get_llm_api_key():
         console.print("[yellow]No API key - skipping semantic analysis[/]")
         return []
 
@@ -242,7 +222,7 @@ def generate_executive_summary(analyses: list[SemanticAnalysis], config: ScreenS
     Returns:
         Executive summary text
     """
-    if not analyses or not config.api_key:
+    if not analyses or not config.get_llm_api_key():
         return ""
 
     # Prepare findings summary
@@ -261,15 +241,10 @@ def generate_executive_summary(analyses: list[SemanticAnalysis], config: ScreenS
                 response = client.post(
                     config.llm_endpoint,
                     headers={
-                        "x-api-key": config.api_key,
+                        "Authorization": f"Bearer {config.get_llm_api_key()}",
                         "Content-Type": "application/json",
                     },
-                    json={
-                        "model": config.llm_model,
-                        "input": [
-                            {"role": "user", "content": [{"type": "input_text", "text": prompt}]}
-                        ],
-                    },
+                    json=build_llm_request_body(config.llm_model, prompt, config.llm_endpoint),
                 )
                 response.raise_for_status()
                 return response
@@ -281,19 +256,7 @@ def generate_executive_summary(analyses: list[SemanticAnalysis], config: ScreenS
         )
 
         result = response.json()
-        # Extract text from v1/responses output format (handle reasoning + message)
-        content = ""
-        for item in result.get("output", []):
-            item_type = item.get("type", "")
-            if item_type == "reasoning":
-                pass  # Skip reasoning blocks
-            elif item_type == "message":
-                for part in item.get("content", []):
-                    if part.get("type") in ("output_text", "text"):
-                        content += part.get("text", "")
-            elif item_type in ("output_text", "text"):
-                content += item.get("text", "")
-        return content
+        return extract_llm_response_text(result, config.llm_endpoint)
 
     except Exception as e:
         console.print(f"[yellow]Executive summary failed: {e}[/]")

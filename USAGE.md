@@ -5,15 +5,18 @@ This guide covers practical examples and workflows for using ScreenScribe to ana
 ## Table of Contents
 
 1. [Basic Usage](#basic-usage)
-2. [Common Workflows](#common-workflows)
-3. [Understanding Output](#understanding-output)
-4. [Sentiment Detection](#sentiment-detection)
-5. [Detection Modes](#detection-modes)
-6. [Advanced Options](#advanced-options)
-7. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
-8. [Custom Keywords](#custom-keywords)
-9. [Resuming Interrupted Processing](#resuming-interrupted-processing)
-10. [Troubleshooting](#troubleshooting)
+2. [Batch Mode](#batch-mode)
+3. [Common Workflows](#common-workflows)
+4. [Understanding Output](#understanding-output)
+5. [HTML Pro Report](#html-pro-report)
+6. [Sentiment Detection](#sentiment-detection)
+7. [Detection Modes](#detection-modes)
+8. [Multi-Provider Setup](#multi-provider-setup)
+9. [Advanced Options](#advanced-options)
+10. [Time Estimates and Dry Run](#time-estimates-and-dry-run)
+11. [Custom Keywords](#custom-keywords)
+12. [Resuming Interrupted Processing](#resuming-interrupted-processing)
+13. [Troubleshooting](#troubleshooting)
 
 ## Basic Usage
 
@@ -43,6 +46,71 @@ screenscribe review ~/Videos/app-review.mov
 
 # Specify custom output directory
 screenscribe review ~/Videos/app-review.mov -o ~/Desktop/review-results
+```
+
+## Batch Mode
+
+Process multiple videos in one command with **shared context** — the AI remembers findings from previous videos via Responses API chaining.
+
+### Analyzing Multiple Videos
+
+```bash
+# Process all videos sequentially with context chaining
+screenscribe review video1.mov video2.mov video3.mov
+
+# With glob patterns
+screenscribe review ~/Videos/sprint-review/*.mov
+
+# With custom output directory
+screenscribe review *.mov -o ./all-reviews
+```
+
+### How Context Chaining Works
+
+When processing multiple videos, ScreenScribe uses the Responses API `previous_response_id` to maintain context:
+
+```
+Video 1, Finding 5 → response_id: "abc123"
+Video 2, Finding 1 → previous_response_id: "abc123"  ← VLM knows Video 1 findings!
+Video 2, Finding 3 → response_id: "def456"
+Video 3, Finding 1 → previous_response_id: "def456"  ← VLM knows Video 1+2!
+```
+
+This means:
+- Later videos benefit from earlier context
+- VLM can identify patterns across videos
+- Duplicate findings are better understood
+
+### Output Structure in Batch Mode
+
+Each video gets its own subdirectory:
+
+```
+all-reviews/
+├── video1_review/
+│   ├── video1_transcript.txt
+│   ├── video1_report.json
+│   ├── video1_report.md
+│   ├── video1_report.html   # HTML Pro report (only with --pro)
+│   └── screenshots/
+├── video2_review/
+│   └── ...
+└── video3_review/
+    └── ...
+```
+
+### Example: Sprint Review Analysis
+
+```bash
+# Analyze all recordings from a sprint review session
+screenscribe review \
+  ~/Videos/sprint-review/day1.mov \
+  ~/Videos/sprint-review/day2.mov \
+  ~/Videos/sprint-review/day3.mov \
+  -o ~/Reports/sprint-42-review
+
+# VLM will remember issues from day1 when analyzing day2,
+# and can say "this is similar to the button issue from earlier"
 ```
 
 ## Common Workflows
@@ -79,21 +147,26 @@ This includes:
 
 Processing time: ~10 minutes for a 15-minute video with 40+ issues.
 
-### Full Analysis
+### Full Analysis (Unified VLM Pipeline)
 
-Enable all features including vision-based screenshot analysis:
+Enable all features with the unified VLM pipeline — a single VLM call analyzes both screenshot AND transcript together:
 
 ```bash
 screenscribe review video.mov
 ```
 
-This adds:
-- UI element identification in screenshots
-- Visual issue detection
-- Accessibility observations
-- Design feedback
+This includes:
+- Full transcript with timestamps
+- Screenshots at issue moments
+- **Unified VLM analysis** (semantic + visual in one call):
+  - Severity ratings and action items
+  - UI element identification
+  - Visual issue detection
+  - Accessibility observations
+  - Design feedback
+- Executive summary
 
-Processing time: ~30+ minutes for a 15-minute video.
+Processing time: ~15-20 minutes for a 15-minute video with 40 issues (~20s per finding).
 
 ### Transcription Only
 
@@ -113,12 +186,13 @@ Useful for:
 ### Directory Structure
 
 ```
-video_review/
-├── transcript.txt      # Plain text transcript
-├── report.json         # Full structured data
-├── report.md           # Human-readable report
+{video}_review/
+├── {video}_transcript.txt  # Plain text transcript
+├── {video}_report.json     # Full structured data
+├── {video}_report.md       # Human-readable report
+├── {video}_report.html     # HTML Pro report (only with --pro)
 └── screenshots/
-    ├── 01_bug_01-23.jpg      # Category_timestamp.jpg
+    ├── 01_bug_01-23.jpg    # Category_timestamp.jpg
     ├── 02_change_02-45.jpg
     ├── 03_ui_03-12.jpg
     └── ...
@@ -211,6 +285,49 @@ The Markdown report contains:
 
 See [Sentiment Detection](#sentiment-detection) for details on `is_issue` and `sentiment` fields.
 
+## HTML Pro Report
+
+Generate an interactive HTML report with the `--pro` flag:
+
+```bash
+screenscribe review video.mov --pro
+```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Video Player** | Embedded player with subtitle sync - click finding to seek |
+| **Finding Cards** | Screenshot, transcript, AI analysis with severity badges |
+| **Lightbox View** | Click screenshot for full-resolution annotation |
+| **Annotation Tools** | Pen, rectangle, arrow tools with color picker |
+| **Human Review** | Edit severity, add notes, mark accepted/rejected |
+| **Language Toggle** | Switch between Polish and English (PL/EN) |
+| **Export Options** | JSON, TODO list, or ZIP bundle |
+
+### Annotation Workflow
+
+1. Click any screenshot thumbnail to open lightbox
+2. Use toolbar: **Pen** (freehand), **Rect** (highlight), **Arrow** (point)
+3. Pick color, draw annotations
+4. **Undo** / **Clear** to adjust
+5. Click **Done** to save
+
+Annotations persist in browser localStorage between sessions. Green dot indicates thumbnails with annotations.
+
+### Reviewed JSON Export
+
+Click **Export JSON** to download `report_reviewed_{video}.json` with human review data (severity, status, notes, annotations) without embedded screenshots.
+
+### ZIP Export
+
+Click **Export ZIP** to download a bundle containing:
+- `report_reviewed_<video>.json` — human review data (severity, status, notes, annotations)
+- `TODO_<video>.md` — TODO list grouped by severity
+- `annotated/` — PNG screenshots with annotations burned in (filenames include video name)
+
+Ideal for sharing with AI agents or external tools.
+
 ## Sentiment Detection
 
 ScreenScribe understands context and **negations**. Not every detected transcript fragment is a problem - sometimes users confirm that something works correctly.
@@ -275,13 +392,13 @@ Use `is_issue` to filter real problems from confirmations:
 
 ```bash
 # Extract only actual issues
-jq '.findings | map(select(.semantic_analysis.is_issue == true))' report.json
+jq '.findings | map(select(.semantic_analysis.is_issue == true))' video_report.json
 
 # Count real issues vs confirmations
 jq '{
   issues: [.findings[] | select(.semantic_analysis.is_issue == true)] | length,
   confirmations: [.findings[] | select(.semantic_analysis.is_issue == false)] | length
-}' report.json
+}' video_report.json
 ```
 
 ## Detection Modes
@@ -347,6 +464,65 @@ For a 15-minute video with ~40 issues:
 |------|----------------|-----------|--------------|
 | Semantic | ~2 min | 1 (pre-filter) | ~40 |
 | Keywords | <1s | 0 | ~30-35 |
+
+## Multi-Provider Setup
+
+ScreenScribe supports using different API providers for different tasks. This is useful for cost optimization — e.g., cheaper STT with LibraxisAI, powerful VLM with OpenAI.
+
+### Per-Endpoint API Keys
+
+```env
+# ~/.config/screenscribe/config.env
+
+# LibraxisAI for STT (cheaper transcription)
+LIBRAXIS_API_KEY=vista-xxx
+
+# OpenAI for VLM (unified analysis)
+OPENAI_API_KEY=sk-proj-xxx
+
+# Explicit endpoints (full URLs)
+SCREENSCRIBE_STT_ENDPOINT=https://api.libraxis.cloud/v1/audio/transcriptions
+SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
+SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
+
+# Models
+SCREENSCRIBE_STT_MODEL=whisper-1
+SCREENSCRIBE_LLM_MODEL=gpt-4o
+SCREENSCRIBE_VISION_MODEL=gpt-4o
+```
+
+### How Keys Are Resolved
+
+| Key Variable | Used For |
+|--------------|----------|
+| `LIBRAXIS_API_KEY` | STT endpoint |
+| `OPENAI_API_KEY` | LLM + Vision endpoints |
+| `SCREENSCRIBE_API_KEY` | Fallback for all endpoints |
+
+### Example Configurations
+
+**All OpenAI:**
+```env
+OPENAI_API_KEY=sk-proj-xxx
+SCREENSCRIBE_STT_ENDPOINT=https://api.openai.com/v1/audio/transcriptions
+SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
+SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
+```
+
+**All LibraxisAI:**
+```env
+LIBRAXIS_API_KEY=vista-xxx
+# Endpoints default to LibraxisAI, no need to specify
+```
+
+**Hybrid (recommended for cost):**
+```env
+LIBRAXIS_API_KEY=vista-xxx              # STT
+OPENAI_API_KEY=sk-proj-xxx              # VLM
+SCREENSCRIBE_STT_ENDPOINT=https://api.libraxis.cloud/v1/audio/transcriptions
+SCREENSCRIBE_LLM_ENDPOINT=https://api.openai.com/v1/responses
+SCREENSCRIBE_VISION_ENDPOINT=https://api.openai.com/v1/responses
+```
 
 ## Advanced Options
 
