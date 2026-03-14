@@ -35,6 +35,7 @@ from .checkpoint import (
 from .config import ScreenScribeConfig
 from .detect import detect_issues, format_timestamp
 from .keywords import save_default_keywords
+from .preprocess import write_preprocess_bundle
 from .report import (
     print_report,
     save_enhanced_json_report,
@@ -46,6 +47,7 @@ from .screenshots import extract_screenshots_for_detections
 
 # Legacy imports kept for backwards compatibility (not used in unified pipeline)
 # from .semantic import analyze_detections_semantically, generate_executive_summary
+from .semantic import generate_detection_executive_summary
 from .semantic_filter import (
     SemanticFilterLevel,
     SemanticFilterResult,
@@ -74,32 +76,45 @@ MAX_REVIEW_VERSIONS = 99
 BOOTSTRAP_BANNER_SHOWN_ENV = "SCREENSCRIBE_BOOTSTRAP_BANNER_SHOWN"
 
 
-def _find_next_review_path(base_path: Path) -> tuple[Path, int | None]:
-    """Find next available review path, appending _2, _3, etc. if needed.
+def _find_next_versioned_path(
+    base_path: Path,
+    *,
+    artifact_markers: tuple[str, ...],
+) -> tuple[Path, int | None]:
+    """Find next available artifact path, appending _2, _3, etc. if needed.
 
     Args:
         base_path: The initial desired output path (e.g., video_review)
+        artifact_markers: Files that prove the directory already contains
+            a completed artifact bundle.
 
     Returns:
         Tuple of (available_path, version_number or None if first)
     """
 
-    # Check if base path has a report (not just empty dir or checkpoint)
-    def has_report(p: Path) -> bool:
-        return (p / "report.html").exists() or (p / "report.json").exists()
+    def has_artifact_bundle(path: Path) -> bool:
+        return any((path / marker).exists() for marker in artifact_markers)
 
-    if not base_path.exists() or not has_report(base_path):
+    if not base_path.exists() or not has_artifact_bundle(base_path):
         return base_path, None
 
     # Find next available number
     version = 2
     while True:
         versioned_path = base_path.parent / f"{base_path.name}_{version}"
-        if not versioned_path.exists() or not has_report(versioned_path):
+        if not versioned_path.exists() or not has_artifact_bundle(versioned_path):
             return versioned_path, version
         version += 1
         if version > MAX_REVIEW_VERSIONS:
             raise RuntimeError(f"Too many review versions for {base_path.name}")
+
+
+def _find_next_review_path(base_path: Path) -> tuple[Path, int | None]:
+    """Find next available review path, appending _2, _3, etc. if needed."""
+    return _find_next_versioned_path(
+        base_path,
+        artifact_markers=("report.html", "report.json"),
+    )
 
 
 def version_callback(value: bool) -> None:
@@ -132,6 +147,7 @@ def _auto_review_if_video() -> None:
             "review",
             "analyze",
             "transcribe",
+            "preprocess",
             "config",
             "version",
             "--help",
@@ -168,9 +184,10 @@ def _interactive_mode() -> None:
     # Command selection
     commands = {
         "1": ("review", "Analyze video and generate report"),
-        "2": ("transcribe", "Transcribe video only"),
-        "3": ("config", "Show/edit configuration"),
-        "4": ("version", "Show version info"),
+        "2": ("preprocess", "Transcript-first artifact bundle"),
+        "3": ("transcribe", "Transcribe video only"),
+        "4": ("config", "Show/edit configuration"),
+        "5": ("version", "Show version info"),
     }
 
     console.print("[bold]Select command:[/]")
@@ -178,7 +195,7 @@ def _interactive_mode() -> None:
         console.print(f"  [cyan]{key}[/]) [bold]{cmd}[/] - {desc}")
     console.print()
 
-    choice = Prompt.ask("Enter choice", choices=["1", "2", "3", "4"], default="1")
+    choice = Prompt.ask("Enter choice", choices=["1", "2", "3", "4", "5"], default="1")
     selected_cmd = commands[choice][0]
 
     if selected_cmd == "version":
@@ -501,6 +518,14 @@ def review(
             help="Output directory for screenshots and reports",
         ),
     ] = None,
+    prompt: Annotated[
+        str | None,
+        typer.Option(
+            "--prompt",
+            "-P",
+            help="Append custom instructions to semantic and vision analysis prompts",
+        ),
+    ] = None,
     language: Annotated[
         str,
         typer.Option(
@@ -702,6 +727,7 @@ def review(
     config.use_semantic_analysis = semantic
     config.use_vision_analysis = vision
     config.verbose = verbose
+    config.analysis_prompt_override = (prompt or "").strip()
 
     # Validate endpoint configuration (fail fast on common mistakes)
     config_warnings = config.validate()
@@ -1066,9 +1092,33 @@ def review(
                 console.rule("[bold]Step 5: Unified VLM Analysis[/]")
                 console.print("[cyan]Analyzing screenshots + transcript context together...[/]")
                 try:
+                    requested_unified_count = len(screenshots)
                     unified_findings = analyze_all_findings_unified(
                         screenshots, config, previous_response_id=batch_context_response_id
                     )
+                    successful_unified_count = len(unified_findings)
+                    if successful_unified_count < requested_unified_count:
+                        failed_count = requested_unified_count - successful_unified_count
+                        if successful_unified_count == 0:
+                            console.print(
+                                "[yellow]All unified analyses failed - falling back to "
+                                "transcript/screenshot findings.[/]"
+                            )
+                        else:
+                            console.print(
+                                f"[yellow]{failed_count}/{requested_unified_count} unified analyses "
+                                "failed - report will mix AI and fallback findings.[/]"
+                            )
+                        pipeline_errors.append(
+                            {
+                                "stage": "unified_analysis",
+                                "message": (
+                                    f"{failed_count} of {requested_unified_count} unified analyses "
+                                    "failed. The report fell back to transcript/screenshot-only "
+                                    "findings for those items."
+                                ),
+                            }
+                        )
                     # Deduplicate similar findings before saving
                     if unified_findings:
                         original_count = len(unified_findings)
@@ -1109,6 +1159,27 @@ def review(
                                 {
                                     "stage": "summary_generation",
                                     "message": str(e),
+                                }
+                            )
+                    elif detections:
+                        try:
+                            executive_summary = generate_detection_executive_summary(
+                                detections, config
+                            )
+                            checkpoint.executive_summary = executive_summary
+                            if executive_summary:
+                                console.print(
+                                    "[yellow]Generated transcript-only executive summary "
+                                    "because screenshot-backed AI analysis was unavailable.[/]"
+                                )
+                        except Exception as e:
+                            console.print(
+                                f"[yellow]Transcript-only summary generation failed: {e}[/]"
+                            )
+                            pipeline_errors.append(
+                                {
+                                    "stage": "summary_generation",
+                                    "message": f"Transcript-only summary fallback failed: {e}",
                                 }
                             )
                 except Exception as e:
@@ -1400,6 +1471,126 @@ def transcribe(
     else:
         console.print()
         console.print(result.text)
+
+
+@app.command()
+def preprocess(
+    video: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to video file",
+            exists=True,
+            dir_okay=False,
+        ),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output directory for preprocess artifacts",
+        ),
+    ] = None,
+    language: Annotated[
+        str,
+        typer.Option(
+            "--lang",
+            "-l",
+            help="Language code for transcription",
+        ),
+    ] = "pl",
+    local: Annotated[
+        bool,
+        typer.Option(
+            "--local",
+            help="Use local STT server",
+        ),
+    ] = False,
+    include_audio: Annotated[
+        bool,
+        typer.Option(
+            "--audio/--no-audio",
+            help="Include extracted audio in the output bundle",
+        ),
+    ] = True,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Reuse output directory even if preprocess artifacts already exist",
+        ),
+    ] = False,
+) -> None:
+    """
+    Build a transcript-first artifact bundle for downstream review.
+
+    This is the non-AI handoff lane: extract audio, transcribe it, save
+    stable transcript artifacts, and stop before semantic or vision analysis.
+
+    Examples:
+        screenscribe preprocess video.mov
+        screenscribe preprocess video.mov -o ./video_preprocess
+        screenscribe preprocess video.mov --no-audio --lang en
+    """
+    check_ffmpeg_installed()
+    config = ScreenScribeConfig.load()
+
+    base_output = output or (video.parent / f"{video.stem}_preprocess")
+    if force:
+        output_dir = base_output
+    else:
+        output_dir, version = _find_next_versioned_path(
+            base_output,
+            artifact_markers=("preprocess.json", "transcript.txt"),
+        )
+        if version:
+            console.print(
+                Panel(
+                    f"[yellow]Found previous preprocess bundle at:[/] {base_output.name}\n"
+                    f"[green]Creating new version:[/] {output_dir.name}",
+                    title="[bold]Found Previous Preprocess Bundle[/]",
+                    border_style="yellow",
+                )
+            )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    console.print()
+    console.print(
+        Panel(
+            f"[bold cyan]ScreenScribe Preprocess[/]\n"
+            f"[dim]Transcript-first artifact bundle for downstream model/agent review[/]\n\n"
+            f"Video: [link=file://{video.resolve()}]{video.name}[/link]\n"
+            f"Output: [link=file://{output_dir.resolve()}]{output_dir.resolve()}[/link]",
+            border_style="cyan",
+        )
+    )
+
+    audio_path = extract_audio(video)
+    duration: float | None
+    try:
+        duration = get_video_duration(video)
+    except RuntimeError:
+        duration = None
+        console.print("[yellow]Could not determine video duration[/]")
+
+    transcription = transcribe_audio(
+        audio_path,
+        language=language,
+        use_local=local,
+        api_key=config.get_stt_api_key(),
+        stt_endpoint=config.stt_endpoint,
+        stt_model=config.stt_model,
+    )
+
+    write_preprocess_bundle(
+        video_path=video.resolve(),
+        output_dir=output_dir.resolve(),
+        transcription=transcription,
+        duration_seconds=duration,
+        extracted_audio_path=audio_path,
+        include_audio=include_audio,
+    )
 
 
 @app.command()

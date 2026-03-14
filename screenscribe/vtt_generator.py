@@ -47,11 +47,12 @@ def format_display_timestamp(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def generate_webvtt(segments: list[Segment]) -> str:
+def generate_webvtt(segments: list[Segment], language: str = "pl") -> str:
     """Generate WebVTT content from transcript segments.
 
     Args:
         segments: List of Segment dataclass instances
+        language: Language code for the VTT header
 
     Returns:
         WebVTT formatted string ready for <track> element
@@ -78,7 +79,7 @@ def generate_webvtt(segments: list[Segment]) -> str:
     lines = [
         "WEBVTT",
         "Kind: captions",
-        "Language: pl",
+        f"Language: {language}",
         "",
     ]
 
@@ -96,6 +97,7 @@ def generate_webvtt(segments: list[Segment]) -> str:
 
 def generate_webvtt_with_cue_settings(
     segments: list[Segment],
+    language: str = "pl",
     position: str = "50%",
     line: str = "auto",
     align: str = "center",
@@ -114,7 +116,7 @@ def generate_webvtt_with_cue_settings(
     lines = [
         "WEBVTT",
         "Kind: captions",
-        "Language: pl",
+        f"Language: {language}",
         "",
     ]
 
@@ -160,7 +162,7 @@ def segments_to_subtitle_entries(segments: list[Segment]) -> list[SubtitleEntry]
     return [SubtitleEntry.from_segment(s) for s in segments]
 
 
-def generate_vtt_data_url(segments: list[Segment]) -> str:
+def generate_vtt_data_url(segments: list[Segment], language: str = "pl") -> str:
     """Generate a data URL containing the WebVTT content.
 
     This allows embedding VTT directly in HTML without external files.
@@ -173,7 +175,7 @@ def generate_vtt_data_url(segments: list[Segment]) -> str:
     """
     import base64
 
-    vtt_content = generate_webvtt(segments)
+    vtt_content = generate_webvtt(segments, language=language)
     vtt_bytes = vtt_content.encode("utf-8")
     b64 = base64.b64encode(vtt_bytes).decode("ascii")
 

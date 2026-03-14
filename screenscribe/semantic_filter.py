@@ -18,6 +18,7 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from .api_utils import build_llm_request_body
 from .config import ScreenScribeConfig
+from .prompts import apply_analysis_prompt_override
 from .text_similarity import _text_similarity
 from .transcribe import Segment, TranscriptionResult
 
@@ -191,6 +192,7 @@ def semantic_prefilter(
     # Get localized prompt
     prompt_template = get_semantic_prefilter_prompt(config.language)
     prompt = prompt_template.format(transcript_with_timestamps=transcript_text)
+    prompt = apply_analysis_prompt_override(prompt, config.analysis_prompt_override)
 
     console.print("[blue]Running semantic pre-filter on entire transcript...[/]")
 

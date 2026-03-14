@@ -299,8 +299,25 @@ def render_html_report_pro(
     if executive_summary:
         executive_summary_html = f'<div class="executive-summary"><h3 data-i18n="executiveSummary">Streszczenie</h3><p>{html.escape(executive_summary)}</p></div>'
     else:
+        if errors:
+            fallback_text = (
+                f"Raport nadal zawiera {len(findings)} wykrytych znalezisk, transkrypcję "
+                "i screenshoty, ale warstwa AI nie wygenerowała podsumowania. "
+                "Sprawdź błędy pipeline poniżej oraz zakładkę Znaleziska."
+            )
+        elif findings:
+            fallback_text = (
+                f"Raport zawiera {len(findings)} wykrytych znalezisk, ale warstwa AI "
+                "nie zwróciła osobnego podsumowania."
+            )
+        else:
+            fallback_text = "Brak podsumowania AI"
+
         executive_summary_html = (
-            '<p class="text-muted" data-i18n="noSummary">Brak podsumowania AI</p>'
+            '<div class="executive-summary executive-summary-warning">'
+            '<h3 data-i18n="noSummary">Podsumowanie AI niedostępne</h3>'
+            f"<p>{html.escape(fallback_text)}</p>"
+            "</div>"
         )
 
     # Render template with all placeholders

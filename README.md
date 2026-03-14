@@ -158,6 +158,9 @@ screenscribe review video.mov --lang en
 
 # Transcription only
 screenscribe transcribe video.mov -o transcript.txt
+
+# Transcript-first artifact bundle for downstream model/agent review
+screenscribe preprocess video.mov
 ```
 
 ## How It Works
@@ -290,6 +293,21 @@ Options:
   -o, --output PATH       Output file for transcript
   -l, --lang TEXT         Language code (default: pl)
   --local                 Use local STT server
+```
+
+### `screenscribe preprocess`
+
+Transcript-first preprocessing bundle without semantic or vision analysis.
+
+```bash
+screenscribe preprocess VIDEO [OPTIONS]
+
+Options:
+  -o, --output PATH       Output directory for preprocess artifacts
+  -l, --lang TEXT         Language code (default: pl)
+  --local                 Use local STT server
+  --audio/--no-audio      Include extracted audio in the bundle (default: enabled)
+  --force                 Reuse output directory if preprocess artifacts already exist
 ```
 
 ### `screenscribe config`

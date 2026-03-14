@@ -14,7 +14,7 @@ from .api_utils import extract_llm_response_text, is_chat_completions_endpoint, 
 from .config import ScreenScribeConfig
 from .detect import Detection
 from .image_utils import encode_image_base64
-from .prompts import get_vision_analysis_prompt
+from .prompts import apply_analysis_prompt_override, get_vision_analysis_prompt
 
 if TYPE_CHECKING:
     from .semantic import SemanticAnalysis
@@ -90,6 +90,8 @@ def analyze_screenshot(
         )
     else:
         prompt = prompt_template.format(transcript_context=detection.segment.text[:200])
+
+    prompt = apply_analysis_prompt_override(prompt, config.analysis_prompt_override)
 
     try:
 

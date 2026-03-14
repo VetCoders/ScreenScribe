@@ -32,7 +32,7 @@ from .api_utils import extract_llm_response_text, is_chat_completions_endpoint, 
 from .config import ScreenScribeConfig
 from .detect import Detection
 from .image_utils import encode_image_base64, get_media_type
-from .prompts import get_unified_analysis_prompt
+from .prompts import apply_analysis_prompt_override, get_unified_analysis_prompt
 
 if TYPE_CHECKING:
     pass
@@ -254,6 +254,10 @@ def _extract_stream_delta(chunk: dict[str, Any], verbose: bool = False) -> str:
     if chunk_type == "response.output_text.delta":
         return str(chunk.get("delta", ""))
 
+    # Responses API: final text block without prior deltas
+    if chunk_type == "response.output_text.done":
+        return str(chunk.get("text", ""))
+
     # Responses API: response.content_part.delta (alternative format)
     if chunk_type == "response.content_part.delta":
         delta = chunk.get("delta", {})
@@ -297,10 +301,12 @@ def _extract_response_id_from_stream(chunk: dict[str, Any]) -> str:
     """Extract response ID from streaming chunk."""
     chunk_type = chunk.get("type", "")
 
-    # response.done contains the final response with ID
-    if chunk_type == "response.done":
+    # Responses-style stream chunks often carry the canonical response id
+    # inside the nested response object, not at top level.
+    if chunk_type in ("response.created", "response.completed", "response.done"):
         response = chunk.get("response", {})
-        return str(response.get("id", ""))
+        if isinstance(response, dict):
+            return str(response.get("id", ""))
 
     # Some formats include ID at chunk level
     return str(chunk.get("id", "") or chunk.get("response_id", ""))
@@ -346,6 +352,7 @@ def analyze_finding_unified_streaming(
         full_context=detection.context,
         category=detection.category,
     )
+    prompt = apply_analysis_prompt_override(prompt, config.analysis_prompt_override)
 
     try:
         # Build request body based on API format
@@ -434,6 +441,23 @@ def analyze_finding_unified_streaming(
                                 if on_content:
                                     on_content(content_delta)
 
+                            # Some Responses-compatible providers deliver the
+                            # final content only in response.completed/response.done.
+                            if not collected_content and chunk.get("type") in (
+                                "response.completed",
+                                "response.done",
+                            ):
+                                response_payload = chunk.get("response", {})
+                                if isinstance(response_payload, dict):
+                                    final_content = extract_response_content(
+                                        response_payload,
+                                        endpoint=config.vision_endpoint,
+                                    )
+                                    if final_content:
+                                        collected_content = final_content
+                                        if on_content:
+                                            on_content(final_content)
+
                             # Extract response ID
                             chunk_response_id = _extract_response_id_from_stream(chunk)
                             if chunk_response_id:
@@ -445,24 +469,22 @@ def analyze_finding_unified_streaming(
         if not collected_content:
             return None
 
-        # Parse JSON from content
-        try:
-            data = parse_json_response(collected_content)
-        except json.JSONDecodeError:
-            return None
+        # Match non-streaming behavior: tolerate non-JSON model output and
+        # keep the raw content instead of silently dropping the finding.
+        data = parse_json_response(collected_content)
 
         return UnifiedFinding(
             detection_id=detection.segment.id,
             screenshot_path=screenshot_path,
             timestamp=detection.segment.start,
             category=detection.category,
-            is_issue=data.get("is_issue", True),
+            is_issue=data.get("is_issue", "parse_error" not in data),
             sentiment=data.get("sentiment", "problem"),
             severity=data.get("severity", "medium"),
-            summary=data.get("summary", ""),
+            summary=data.get("summary", data.get("raw_content", "")),
             action_items=data.get("action_items", []),
             affected_components=data.get("affected_components", []),
-            suggested_fix=data.get("suggested_fix", ""),
+            suggested_fix=data.get("suggested_fix", data.get("parse_error", "")),
             ui_elements=data.get("ui_elements", []),
             issues_detected=data.get("issues_detected", []),
             accessibility_notes=data.get("accessibility_notes", []),
@@ -514,6 +536,7 @@ def analyze_finding_unified(
         full_context=detection.context,  # Full context from surrounding segments
         category=detection.category,
     )
+    prompt = apply_analysis_prompt_override(prompt, config.analysis_prompt_override)
 
     try:
 
@@ -685,9 +708,38 @@ def analyze_all_findings_unified(
         f"(max {MAX_WORKERS} concurrent, {STAGGER_DELAY}s stagger)...[/]"
     )
 
+    # Fast-fail probe: if the provider rejects screenshot-backed image input,
+    # do not hang the whole batch waiting on N parallel streaming requests.
+    first_detection, first_screenshot = screenshots[0]
+    probe_result = analyze_finding_unified(
+        first_detection,
+        first_screenshot,
+        config,
+        previous_response_id=previous_response_id or None,
+    )
+    if probe_result is None:
+        console.print(
+            "[yellow]Unified VLM preflight failed on the first screenshot - "
+            "skipping screenshot-backed unified analysis for this run.[/]"
+        )
+        return []
+    if len(screenshots) == 1:
+        console.print(
+            f"[dim]  [1/1][/] {first_detection.category} @ {first_detection.segment.start:.1f}s "
+            f"[green]{probe_result.severity if probe_result.is_issue else 'ok'}[/]"
+        )
+        console.print(
+            f"[green]Unified analysis complete:[/] "
+            f"[red]{1 if probe_result.is_issue and probe_result.severity == 'critical' else 0} critical[/], "
+            f"[yellow]{1 if probe_result.is_issue and probe_result.severity == 'high' else 0} high[/], "
+            f"[blue]{1 if probe_result.is_issue and probe_result.severity == 'medium' else 0} medium[/], "
+            f"[dim]{1 if probe_result.is_issue and probe_result.severity == 'low' else 0} low[/]"
+        )
+        return [probe_result]
+
     # Shared state for response_id chaining
     response_id_lock = threading.Lock()
-    shared_response_id = previous_response_id
+    shared_response_id = probe_result.response_id or previous_response_id
 
     # Track task states for display
     task_states: dict[int, _TaskState] = {}
@@ -695,12 +747,11 @@ def analyze_all_findings_unified(
         task_states[idx] = _TaskState(idx=idx, detection=detection, screenshot_path=screenshot_path)
 
     # Results storage (indexed by original position)
-    results_by_idx: dict[int, UnifiedFinding | None] = {}
-    completed_count = 0
+    results_by_idx: dict[int, UnifiedFinding | None] = {0: probe_result}
 
     def analyze_one(idx: int, delay: float) -> tuple[int, UnifiedFinding | None]:
         """Analyze a single finding with staggered start and response_id chaining."""
-        nonlocal shared_response_id, completed_count
+        nonlocal shared_response_id
 
         # Staggered start
         if delay > 0:
@@ -741,9 +792,6 @@ def analyze_all_findings_unified(
             state.severity = finding.severity if finding.is_issue else "ok"
         else:
             state.status = "failed"
-
-        with response_id_lock:
-            completed_count += 1
         return (idx, finding)
 
     # Build progress display
@@ -762,15 +810,16 @@ def analyze_all_findings_unified(
         main_task = progress.add_task(
             f"Analyzing {len(screenshots)} findings",
             total=len(screenshots),
-            stream="starting...",
+            completed=1,
+            stream=f"[green]ok[/] #1 [{probe_result.severity if probe_result.is_issue else 'ok'}]",
         )
 
         # Submit all tasks with staggered delays
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures: dict[Future[tuple[int, UnifiedFinding | None]], int] = {}
 
-            for idx in range(len(screenshots)):
-                delay = idx * STAGGER_DELAY
+            for idx in range(1, len(screenshots)):
+                delay = (idx - 1) * STAGGER_DELAY
                 future = executor.submit(analyze_one, idx, delay)
                 futures[future] = idx
 

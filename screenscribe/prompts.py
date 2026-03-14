@@ -4,6 +4,23 @@ from typing import Literal
 
 PromptLanguage = Literal["pl", "en"]
 
+
+def apply_analysis_prompt_override(base_prompt: str, override: str = "") -> str:
+    """Append operator instructions without breaking required output contracts."""
+    cleaned = override.strip()
+    if not cleaned:
+        return base_prompt
+
+    return (
+        f"{base_prompt}\n\n"
+        "ADDITIONAL ANALYSIS INSTRUCTIONS:\n"
+        f"{cleaned}\n\n"
+        "These instructions refine the analysis but do not replace the required "
+        "output format, schema, or requested language. Preserve every required "
+        "field and formatting rule from the original prompt."
+    )
+
+
 # Semantic analysis prompts
 SEMANTIC_ANALYSIS_PROMPTS: dict[str, str] = {
     "pl": """Jesteś ekspertem UX/UI i programistą analizującym feedback z nagrania screencast.

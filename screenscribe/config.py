@@ -53,6 +53,7 @@ class ScreenScribeConfig:
     use_semantic_analysis: bool = True
     use_vision_analysis: bool = True
     verbose: bool = False
+    analysis_prompt_override: str = ""
 
     def get_stt_api_key(self) -> str:
         """Get API key for STT endpoint."""
