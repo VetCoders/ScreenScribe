@@ -133,3 +133,39 @@ def test_html_pro_report_uses_relative_video_source_without_file_scheme(tmp_path
     assert 'src="sample.mov"' in html
     assert "file://" not in html
     assert (output.parent / "sample.mov").exists()
+
+
+def test_html_pro_report_surfaces_pipeline_errors_when_ai_summary_missing() -> None:
+    findings = [
+        {
+            "id": 1,
+            "category": "bug",
+            "timestamp_formatted": "00:12",
+            "timestamp": 12.5,
+            "text": "Przycisk dalej nie działa poprawnie.",
+            "context": "Kontekst testowy",
+            "keywords": ["semantic:bug"],
+            "screenshot": "",
+            "screenshot_path": "",
+        }
+    ]
+
+    html = render_html_report_pro(
+        video_name="test.mov",
+        video_path=None,
+        generated_at="2026-02-15T17:31:26",
+        executive_summary="",
+        findings=findings,
+        segments=_sample_segments(),
+        errors=[
+            {
+                "stage": "unified_analysis",
+                "message": "7 of 7 unified analyses failed. The report fell back to transcript/screenshot-only findings for those items.",
+            }
+        ],
+    )
+
+    assert "Bledy Pipeline" in html
+    assert "7 of 7 unified analyses failed" in html
+    assert "Podsumowanie AI niedostępne" in html
+    assert "Raport nadal zawiera 1 wykrytych znalezisk" in html
