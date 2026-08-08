@@ -10,6 +10,7 @@ patched ``cli.console`` still bind.
 
 import socket
 from pathlib import Path
+from urllib.parse import quote
 
 
 def _serve_report(output_dir: Path, video_path: Path, port: int = 8765) -> None:
@@ -81,8 +82,15 @@ def _serve_report(output_dir: Path, video_path: Path, port: int = 8765) -> None:
         )
 
         # /api/* is gated by a one-time session token carried in the URL fragment.
+        # The report filename comes from the video stem and routinely holds spaces
+        # ("Screen Recording ... .mov"). It MUST be percent-encoded before the
+        # fragment is appended: an unencoded space makes the whole string an
+        # invalid URL, and macOS `open location` then escapes it wholesale --
+        # including the "#" -> "%23". That turns the token into part of the request
+        # path (404 + token in the access log) instead of a server-invisible
+        # fragment. Encode the path first, append "#token=..." after.
         url = tokenized_url(
-            f"http://localhost:{selected_port}/{report_filename}",
+            f"http://localhost:{selected_port}/{quote(report_filename)}",
             app_instance.state.session_token,
         )
         console.print(f"[bold green]Report URL:[/] {url}")
