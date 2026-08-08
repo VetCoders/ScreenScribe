@@ -2,12 +2,43 @@
 
 ## Unreleased
 
+## [0.1.18] - 2026-08-08
+
 - **Fixed: `review` opens the report when the video name contains spaces.** The
   report URL is now percent-encoded before the `#token=...` fragment is appended,
   so the default macOS recording name ("Screen Recording … at 14.09.22.mp4") no
   longer produces `{"detail":"Not Found"}`. Previously the raw URL was escaped
   wholesale by the OS handler, turning `#` into `%23` and pushing the session
   token into the request path (and the access log) instead of the fragment.
+- **Fixed: concurrent saves and analyses no longer lose work in the review and
+  analyze servers.** Two overlapping saves each loaded, merged and rewrote
+  `report.json` independently, so the second writer could overwrite a reviewer's
+  verdict with a snapshot taken before the first save landed; the whole
+  read-modify-write cycle is now serialized per report. Chained VLM/STT calls
+  advance the conversation head only when it has not moved since the call
+  started, so a slow analysis returning late no longer clobbers the newer
+  response id and leaves the next request chaining off a stale one.
+- **Fixed: the review report's "Moments" tab counter includes manual moments.**
+  The header count was a server-side snapshot of AI findings only, so marking a
+  manual moment updated the manual panel while the tab stayed frozen. The count
+  now flows through a single live renderer that sums non-rejected AI findings
+  and manual moments, and it survives verdict changes and language switches
+  instead of being overwritten on every re-render.
+- **Fixed: provider API keys are classified by shape and origin.** LibraxisAI
+  keys (`sk-vista`, legacy `vista-`) are recognized as such, and any other `sk-`
+  key is treated as ambiguous rather than assumed to be OpenAI — OpenAI-compatible
+  gateways share that prefix. Only the provably wrong combinations still block a
+  run: a LibraxisAI key aimed at `openai.com`, or a key taken from an explicit
+  `OPENAI_API_KEY` aimed at a LibraxisAI endpoint. An ambiguous `sk-` key on a
+  LibraxisAI endpoint is now a non-blocking warning that points at
+  `screenscribe config setup` instead of exiting. The outgoing STT/LLM/VLM
+  request shape is covered by new contract tests.
+- **Fixed: `--embed-video` explains itself when the video is too large.** Videos
+  at or above the 50MB embed limit fall back to linking by filename; that
+  fallback is now reported in the report's errors section instead of happening
+  silently. The check runs where the real source path is known, so it actually
+  fires for saved reports, and the warning reaches the caller's error list
+  rather than a discarded copy.
 
 ## [0.1.17] - 2026-07-13
 
