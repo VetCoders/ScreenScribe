@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fixed: `review` opens the report when the video name contains spaces.** The
+  report URL is now percent-encoded before the `#token=...` fragment is appended,
+  so the default macOS recording name ("Screen Recording … at 14.09.22.mp4") no
+  longer produces `{"detail":"Not Found"}`. Previously the raw URL was escaped
+  wholesale by the OS handler, turning `#` into `%23` and pushing the session
+  token into the request path (and the access log) instead of the fragment.
+
 ## [0.1.17] - 2026-07-13
 
 - **Changed: adopted the Business Source License 1.1.** The project now ships
