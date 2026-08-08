@@ -48,3 +48,6 @@ unsure about.
   template for handing a task to a teammate or an AI agent.
 - [`release-checklist.md`](./release-checklist.md) — the checklist to run before
   cutting a release.
+- [`site-deploy.md`](./site-deploy.md) — how the canonical production site is
+  deployed (Tailscale + atomic release directories) and what it needs to be
+  configured.
