@@ -12,6 +12,7 @@ from __future__ import annotations
 import socket
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 import pytest
 import typer
@@ -473,6 +474,51 @@ def test_serve_report_starts_server_and_opens_browser(tmp_path: Path, monkeypatc
     assert opened and opened[0].endswith("#tok")
     # symlink cleaned up in finally
     assert not (out / "clip.mov").is_symlink()
+
+
+def test_serve_report_percent_encodes_spaces_and_keeps_raw_token_fragment(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """A report filename with spaces must reach the browser percent-encoded.
+
+    Regression: the URL was built from the raw filename, so the default macOS
+    recording name ("Screen Recording ... at 14.09.22") produced an invalid URL.
+    macOS `open location` then escaped the whole string -- turning the "#" of the
+    "#token=..." fragment into "%23", pushing the session token into the request
+    path: {"detail":"Not Found"} plus a token leak into the server access log.
+    The path must carry %20 while the fragment stays a real fragment.
+    """
+    out = tmp_path / "out"
+    out.mkdir()
+    stem = "Screen Recording 2026-08-08 at 14.09.22"
+    video = tmp_path / f"{stem}.mp4"
+    video.write_bytes(b"x")
+    report = out / f"{stem}_report.html"
+    report.write_text("<html></html>")
+
+    class _FakeAppState:
+        session_token = "tok"  # noqa: S105 - test fixture
+
+    class _FakeApp:
+        state = _FakeAppState()
+
+    opened: list[str] = []
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(review_server, "create_review_app", lambda **_k: _FakeApp())
+    monkeypatch.setattr(cli, "_find_available_port", lambda preferred, **_k: preferred)
+    monkeypatch.setattr(uvicorn, "run", lambda _a, **_k: None)
+
+    # The real tokenized_url runs here: the fragment join is part of what we pin.
+    _serve_report(out, video, port=9124)
+
+    assert opened, "browser was never opened"
+    url = opened[0]
+    parts = urlsplit(url)
+    assert parts.fragment == "token=tok"
+    assert url.count("#") == 1
+    assert "%23" not in url
+    assert parts.path == f"/{stem.replace(' ', '%20')}_report.html"
+    assert (out / unquote(parts.path).lstrip("/")).exists()
 
 
 def test_serve_report_falls_forward_when_port_busy(tmp_path: Path, monkeypatch: Any) -> None:
