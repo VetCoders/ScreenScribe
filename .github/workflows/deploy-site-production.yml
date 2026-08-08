@@ -17,7 +17,8 @@ on:
     paths:
       - "site/**"
       - ".github/workflows/deploy-site-production.yml"
-  # Manual re-deploy of the current main without touching site/**.
+  # Manual re-deploy of the current main without touching site/**. A dispatch
+  # against any other ref is skipped by the job-level guard below.
   workflow_dispatch:
 
 # Never cancel an in-flight production deploy; serialize instead.
@@ -30,6 +31,8 @@ permissions:
 
 jobs:
   deploy:
+    # Manual dispatch can target any ref; production deploys only ever run main.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # Defense in depth: a hung transfer must not eat the whole job budget and
     # skip rollback. Per-curl timeouts below are the primary bound.
