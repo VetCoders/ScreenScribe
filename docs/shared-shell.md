@@ -13,11 +13,23 @@ full document.
 | Slot renderer | `screenscribe/shell/renderer.py` | `render_surface(config, context)` fills every slot, owns asset/script ordering, server-side i18n, and asserts no slot is left unfilled. |
 | Surface configs | `screenscribe/shell/surface.py` | `REVIEW_SURFACE` and `ANALYZE_SURFACE` — the per-mode capability maps. |
 | Partials | `screenscribe/html_pro_assets/templates/partials/` | Reusable slot bodies (`video_panel`, `transcript_panel`, `tabbar`, `header_right`, `export_panel`, …). |
+| Layout controller | `screenscribe/html_pro_assets/scripts/lib/layout-control.js` | Measures the wrapped header and keeps `--header-height` synchronized for both surfaces and every responsive breakpoint. |
 
 The review renderer (`screenscribe/html_pro/renderer.py`,
 `render_html_report_pro`) builds review-specific context and calls
 `render_surface(REVIEW_SURFACE, context)`. The analyze server
 (`screenscribe/analyze_server.py`) calls `render_surface(ANALYZE_SURFACE, context)`.
+
+The header is intentionally allowed to wrap below 1200 px. Do not hardcode a
+second breakpoint-specific content offset: the shared layout controller measures
+the rendered header (including language and window-action rows) and writes the
+actual pixel height to `--header-height`. The desktop fixed shell and the mobile
+stacked shell both consume that one value.
+
+Tabs use a roving-tabindex contract: the active tab has `tabindex="0"`, inactive
+tabs have `tabindex="-1"`, and `activateTab` updates both `tabindex` and
+`aria-selected`. The sidebar separator exposes its real pixel min/max/current
+values through ARIA; do not mix percentage bounds with a pixel current value.
 
 ## How a mode extends the shell
 
@@ -71,12 +83,30 @@ never always-visible footer/side buttons.
   after the first marked moment; the client enables them once artifacts exist.
 - **review**: the `tab-export` panel in `review_sidebar.html` hosts the
   TODO / JSON / ZIP downloads. *Save review* (review-state persistence, not an
-  artifact download) stays in the sidebar footer.
+  artifact download) stays in the sidebar footer beside *Reset review*. Reset is
+  a confirmed, server-backed return to the generated report: it removes human
+  verdicts, notes, manual merge overlays, manual moments, and review-created
+  work items while preserving the generated findings and unrelated report data.
 
 The review report's findings always exist, so its downloads are not readiness-
 gated; analyze gates because its artifacts do not exist until the user marks a
 moment.
 
 > The `Statistics` / `Statystyki` tab was removed from the review UI. Severity
-> counts are still computed client-side for the findings counter and for export
-> payloads — only the user-facing tab and its stat-card markup were dropped.
+> counts remain available to export logic — only the user-facing tab and its
+> stat-card markup were dropped.
+
+## Review moment and merge contracts
+
+`Moments (N)` counts logical moments represented in the current review: every
+visible AI finding card, including rejected cards, plus every manual moment. A
+human merge replaces N source cards with one logical card, so the count decreases
+by `N - 1`; unmerge restores the source-card count. Rejection never changes the
+count because the rejected card remains visible and auditable.
+
+Human merges are reversible. The draft and saved survivor keep additive
+`member_reviews` / `merged_member_reviews` snapshots of the source findings.
+Unmerge keeps edits made on the survivor while it was merged and restores the
+other members' pre-merge verdicts, priorities, notes, and annotations. Legacy
+saved merges without snapshots remain compatible: the survivor keeps its state
+and absorbed members return as unreviewed.

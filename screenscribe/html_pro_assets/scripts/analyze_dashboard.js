@@ -1156,6 +1156,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const resizer = document.getElementById('sidebarResizer');
         const sidebar = document.querySelector('.sidebar');
         if (!resizer || !sidebar) return;
+        const panel = document.querySelector('.review-column') || sidebar;
 
         const storageKey = 'screenscribe_sidebar_width';
         const isMobile = () => window.matchMedia('(max-width: 900px)').matches;
@@ -1173,6 +1174,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const { minPx, maxPx } = getBounds();
             const nextWidth = Math.min(maxPx, Math.max(minPx, width));
             document.documentElement.style.setProperty('--sidebar-width', `${nextWidth}px`);
+            resizer.setAttribute('aria-valuemin', String(Math.round(minPx)));
+            resizer.setAttribute('aria-valuemax', String(Math.round(maxPx)));
             resizer.setAttribute('aria-valuenow', String(Math.round(nextWidth)));
             if (persist) {
                 try { localStorage.setItem(storageKey, String(Math.round(nextWidth))); }
@@ -1180,26 +1183,29 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
+        let restoredWidth = false;
         try {
             const saved = Number(localStorage.getItem(storageKey));
-            if (saved) applyWidth(saved, false);
+            if (saved) {
+                applyWidth(saved, false);
+                restoredWidth = true;
+            }
         } catch (_err) { /* localStorage unavailable; non-fatal */ }
+        if (!restoredWidth) applyWidth(panel.getBoundingClientRect().width, false);
 
         // Keyboard resize: focusable separator, Arrow keys nudge, Home/End jump
         // to the min/max bound. Mirrors review_app.js so both surfaces match.
         const KEY_STEP = 24;
         resizer.tabIndex = 0;
-        resizer.setAttribute('aria-valuemin', '0');
-        resizer.setAttribute('aria-valuemax', '100');
         resizer.addEventListener('keydown', (event) => {
             if (isMobile()) return;
             const { minPx, maxPx } = getBounds();
-            const current = sidebar.getBoundingClientRect().width;
+            const current = panel.getBoundingClientRect().width;
             let next = null;
             if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next = current + KEY_STEP;
             else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next = current - KEY_STEP;
-            else if (event.key === 'Home') next = maxPx;
-            else if (event.key === 'End') next = minPx;
+            else if (event.key === 'Home') next = minPx;
+            else if (event.key === 'End') next = maxPx;
             if (next === null) return;
             event.preventDefault();
             applyWidth(next);
@@ -1209,7 +1215,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         resizer.addEventListener('pointerdown', (event) => {
             if (isMobile()) return;
-            dragState = { startX: event.clientX, startWidth: sidebar.getBoundingClientRect().width };
+            dragState = { startX: event.clientX, startWidth: panel.getBoundingClientRect().width };
             document.body.classList.add('is-resizing');
             if (resizer.setPointerCapture) resizer.setPointerCapture(event.pointerId);
             event.preventDefault();
@@ -1237,7 +1243,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.body.classList.remove('is-resizing');
                 return;
             }
-            applyWidth(sidebar.getBoundingClientRect().width, false);
+            applyWidth(panel.getBoundingClientRect().width, false);
         });
     })();
 

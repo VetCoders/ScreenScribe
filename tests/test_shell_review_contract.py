@@ -66,6 +66,10 @@ def test_review_shell_dom_contract() -> None:
     assert 'data-i18n-namespace="review"' in html
     assert 'class="workspace-shell"' in html
     assert 'class="modal-layer"' in html
+    assert re.search(r'<button[^>]+data-tab="summary"[^>]+tabindex="0"', html)
+    assert (
+        len(re.findall(r'<button[^>]+data-tab="(?:findings|export)"[^>]+tabindex="-1"', html)) == 2
+    )
 
     for critical_id in (
         "detachReviewBtn",
@@ -127,6 +131,7 @@ def test_review_shell_dom_contract() -> None:
         'data-action="voice-note"',
         # Post-C7.2: save/export buttons wired via data-action + event delegation.
         'data-action="save-review"',
+        'data-action="reset-review"',
         'data-action="export-todo"',
         'data-action="export-json"',
         'data-action="export-zip"',
@@ -152,10 +157,12 @@ def test_review_shell_dom_contract() -> None:
     ):
         assert export_panel_idx < html.index(download) < footer_idx, download
     assert footer_idx < html.index('data-action="save-review"')
+    assert footer_idx < html.index('data-action="reset-review"')
+    assert "Reset review" in html
 
     # The header "Momenty (N)" tab counter needs a span with a stable id so
-    # review_app.js can add manual moments to the AI findings count live
-    # (server only knows the AI count at render time).
+    # review_app.js can count logical AI cards plus manual moments live
+    # (server only knows the initial AI count at render time).
     assert '<span id="findings-count">1</span>' in html
 
     assert 'name="verdict-1" value="accepted"' in html

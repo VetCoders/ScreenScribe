@@ -179,11 +179,54 @@ def test_f0_review_app_loads_without_referenceerror() -> None:
     """The script evaluates and exposes the core review functions."""
     _run_review_app_smoke(
         """
-        for (const name of ['buildTodoMarkdown', 'buildReviewData', 'handleChangeEvent', 'normalizeVerdict']) {
+        for (const name of [
+            'buildTodoMarkdown', 'buildReviewData', 'handleChangeEvent',
+            'normalizeVerdict', 'unmergeFindings', 'resetReview'
+        ]) {
             if (typeof eval(name) !== 'function') {
                 console.error('missing top-level function: ' + name);
                 process.exitCode = 1;
             }
+        }
+        """
+    )
+
+
+def test_f0_moments_counter_includes_visible_rejected_and_manual_moments() -> None:
+    """The tab count is logical visible cards + manual moments, independent of verdict."""
+    _run_review_app_smoke(
+        """
+        const articles = [
+            { dataset: { findingId: 'a', verdict: 'accepted', severity: 'high' } },
+            { dataset: { findingId: 'b', verdict: 'rejected', severity: 'low' } },
+            { dataset: { findingId: 'c', verdict: 'none', severity: 'medium', mergedAway: 'true' } },
+        ];
+        const tabButton = {
+            title: '',
+            ariaLabel: '',
+            setAttribute(name, value) { if (name === 'aria-label') this.ariaLabel = value; },
+        };
+        const tabCount = {
+            textContent: '0',
+            closest() { return tabButton; },
+        };
+        document.querySelectorAll = (selector) => selector === '.finding' ? articles : [];
+        document.getElementById = (id) => id === 'findings-count' ? tabCount : null;
+        reportState.findings = {
+            a: { verdict: 'accepted' },
+            b: { verdict: 'rejected' },
+        };
+        reportState.manualFrames = [{ marker_id: 'manual-1' }];
+
+        updateReviewMeta();
+
+        if (tabCount.textContent !== '3') {
+            console.error('expected accepted + rejected + manual = 3, got ' + tabCount.textContent);
+            process.exitCode = 1;
+        }
+        if (!tabButton.ariaLabel.includes('3')) {
+            console.error('accessible count description missing: ' + tabButton.ariaLabel);
+            process.exitCode = 1;
         }
         """
     )

@@ -394,6 +394,23 @@ def create_review_app(
             raise HTTPException(status_code=500, detail="Report JSON is invalid.")
         return json_path, data
 
+    def write_report_json_atomic(json_path: Path, report_data: dict[str, Any]) -> None:
+        """Durably replace ``report.json`` without exposing a torn write."""
+        import json
+
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            dir=str(json_path.parent), prefix=".report-", suffix=".json.tmp"
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                json.dump(report_data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_name, json_path)
+        except Exception:
+            Path(tmp_name).unlink(missing_ok=True)
+            raise
+
     def _finding_verdict(human: dict[str, Any]) -> str:
         # legacy migration: confirmed -> verdict — read either the new
         # `verdict` string or the old boolean `confirmed` from report.json.
@@ -418,6 +435,10 @@ def create_review_app(
             # would recompute the merged review with empty members and silently
             # drop the evidence. Mirror of the merged_from_ids hydrate above.
             "member_annotations": list(human.get("member_annotations") or []),
+            # Exact pre-merge reviewer states make a saved human merge reversible.
+            # Older reports omit this additive field; the client then restores
+            # absorbed members as unreviewed while keeping the survivor's edits.
+            "merged_member_reviews": dict(human.get("merged_member_reviews") or {}),
         }
 
     def work_item_from_review_finding(finding: dict[str, Any]) -> WorkItem:
@@ -910,6 +931,61 @@ def create_review_app(
         hydrate_state_with_session_frames(state, session_markers)
         return JSONResponse(content=state)
 
+    @app.post("/api/reset-review")
+    async def reset_review_state() -> JSONResponse:
+        """Reset the report to its generated, pre-review state.
+
+        The generated findings remain canonical. Only human-review overlays,
+        review-created work items, manual markers/results, and their image files
+        are removed. The JSON replace lands before session state or image files
+        are cleared, so a failed disk write leaves the current review intact.
+        """
+        await save_lock.acquire()
+        try:
+            json_path, report_data = load_report_json()
+            report_data.pop("human_review", None)
+            report_data.pop("manual_review", None)
+
+            work_items = report_data.get("work_items")
+            if isinstance(work_items, list):
+                retained = [
+                    item
+                    for item in work_items
+                    if not isinstance(item, dict)
+                    or item.get("source") not in {"review_detection", "review_manual_frame"}
+                ]
+                if retained:
+                    report_data["work_items"] = retained
+                else:
+                    report_data.pop("work_items", None)
+
+            write_report_json_atomic(json_path, report_data)
+
+            with session.lock:
+                session.markers.clear()
+                session.results.clear()
+                session.last_response_id = ""
+            _sweep_orphan_manual_frames(session.output_dir, set())
+
+            return JSONResponse(
+                content={
+                    "status": "reset",
+                    "state": {
+                        "findings": {},
+                        "manualFrames": [],
+                        "reviewer": "",
+                        "modified": False,
+                    },
+                }
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error("Failed to reset review state: %s", exc)
+            raise HTTPException(status_code=500, detail="Failed to reset review state.") from exc
+        finally:
+            save_lock.release()
+
     @app.post("/api/manual-analyze/{marker_id}")
     async def analyze_manual_frame(marker_id: str) -> JSONResponse:
         """Run VLM analysis for one manual frame."""
@@ -927,8 +1003,6 @@ def create_review_app(
     async def save_review_state(request: Request) -> dict[str, Any]:
         """Persist the human review (verdicts, notes, annotations) plus manual
         markers and results to the disk report.json."""
-        import json
-
         # Serialize the entire load->merge->write cycle: a concurrent save must
         # not load report.json before this one's atomic replace lands, or it
         # would overwrite with a stale snapshot and drop this save's verdicts.
@@ -1051,31 +1125,8 @@ def create_review_app(
                     for marker in markers
                 ]
 
-            # BH30: write report.json atomically. The previous direct
-            # ``open(json_path, "w")`` truncated the file in place, so a crash
-            # mid-write (process killed, disk full) could leave a half-written,
-            # unparseable report.json — destroying the reviewer's saved state.
-            # Write to a temp file in the same directory, then os.replace it in.
-            # ``os.replace`` is atomic on the same filesystem, so a crash before
-            # the replace leaves the previous report.json fully intact.
-            tmp_fd, tmp_name = tempfile.mkstemp(
-                dir=str(json_path.parent), prefix=".report-", suffix=".json.tmp"
-            )
-            try:
-                with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-                    json.dump(report_data, f, indent=2, ensure_ascii=False)
-                    # Flush Python + OS buffers to the platter before the atomic
-                    # replace. Without fsync, os.replace can commit the rename
-                    # while the temp file's bytes are still in the OS page cache,
-                    # so a crash right after leaves report.json pointing at a
-                    # zero/short file — the exact data-loss os.replace is meant to
-                    # prevent.
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(tmp_name, json_path)
-            except Exception:
-                Path(tmp_name).unlink(missing_ok=True)
-                raise
+            # BH30: replace atomically only after the complete payload is fsynced.
+            write_report_json_atomic(json_path, report_data)
 
             # Sweep orphaned manual-frame images only after report.json is durably
             # written (finding 156). The keep-set is the full live reference set:

@@ -965,6 +965,91 @@ def test_review_server_save_merges_human_review(
     assert len(saved["findings"]) == 2
 
 
+def test_review_server_reset_returns_to_generated_report_state(
+    review_workspace: tuple[Path, Path, Path],
+) -> None:
+    """Reset removes only review overlays and their durable manual-frame files."""
+    import json
+
+    output_dir, report_file, video_path = review_workspace
+    json_path = output_dir / "screen_report.json"
+    manual_dir = output_dir / "manual_frames"
+    manual_dir.mkdir()
+    (manual_dir / "manual-1.jpg").write_bytes(b"review-only-frame")
+    json_path.write_text(
+        json.dumps(
+            {
+                "video": "screen.mov",
+                "findings": [{"id": 1}, {"id": 2}],
+                "human_review": {
+                    "reviewer": "alex",
+                    "findings": {"1": {"verdict": "accepted"}},
+                    "manual_frames": [
+                        {"marker_id": "manual-1", "frame_path": "manual_frames/manual-1.jpg"}
+                    ],
+                },
+                "manual_review": {
+                    "markers": [
+                        {"marker_id": "manual-1", "frame_path": "manual_frames/manual-1.jpg"}
+                    ],
+                    "results": [],
+                },
+                "work_items": [
+                    {"id": "1", "source": "review_detection"},
+                    {"id": "manual-1", "source": "review_manual_frame"},
+                    {"id": "pipeline-1", "source": "pipeline_detection"},
+                ],
+                "pipeline_metadata": {"keep": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    app = create_review_app(output_dir, report_file.name, video_path, _config())
+    client = TestClient(app)
+
+    response = client.post("/api/reset-review")
+
+    assert response.status_code == 200
+    assert response.json()["state"] == {
+        "findings": {},
+        "manualFrames": [],
+        "reviewer": "",
+        "modified": False,
+    }
+    saved = json.loads(json_path.read_text(encoding="utf-8"))
+    assert saved["findings"] == [{"id": 1}, {"id": 2}]
+    assert saved["pipeline_metadata"] == {"keep": True}
+    assert saved["work_items"] == [{"id": "pipeline-1", "source": "pipeline_detection"}]
+    assert "human_review" not in saved
+    assert "manual_review" not in saved
+    assert list(manual_dir.iterdir()) == []
+    assert client.get("/api/review-state").json() == {
+        "findings": {},
+        "manualFrames": [],
+        "reviewer": "",
+        "modified": False,
+    }
+
+
+def test_review_server_reset_is_idempotent(
+    review_workspace: tuple[Path, Path, Path],
+) -> None:
+    """Repeating reset on an already-clean report is a successful no-op."""
+    import json
+
+    output_dir, report_file, video_path = review_workspace
+    json_path = output_dir / "screen_report.json"
+    baseline = {"video": "screen.mov", "findings": [{"id": 1}]}
+    json_path.write_text(json.dumps(baseline), encoding="utf-8")
+    app = create_review_app(output_dir, report_file.name, video_path, _config())
+    client = TestClient(app)
+
+    assert client.post("/api/reset-review").status_code == 200
+    assert client.post("/api/reset-review").status_code == 200
+    assert json.loads(json_path.read_text(encoding="utf-8")) == baseline
+
+
 def test_review_server_reloads_human_review_from_disk_after_fresh_load(
     review_workspace: tuple[Path, Path, Path],
 ) -> None:
@@ -1780,6 +1865,9 @@ def test_review_state_returns_merged_from_ids(
                             "verdict": "accepted",
                             "notes": "survivor",
                             "merged_from_ids": [18, 26, 27],
+                            "merged_member_reviews": {
+                                "18": {"verdict": "rejected", "notes": "restore me"}
+                            },
                         },
                         "6": {"verdict": "accepted", "notes": "standalone"},
                     }
@@ -1797,6 +1885,9 @@ def test_review_state_returns_merged_from_ids(
 
     survivor = findings.get("17", {})
     assert survivor.get("merged_from_ids") == [18, 26, 27], survivor
+    assert survivor.get("merged_member_reviews") == {
+        "18": {"verdict": "rejected", "notes": "restore me"}
+    }
     # A standalone finding carries an empty trail, never a missing key.
     assert findings.get("6", {}).get("merged_from_ids") == []
 

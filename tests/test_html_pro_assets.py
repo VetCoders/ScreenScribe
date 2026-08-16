@@ -456,6 +456,8 @@ def test_review_js_focus_traps_and_keyboard_nav_presence_smoke() -> None:
     # activateTab / setLanguage keep ARIA state in sync.
     assert "aria-selected" in js
     assert "aria-pressed" in js
+    assert "button.tabIndex = isActive ? 0 : -1" in js
+    assert "document.documentElement.lang = lang" in js
 
     # Resizer is keyboard-operable.
     assert "resizer.tabIndex = 0" in js
@@ -463,6 +465,33 @@ def test_review_js_focus_traps_and_keyboard_nav_presence_smoke() -> None:
 
     # Clickable thumbnails become keyboard-operable buttons.
     assert "img.setAttribute('role', 'button')" in js
+
+
+def test_shared_shell_layout_controller_tracks_real_header_height() -> None:
+    layout_js = assets.load_js_lib_layout_control()
+    assert "ResizeObserver" in layout_js
+    assert "getBoundingClientRect().height" in layout_js
+    assert "--header-height" in layout_js
+
+
+def test_mobile_header_uses_non_clipping_grid_and_i18n_keeps_merged_labels() -> None:
+    css = assets.load_css()
+    i18n_js = assets.load_js_i18n_runtime()
+    assert "@media (max-width: 600px)" in css
+    assert "grid-template-columns: minmax(0, 1fr) auto" in css
+    assert '"mergedEvidence": "Merged evidence frames"' in i18n_js
+    assert '"mergedEvidence": "Scalone klatki dowodowe"' in i18n_js
+
+
+def test_sidebar_resizer_aria_uses_pixel_bounds_consistently() -> None:
+    review_js = assets.load_js_review_app()
+    analyze_js = assets.load_js_analyze_dashboard()
+    for js in (review_js, analyze_js):
+        assert "aria-valuemin', String(Math.round(minPx))" in js
+        assert "aria-valuemax', String(Math.round(maxPx))" in js
+        assert "aria-valuenow', String(Math.round(nextWidth))" in js
+        assert "aria-valuemin', '0'" not in js
+        assert "aria-valuemax', '100'" not in js
 
 
 def test_dashboard_js_focus_restore_and_keyboard_controls_presence_smoke() -> None:

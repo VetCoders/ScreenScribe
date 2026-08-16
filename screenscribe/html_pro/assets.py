@@ -85,6 +85,11 @@ def load_js_lib_language_control() -> str:
     return load_asset("scripts/lib/language-control.js")
 
 
+def load_js_lib_layout_control() -> str:
+    """Load shared responsive shell geometry synchronization."""
+    return load_asset("scripts/lib/layout-control.js")
+
+
 def load_js_lib_stt_transport() -> str:
     """Load shared speech-to-text transport plumbing."""
     return load_asset("scripts/lib/stt-transport.js")
