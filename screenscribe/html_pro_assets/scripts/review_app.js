@@ -1921,7 +1921,7 @@ function renderMergedCard(merged) {
     sevLabel.textContent = t('review.changePriority');
     const sevSelect = document.createElement('select');
     sevSelect.className = 'severity-select';
-    sevSelect.id = 'finding-priority-' + merged.id;
+    sevSelect.id = 'merged-finding-priority-' + merged.id;
     sevLabel.htmlFor = sevSelect.id;
     sevField.appendChild(sevLabel);
     [['', 'review.noChange'], ['critical', 'review.critical'], ['high', 'review.high'],
@@ -1942,7 +1942,7 @@ function renderMergedCard(merged) {
     const notesLabel = document.createElement('label');
     notesLabel.textContent = t('review.notes');
     const notesArea = document.createElement('textarea');
-    notesArea.id = 'finding-notes-' + merged.id;
+    notesArea.id = 'merged-finding-notes-' + merged.id;
     notesLabel.htmlFor = notesArea.id;
     notesField.appendChild(notesLabel);
     notesArea.setAttribute('placeholder', t('review.notesPlaceholder'));

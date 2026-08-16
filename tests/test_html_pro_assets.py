@@ -65,6 +65,16 @@ def test_report_viewer_partials_have_no_inline_onclick() -> None:
     assert not offenders, "inline onclick still present in partials: " + ", ".join(offenders)
 
 
+def test_merged_review_controls_use_distinct_ids_from_hidden_originals() -> None:
+    """Generated merge cards must not duplicate ids from hidden source cards."""
+    review_app = assets.load_js_review_app()
+
+    assert "'merged-finding-priority-' + merged.id" in review_app
+    assert "'merged-finding-notes-' + merged.id" in review_app
+    assert "sevSelect.id = 'finding-priority-' + merged.id" not in review_app
+    assert "notesArea.id = 'finding-notes-' + merged.id" not in review_app
+
+
 def test_stylesheets_have_no_webfont_imports() -> None:
     """The report is an offline evidence bundle: opening it must not trigger
     any network request. No @import in any shipped stylesheet; brand fonts
