@@ -8,7 +8,9 @@
   priorities, or annotations, and rebind visible annotation previews after the
   split. Reset review atomically returns to generated findings, clears the
   reviewer and manual review state, and reports success once the canonical JSON
-  commit lands even if stale frame cleanup can only emit a warning.
+  commit lands even if stale frame cleanup can only emit a warning. A monotonic
+  reset generation now invalidates delayed manual-frame Add/Analyze work without
+  discarding annotation edits during ordinary same-generation synchronization.
 - **Fixed: the shared review/analyze shell stays usable and accessible at narrow
   widths.** Oversized moment previews are bounded, analyze header controls wrap
   on phones, active tabs keep their roving `tabindex` in sync, the sidebar

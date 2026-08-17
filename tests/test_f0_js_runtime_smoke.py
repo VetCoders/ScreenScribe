@@ -736,6 +736,34 @@ def test_f4_restore_uses_newer_draft_state_over_stale_sync() -> None:
     )
 
 
+def test_f4_reset_generation_beats_later_stale_timestamps() -> None:
+    """A newer reset epoch outranks savedAt in restore and cross-tab sync."""
+    _run_review_app_smoke(
+        """
+        const staleDraft = {
+            savedAt: '2026-06-17T12:05:00.000Z',
+            state: { resetGeneration: 0, findings: { f1: { verdict: 'accepted' } } },
+        };
+        const resetSync = {
+            savedAt: '2026-06-17T12:04:00.000Z',
+            state: { resetGeneration: 1, findings: {}, manualFrames: [] },
+        };
+        const chosen = chooseReviewRestoreEnvelope(staleDraft, resetSync);
+        if (chosen.envelope !== resetSync || chosen.source !== 'sync') {
+            console.error('later stale draft beat the reset generation');
+            process.exitCode = 1;
+        }
+
+        reportState.resetGeneration = 1;
+        stateSyncRuntime.lastLocalSavedAt = Date.parse('2026-06-17T12:04:00.000Z');
+        if (isIncomingReviewEnvelopeFresher(staleDraft)) {
+            console.error('old-generation envelope was accepted because its timestamp was later');
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
 def test_f4_manual_frame_add_flushes_draft_synchronously() -> None:
     """A freshly added manual frame lands in the localStorage draft immediately.
 

@@ -64,7 +64,11 @@ const reportState = {
     merges: [],
     reviewer: '',
     modified: false,
-    reportId: ''
+    reportId: '',
+    // Monotonic server-issued epoch for destructive review resets. Shared
+    // snapshots and manual-frame requests carry it so work started before a
+    // reset cannot overwrite the reset afterwards.
+    resetGeneration: 0,
 };
 
 const WINDOW_MODES = {
@@ -357,6 +361,7 @@ function buildPersistableState(modified) {
         merges: Array.isArray(reportState.merges) ? reportState.merges : [],
         reviewer: reportState.reviewer,
         modified,
+        resetGeneration: reportState.resetGeneration,
     };
 }
 
@@ -411,6 +416,14 @@ function rememberLocalSavedAt(savedAt) {
 }
 
 function isIncomingReviewEnvelopeFresher(envelope) {
+    const incomingGeneration = resetGenerationFromEnvelope(envelope);
+    const localGeneration = normalizeResetGeneration(reportState.resetGeneration);
+    // A destructive reset is authoritative regardless of wall-clock ordering.
+    // Conversely, a late write from work started before that reset must never
+    // win merely because its savedAt timestamp is newer.
+    if (incomingGeneration !== localGeneration) {
+        return incomingGeneration > localGeneration;
+    }
     const incoming = savedAtTime(envelope);
     // No usable timestamp on the incoming snapshot (legacy/older writer): it
     // cannot be proven stale, so let it through rather than silently dropping it.
@@ -541,11 +554,19 @@ function hydrateReportState(
         return;
     }
 
+    const currentResetGeneration = normalizeResetGeneration(reportState.resetGeneration);
+    const incomingResetGeneration = normalizeResetGeneration(snapshot.resetGeneration);
+    const resetAdvanced = incomingResetGeneration > currentResetGeneration;
+    const resetHydration = discardActiveEditor || resetAdvanced;
+
     // Reset is the only hydration that deliberately invalidates an active
     // annotation edit. Ordinary draft/disk/cross-window hydration must not close
     // the lightbox and silently discard a drawing in progress.
-    if (discardActiveEditor && (currentLightboxFindingId || lightboxAnnotationTool)) {
+    if (resetHydration && (currentLightboxFindingId || lightboxAnnotationTool)) {
         closeLightbox({ saveAnnotations: false, restoreFocus: false });
+    }
+    if (resetHydration && manualFrameRuntime.currentFrame) {
+        closeManualFrameModal();
     }
 
     stateSyncRuntime.suppressEvents = true;
@@ -556,6 +577,7 @@ function hydrateReportState(
     reportState.merges = Array.isArray(snapshot.merges) ? snapshot.merges : [];
     reportState.reviewer = snapshot.reviewer || '';
     reportState.modified = Boolean(snapshot.modified);
+    reportState.resetGeneration = Math.max(currentResetGeneration, incomingResetGeneration);
     stateSyncRuntime.suppressEvents = false;
 
     const reviewerInput = document.getElementById('reviewer-name');
@@ -636,10 +658,12 @@ async function hydrateReportStateFromDisk({ enrichManualFrameImagesOnly = false 
             || (snapshot?.findings && Object.keys(snapshot.findings).length > 0)
             || (Array.isArray(snapshot?.manualFrames) && snapshot.manualFrames.length > 0)
         );
-        if (!hasDiskState || reportState.modified) {
+        const resetAdvanced = normalizeResetGeneration(snapshot?.resetGeneration)
+            > normalizeResetGeneration(reportState.resetGeneration);
+        if ((!hasDiskState && !resetAdvanced) || (reportState.modified && !resetAdvanced)) {
             return;
         }
-        hydrateReportState(snapshot);
+        hydrateReportState(snapshot, { discardActiveEditor: resetAdvanced });
     } catch (error) {
         if (DEBUG) console.debug('No persisted review state available:', error);
     }
@@ -662,12 +686,30 @@ function savedAtTime(envelope) {
     return Number.isFinite(time) ? time : null;
 }
 
+function normalizeResetGeneration(value) {
+    const generation = Number(value);
+    return Number.isInteger(generation) && generation >= 0 ? generation : 0;
+}
+
+function resetGenerationFromEnvelope(envelope) {
+    const state = envelope?.state || envelope;
+    return normalizeResetGeneration(state?.resetGeneration);
+}
+
 function chooseReviewRestoreEnvelope(draftEnvelope, syncEnvelope) {
     if (!draftEnvelope) {
         return { envelope: syncEnvelope, source: 'sync' };
     }
     if (!syncEnvelope) {
         return { envelope: draftEnvelope, source: 'draft' };
+    }
+
+    const draftGeneration = resetGenerationFromEnvelope(draftEnvelope);
+    const syncGeneration = resetGenerationFromEnvelope(syncEnvelope);
+    if (draftGeneration !== syncGeneration) {
+        return syncGeneration > draftGeneration
+            ? { envelope: syncEnvelope, source: 'sync' }
+            : { envelope: draftEnvelope, source: 'draft' };
     }
 
     const draftTime = savedAtTime(draftEnvelope);
@@ -2471,12 +2513,16 @@ async function resetReview() {
     const button = document.querySelector('[data-action="reset-review"]');
     if (button) button.disabled = true;
     try {
+        let resetGeneration = normalizeResetGeneration(reportState.resetGeneration) + 1;
         if (!isStaticDemo()) {
             const response = await fetch('/api/reset-review', {
                 method: 'POST',
                 headers: { 'Accept': 'application/json' },
             });
-            await fetchJsonOrThrow(response, 'Failed to reset review.');
+            const payload = await fetchJsonOrThrow(response, 'Failed to reset review.');
+            resetGeneration = normalizeResetGeneration(
+                payload.resetGeneration ?? payload.state?.resetGeneration
+            );
         }
 
         const findings = {};
@@ -2490,6 +2536,7 @@ async function resetReview() {
                 merges: [],
                 reviewer: '',
                 modified: false,
+                resetGeneration,
             },
             { discardActiveEditor: true }
         );
@@ -3080,6 +3127,7 @@ function setManualFrameStatus(message, tone = '') {
 }
 
 function openManualFrameModal(frame) {
+    frame._resetGeneration = normalizeResetGeneration(reportState.resetGeneration);
     manualFrameRuntime.currentFrame = frame;
 
     const modal = document.getElementById('manualFrameModal');
@@ -3461,6 +3509,13 @@ async function saveManualNote(markerId) {
 // ANALYZE sidebar: marking is the durable act, analysis is optional and
 // separate. Returns the marker_id so analyze can reuse an already-marked frame.
 async function markManualFrame(current, transcript, notes) {
+    const operationGeneration = normalizeResetGeneration(reportState.resetGeneration);
+    if (!Number.isInteger(current._resetGeneration)) {
+        current._resetGeneration = operationGeneration;
+    }
+    if (current._resetGeneration !== operationGeneration) {
+        return null;
+    }
     if (current.marker_id) {
         // BH28: the frame is already marked, but the reviewer may have edited its
         // notes/transcript afterwards (e.g. typed more, then hit Analyze). Without
@@ -3468,7 +3523,9 @@ async function markManualFrame(current, transcript, notes) {
         // dropped on reload — and a later analyze ran against the stale server
         // copy. Persist the edit to the server marker so the change is durable.
         await updateManualFrameMarker(current.marker_id, transcript, notes);
-        return current.marker_id;
+        return normalizeResetGeneration(reportState.resetGeneration) === operationGeneration
+            ? current.marker_id
+            : null;
     }
     // BH10 in-flight idempotency: Add and Analyze can both call markManualFrame on
     // the same frame before the first POST resolves (the marker_id guard above
@@ -3485,9 +3542,17 @@ async function markManualFrame(current, transcript, notes) {
                     frame_base64: current.frameBase64,
                     transcript,
                     notes,
+                    reset_generation: operationGeneration,
                 }),
             });
             const markPayload = await fetchJsonOrThrow(markResponse, t('review.manualFrameSaveFailed'));
+            const responseGeneration = normalizeResetGeneration(
+                markPayload.resetGeneration ?? operationGeneration
+            );
+            if (normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration
+                || responseGeneration !== operationGeneration) {
+                return null;
+            }
             current.marker_id = markPayload.marker_id;
             upsertManualFrame({
                 marker_id: markPayload.marker_id,
@@ -3520,7 +3585,8 @@ async function addManualFrame() {
     try {
         if (addBtn) addBtn.disabled = true;
         setManualFrameStatus(t('review.statusSavingFrame'), 'busy');
-        await markManualFrame(current, transcript, notes);
+        const markerId = await markManualFrame(current, transcript, notes);
+        if (!markerId) return;
         showNotification(t('review.manualFrameAdded'));
         closeManualFrameModal();
     } catch (error) {
@@ -3535,6 +3601,7 @@ async function addManualFrame() {
 async function analyzeManualFrame() {
     const current = manualFrameRuntime.currentFrame;
     if (!current) return;
+    const operationGeneration = normalizeResetGeneration(reportState.resetGeneration);
 
     const transcript = readManualFrameTranscript();
     const notes = document.getElementById('manualFrameNotes')?.value || '';
@@ -3547,12 +3614,20 @@ async function analyzeManualFrame() {
         // Reuse an already-marked frame; otherwise mark it first so analyze
         // never silently discards the capture.
         const markerId = await markManualFrame(current, transcript, notes);
+        if (!markerId || normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration) {
+            return;
+        }
 
         setManualFrameStatus(t('review.statusRunningAnalysis'), 'busy');
-        const analyzeResponse = await fetch(`/api/manual-analyze/${markerId}`, {
-            method: 'POST',
-        });
+        const analyzeResponse = await fetch(
+            `/api/manual-analyze/${markerId}?reset_generation=${operationGeneration}`,
+            { method: 'POST' }
+        );
         const analyzePayload = await fetchJsonOrThrow(analyzeResponse, t('review.manualFrameAnalysisFailed'));
+
+        if (normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration) {
+            return;
+        }
 
         if (analyzePayload.status !== 'completed' || !analyzePayload.result) {
             throw new Error(analyzePayload.error || t('review.manualFrameAnalysisFailed'));

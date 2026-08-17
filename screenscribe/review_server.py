@@ -66,6 +66,7 @@ class ManualFrameRequest(BaseModel):
     frame_base64: str = Field(..., max_length=MAX_FRAME_BASE64_CHARS)
     transcript: str = ""
     notes: str = ""
+    reset_generation: int = Field(0, ge=0)
 
 
 class ManualFrameUpdateRequest(BaseModel):
@@ -133,6 +134,7 @@ class ReviewSession:
     markers: dict[str, ManualFrameMarker] = field(default_factory=dict)
     results: dict[str, ManualFrameResult] = field(default_factory=dict)
     last_response_id: str = ""
+    reset_generation: int = 0
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -835,6 +837,13 @@ def create_review_app(
         in-memory base64 is gone. The base64 is still kept on the live marker for
         immediate analysis/hydrate within the session.
         """
+        with session.lock:
+            if request.reset_generation != session.reset_generation:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Review reset invalidated this manual frame.",
+                )
+
         marker_id = str(uuid.uuid4())
         frame_path = store_manual_frame_image(session.output_dir, marker_id, request.frame_base64)
         marker = ManualFrameMarker(
@@ -846,10 +855,24 @@ def create_review_app(
             status="pending",
             frame_path=frame_path,
         )
+        stale_generation = False
         with session.lock:
-            session.markers[marker_id] = marker
+            stale_generation = request.reset_generation != session.reset_generation
+            if not stale_generation:
+                session.markers[marker_id] = marker
+        if stale_generation:
+            _remove_manual_frame_image(session.output_dir, frame_path)
+            raise HTTPException(
+                status_code=409,
+                detail="Review reset invalidated this manual frame.",
+            )
         return JSONResponse(
-            content={"marker_id": marker_id, "status": "pending", "frame_path": frame_path}
+            content={
+                "marker_id": marker_id,
+                "status": "pending",
+                "frame_path": frame_path,
+                "resetGeneration": request.reset_generation,
+            }
         )
 
     @app.delete("/api/manual-mark/{marker_id}")
@@ -928,7 +951,9 @@ def create_review_app(
         state = build_review_state_from_report(report_data)
         with session.lock:
             session_markers = list(session.markers.values())
+            reset_generation = session.reset_generation
         hydrate_state_with_session_frames(state, session_markers)
+        state["resetGeneration"] = reset_generation
         return JSONResponse(content=state)
 
     @app.post("/api/reset-review")
@@ -964,6 +989,8 @@ def create_review_app(
             write_report_json_atomic(json_path, report_data)
 
             with session.lock:
+                session.reset_generation += 1
+                reset_generation = session.reset_generation
                 session.markers.clear()
                 session.results.clear()
                 session.last_response_id = ""
@@ -983,7 +1010,9 @@ def create_review_app(
                         "manualFrames": [],
                         "reviewer": "",
                         "modified": False,
+                        "resetGeneration": reset_generation,
                     },
+                    "resetGeneration": reset_generation,
                 }
             )
         except HTTPException:
@@ -995,14 +1024,30 @@ def create_review_app(
             save_lock.release()
 
     @app.post("/api/manual-analyze/{marker_id}")
-    async def analyze_manual_frame(marker_id: str) -> JSONResponse:
+    async def analyze_manual_frame(
+        marker_id: str, reset_generation: int | None = None
+    ) -> JSONResponse:
         """Run VLM analysis for one manual frame."""
         # BH14: analyze_single_marker makes a blocking ~120s VLM HTTP call.
         # Running it directly in this async handler would freeze the event loop
         # for the whole analysis, blocking every other request. Offload to the
         # threadpool (mirror of analyze-side /api/analyze BH4). The
         # HTTPException(404) for an unknown marker still propagates unchanged.
+        with session.lock:
+            if reset_generation is not None and reset_generation != session.reset_generation:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Review reset invalidated this manual frame analysis.",
+                )
         outcome = await run_in_threadpool(analyze_single_marker, marker_id)
+        with session.lock:
+            current_generation = session.reset_generation
+        if reset_generation is not None and reset_generation != current_generation:
+            raise HTTPException(
+                status_code=409,
+                detail="Review reset invalidated this manual frame analysis.",
+            )
+        outcome["resetGeneration"] = current_generation
         return JSONResponse(content=outcome)
 
     # Under /api/ so the Host+Origin+session-token guards cover it — a write
