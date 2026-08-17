@@ -538,6 +538,13 @@ function hydrateReportState(snapshot, { showRestoreToast = false } = {}) {
         return;
     }
 
+    // A synchronized snapshot supersedes any annotations currently being edited.
+    // Discard the active editor before replacing reportState so closing a stale
+    // lightbox cannot save its pre-hydration annotations back into the new state.
+    if (currentLightboxFindingId || lightboxAnnotationTool) {
+        closeLightbox({ saveAnnotations: false, restoreFocus: false });
+    }
+
     stateSyncRuntime.suppressEvents = true;
     reportState.findings = migrateFindingStates(snapshot.findings || {});
     reportState.manualFrames = mergeManualFrameImages(reportState.manualFrames, snapshot.manualFrames || []);
@@ -1009,18 +1016,24 @@ function openLightbox(img) {
     }
 }
 
-function closeLightbox() {
+function closeLightbox({ saveAnnotations = true, restoreFocus = true } = {}) {
     const lightbox = document.getElementById('lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
     const lightboxToolbar = document.getElementById('lightbox-toolbar');
 
-    // Save annotations before closing
-    if (lightboxAnnotationTool && currentLightboxFindingId) {
-        lightboxAnnotationTool.saveAnnotations();
+    // Cancel a pending image load so it cannot create a new annotation editor
+    // after a synchronized reset has already dismissed the lightbox.
+    if (lightboxImg) lightboxImg.onload = null;
 
-        // Update thumbnail canvas with new annotations
-        const thumbnailTool = annotationTools.get(currentLightboxFindingId);
-        if (thumbnailTool) {
-            thumbnailTool.refreshFromState();
+    if (lightboxAnnotationTool) {
+        if (saveAnnotations && currentLightboxFindingId) {
+            lightboxAnnotationTool.saveAnnotations();
+
+            // Update thumbnail canvas with new annotations
+            const thumbnailTool = annotationTools.get(currentLightboxFindingId);
+            if (thumbnailTool) {
+                thumbnailTool.refreshFromState();
+            }
         }
         lightboxAnnotationTool.destroy();
     }
@@ -1035,7 +1048,7 @@ function closeLightbox() {
         lightbox.__focusTrapHandler = null;
     }
     // Restore focus to the thumbnail (or whatever opened the lightbox).
-    if (lightboxReturnFocus && typeof lightboxReturnFocus.focus === 'function') {
+    if (restoreFocus && lightboxReturnFocus && typeof lightboxReturnFocus.focus === 'function') {
         lightboxReturnFocus.focus();
     }
     lightboxReturnFocus = null;

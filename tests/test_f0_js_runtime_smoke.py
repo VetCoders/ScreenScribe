@@ -1232,6 +1232,56 @@ def test_f0_hydrate_preserves_manual_frame_image_on_lightweight_snapshot() -> No
     )
 
 
+def test_f0_hydrate_discards_active_annotation_editor() -> None:
+    """A synchronized reset must not let a stale lightbox resurrect annotations."""
+    _run_review_app_smoke(
+        """
+        renderManualFrames = () => {};
+        restoreUIFromState = () => {};
+        restoreMergesToDom = () => {};
+        initAnnotationTools = () => {};
+
+        const lightbox = {
+            classList: { remove() {} },
+            setAttribute() {},
+            removeEventListener() {},
+            __focusTrapHandler: null,
+        };
+        const lightboxImg = { onload: () => { throw new Error('stale onload fired'); } };
+        const lightboxToolbar = { style: { display: 'flex' } };
+        document.getElementById = (id) => ({
+            lightbox,
+            'lightbox-img': lightboxImg,
+            'lightbox-toolbar': lightboxToolbar,
+        }[id] || null);
+
+        let saves = 0;
+        let destroys = 0;
+        currentLightboxFindingId = 'a';
+        lightboxAnnotationTool = {
+            saveAnnotations() { saves += 1; },
+            destroy() { destroys += 1; },
+        };
+
+        hydrateReportState({ findings: {}, manualFrames: [], reviewer: '' });
+        closeLightbox();
+
+        if (saves !== 0 || destroys !== 1) {
+            console.error('hydrate saved or retained the stale editor: ' + JSON.stringify({ saves, destroys }));
+            process.exitCode = 1;
+        }
+        if (lightboxAnnotationTool !== null || currentLightboxFindingId !== null) {
+            console.error('hydrate left stale lightbox state alive');
+            process.exitCode = 1;
+        }
+        if (lightboxImg.onload !== null) {
+            console.error('hydrate did not cancel the pending stale image load');
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
 def test_f0_manual_frame_empty_transcript_placeholder_not_saved() -> None:
     """The "no spoken description" placeholder must never be saved as transcript.
 
