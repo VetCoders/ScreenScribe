@@ -2120,7 +2120,7 @@ body.is-resizing * {
 
 .export-buttons {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--space-sm) var(--space-lg);
     flex-wrap: wrap;
 }
 
@@ -2304,9 +2304,14 @@ footer::before {
     background: var(--surface-hover);
 }
 
+.export-buttons button.btn-reset-review {
+    color: var(--color-error);
+    border-color: color-mix(in srgb, var(--color-error) 55%, var(--border-default));
+}
+
 .export-buttons button.btn-reset-review:hover {
-    color: var(--color-danger, #c43d4b);
-    border-color: var(--color-danger, #c43d4b);
+    color: var(--color-error);
+    border-color: var(--color-error);
     box-shadow: none;
 }
 

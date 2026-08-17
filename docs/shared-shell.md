@@ -84,9 +84,10 @@ never always-visible footer/side buttons.
 - **review**: the `tab-export` panel in `review_sidebar.html` hosts the
   TODO / JSON / ZIP downloads. *Save review* (review-state persistence, not an
   artifact download) stays in the sidebar footer beside *Reset review*. Reset is
-  a confirmed, server-backed return to the generated report: it removes human
-  verdicts, notes, manual merge overlays, manual moments, and review-created
-  work items while preserving the generated findings and unrelated report data.
+  a confirmed, server-backed return to the generated report: it removes the
+  reviewer name, human verdicts, notes, manual merge overlays, manual moments,
+  and review-created work items while preserving the generated findings and
+  unrelated report data.
 
 The review report's findings always exist, so its downloads are not readiness-
 gated; analyze gates because its artifacts do not exist until the user marks a
@@ -106,7 +107,11 @@ count because the rejected card remains visible and auditable.
 
 Human merges are reversible. The draft and saved survivor keep additive
 `member_reviews` / `merged_member_reviews` snapshots of the source findings.
-Unmerge keeps edits made on the survivor while it was merged and restores the
-other members' pre-merge verdicts, priorities, notes, and annotations. Legacy
-saved merges without snapshots remain compatible: the survivor keeps its state
-and absorbed members return as unreviewed.
+Unmerge keeps notes, priorities, and annotations edited on the survivor while it
+was merged, but restores its pre-merge verdict because merge's automatic
+`accepted` state is mechanics rather than a new reviewer decision. Other members
+recover their pre-merge verdicts, priorities, notes, and annotations. Chaining a
+merged survivor into an earlier finding snapshots that survivor's current review
+state before it becomes an absorbed member, so intermediate edits survive the
+eventual unmerge. Legacy saved merges without snapshots remain compatible: the
+survivor keeps its state and absorbed members return as unreviewed.

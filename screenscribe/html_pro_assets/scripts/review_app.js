@@ -1184,12 +1184,6 @@ function bindThumbnailClicks(scope = document) {
 // re-flagged later. A human merge counts as one logical moment, not N cards.
 // =============================================================================
 
-function getEffectiveSeverity(article) {
-    const findingId = article.dataset.findingId;
-    const override = reportState.findings[findingId]?.severity;
-    return override || article.dataset.severity || 'medium';
-}
-
 function getReviewStatus(article) {
     if (article.dataset.verdict === 'accepted') return 'accepted';
     if (article.dataset.verdict === 'rejected') return 'rejected';
@@ -1204,18 +1198,7 @@ function updateReviewMeta() {
     const articles = Array.from(document.querySelectorAll('.finding')).filter(
         (article) => article.dataset.mergedAway !== 'true'
     );
-    const counts = { total: 0, critical: 0, high: 0, medium: 0, low: 0,
-        accepted: 0, rejected: 0, none: 0 };
-    articles.forEach((article) => {
-        const status = getReviewStatus(article);
-        counts[status] += 1;
-        counts.total += 1;
-        if (status !== 'rejected') {
-            const sev = getEffectiveSeverity(article);
-            if (counts[sev] !== undefined) counts[sev] += 1;
-        }
-    });
-    updateFindingsTabCount(counts.total);
+    updateFindingsTabCount(articles.length);
 }
 
 // =============================================================================
@@ -3943,7 +3926,7 @@ function initSidebarResize() {
     }
 
     // Keyboard resize: the separator is focusable and Arrow keys nudge the
-    // width; Home/End jump to the max/min bound (WCAG 2.1.1 keyboard access).
+    // width; Home/End jump to the min/max bound (WCAG 2.1.1 keyboard access).
     const KEY_STEP = 24;
     resizer.tabIndex = 0;
     resizer.addEventListener('keydown', (event) => {

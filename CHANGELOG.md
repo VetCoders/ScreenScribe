@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Fixed: HTML Pro review changes can be safely undone or reset.** Human merge
+  groups now expose Unmerge, preserve source review snapshots through chained
+  merges, restore the survivor's pre-merge verdict without losing later notes,
+  priorities, or annotations, and rebind visible annotation previews after the
+  split. Reset review atomically returns to generated findings, clears the
+  reviewer and manual review state, and reports success once the canonical JSON
+  commit lands even if stale frame cleanup can only emit a warning.
+- **Fixed: the shared review/analyze shell stays usable and accessible at narrow
+  widths.** Oversized moment previews are bounded, analyze header controls wrap
+  on phones, active tabs keep their roving `tabindex` in sync, the sidebar
+  separator reports consistent pixel bounds, and the live Moments counter
+  counts every visible logical card (including rejected cards) plus manual
+  moments.
+
 ## [0.1.18] - 2026-08-08
 
 - **Fixed: `review` opens the report when the video name contains spaces.** The

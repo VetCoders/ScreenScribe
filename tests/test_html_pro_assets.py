@@ -75,6 +75,22 @@ def test_merged_review_controls_use_distinct_ids_from_hidden_originals() -> None
     assert "notesArea.id = 'finding-notes-' + merged.id" not in review_app
 
 
+def test_reset_copy_and_styling_disclose_destructive_scope() -> None:
+    """Reset names the reviewer field it clears and is visibly destructive at rest."""
+    review_app = assets.load_js_review_app()
+    i18n_js = assets.load_js_i18n_runtime()
+    css = load_css()
+
+    assert "updateFindingsTabCount(articles.length)" in review_app
+    assert "getEffectiveSeverity" not in review_app
+    assert "This clears the reviewer name" in i18n_js
+    assert "usunięcie nazwy recenzenta" in i18n_js
+    assert "w tym odrzucone" in i18n_js
+    assert ".export-buttons button.btn-reset-review {" in css
+    assert "color: var(--color-error)" in css
+    assert "--color-danger" not in css
+
+
 def test_stylesheets_have_no_webfont_imports() -> None:
     """The report is an offline evidence bundle: opening it must not trigger
     any network request. No @import in any shipped stylesheet; brand fonts
