@@ -1137,6 +1137,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const isActive = b === btn;
             b.classList.toggle('active', isActive);
             b.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            b.tabIndex = isActive ? 0 : -1;
         });
         document.querySelectorAll('.tab-content').forEach((pane) => pane.classList.remove('active'));
         const pane = document.getElementById('tab-' + target);

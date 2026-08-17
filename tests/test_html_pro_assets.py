@@ -535,6 +535,7 @@ def test_dashboard_js_focus_restore_and_keyboard_controls_presence_smoke() -> No
     assert "initTabKeyboard(tabButtons" in js
     assert "ArrowRight" in tab_js
     assert "setAttribute('aria-selected'" in js
+    assert "b.tabIndex = isActive ? 0 : -1" in js
     assert "nextBtn.focus()" in tab_js
 
     # Lang toggle keeps aria-pressed in sync.
