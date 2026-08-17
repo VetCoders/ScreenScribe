@@ -1561,6 +1561,15 @@ function mergeFindings(ids) {
         Object.entries(entry.member_reviews || {}).forEach(([id, review]) => {
             memberReviews[normId(id)] = snapshotFindingReview(review);
         });
+        // Hidden members cannot change while folded, so their original
+        // snapshots stay authoritative. The visible survivor can be edited,
+        // however; when an earlier finding absorbs this group, preserve that
+        // current state instead of silently reverting it to the first merge's
+        // stale snapshot on the eventual unmerge.
+        const absorbedSurvivorKey = normId(entry.id);
+        memberReviews[absorbedSurvivorKey] = snapshotFindingReview(
+            reportState.findings[absorbedSurvivorKey]
+        );
     });
     members.forEach((id) => {
         const key = normId(id);
@@ -2042,9 +2051,12 @@ function unmergeFindings(survivorId) {
             ? snapshotFindingReview(snapshots[memberId])
             : createDefaultFindingState();
         // Edits made on the merged card belong to the survivor when the group is
-        // split. Other members recover their exact pre-merge review snapshots.
+        // split, but the merge's automatic `accepted` verdict is mechanics, not
+        // a new reviewer decision. Undo therefore restores the survivor's
+        // pre-merge verdict while retaining its current notes, severity and
+        // annotations. Other members recover their exact snapshots.
         reportState.findings[memberId] = memberId === survivorKey
-            ? currentSurvivor
+            ? { ...currentSurvivor, verdict: restored.verdict }
             : restored;
     });
 

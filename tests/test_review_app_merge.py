@@ -268,11 +268,16 @@ def test_unmerge_restores_members_and_keeps_current_survivor_edits() -> None:
         """
         reportState.findings.a.notes = 'edited while merged';
         reportState.findings.a.severity = 'critical';
+        // Exercise the none -> auto-accepted -> undo path explicitly. The
+        // harness starts a as accepted for the other merge assertions.
+        reportState.merges[0].member_reviews.a.verdict = 'none';
         if (!unmergeFindings('a')) throw new Error('unmergeFindings returned false');
         if (reportState.merges.length !== 0) throw new Error('merge entry survived unmerge');
         if (reportState.findings.a.notes !== 'edited while merged'
             || reportState.findings.a.severity !== 'critical')
             throw new Error('current survivor edits were lost');
+        if (reportState.findings.a.verdict !== 'none')
+            throw new Error('unmerge kept the merge-generated accepted verdict');
         if (reportState.findings.b.verdict !== 'rejected'
             || reportState.findings.b.notes !== 'member note')
             throw new Error('absorbed member review was not restored: '

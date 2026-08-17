@@ -233,6 +233,51 @@ def test_merge_chains_third_duplicate_into_existing_group() -> None:
     )
 
 
+def test_rechain_preserves_intermediate_survivor_edits_for_unmerge() -> None:
+    """Absorbing a merge into an earlier survivor must not restore stale review state."""
+    _run(
+        """
+        reportState.findings = {
+            a: { verdict: 'none', severity: 'low', notes: 'original a', annotations: [] },
+            b: { verdict: 'rejected', severity: 'medium', notes: 'original b', annotations: [] },
+            c: { verdict: 'none', severity: null, notes: 'original c', annotations: [] },
+        };
+
+        mergeFindings(['a', 'b']);
+        reportState.findings.a.verdict = 'rejected';
+        reportState.findings.a.severity = 'critical';
+        reportState.findings.a.notes = 'edited intermediate survivor';
+        reportState.findings.a.annotations = [{ type: 'rect', x: 0.25 }];
+
+        const chained = mergeFindings(['a', 'c']);
+        if (!chained || String(chained.id) !== 'c')
+            throw new Error('earlier c did not become chained survivor');
+        if (!unmergeFindings('c')) throw new Error('chained group did not unmerge');
+
+        const restoredA = reportState.findings.a;
+        if (restoredA.verdict !== 'rejected'
+            || restoredA.severity !== 'critical'
+            || restoredA.notes !== 'edited intermediate survivor'
+            || restoredA.annotations[0]?.type !== 'rect') {
+            throw new Error('intermediate survivor edits were lost: ' + JSON.stringify(restoredA));
+        }
+        if (reportState.findings.b.verdict !== 'rejected'
+            || reportState.findings.b.notes !== 'original b') {
+            throw new Error('hidden member snapshot was not retained: '
+                + JSON.stringify(reportState.findings.b));
+        }
+        if (reportState.findings.c.verdict !== 'none')
+            throw new Error('chained survivor kept merge-generated accepted verdict');
+        """,
+        # Make c earlier than the existing a/b merge so c becomes the chained
+        # survivor and a becomes an ordinary member on final unmerge.
+        findings=[
+            {**finding, "timestamp": 0.5} if finding["id"] == "c" else finding
+            for finding in _FINDINGS
+        ],
+    )
+
+
 def test_merge_chains_third_duplicate_with_numeric_ids() -> None:
     """With NUMERIC finding ids, re-merging the survivor (1) + a third duplicate (3)
     must still fold into the existing 1/2 group.
