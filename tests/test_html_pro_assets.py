@@ -489,6 +489,10 @@ def test_mobile_header_uses_non_clipping_grid_and_i18n_keeps_merged_labels() -> 
     i18n_js = assets.load_js_i18n_runtime()
     assert "@media (max-width: 600px)" in css
     assert "grid-template-columns: minmax(0, 1fr) auto" in css
+    assert 'body[data-surface-id="analyze"] .app-header' in css
+    assert 'body[data-surface-id="analyze"] .header-right' in css
+    assert "flex-wrap: wrap" in css
+    assert "justify-content: flex-start" in css
     assert '"mergedEvidence": "Merged evidence frames"' in i18n_js
     assert '"mergedEvidence": "Scalone klatki dowodowe"' in i18n_js
 

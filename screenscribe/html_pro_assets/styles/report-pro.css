@@ -517,6 +517,22 @@ body[data-window-mode="player"] .header-tabs {
         grid-column: 1 / -1;
         grid-row: 3;
     }
+    /* Analyze carries both speech- and UI-language controls in header-right.
+       Give that intrinsic-width group its own wrapping row on phones instead
+       of squeezing the non-wrapping wordmark into a competing grid column. */
+    body[data-surface-id="analyze"] .app-header {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    body[data-surface-id="analyze"] .header-right {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        width: 100%;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+    body[data-surface-id="analyze"] .header-tabs {
+        grid-row: 3;
+    }
 }
 
 /* Language toggle */
