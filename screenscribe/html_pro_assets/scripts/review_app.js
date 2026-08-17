@@ -1563,9 +1563,15 @@ function mergeFindings(ids) {
         // current state instead of silently reverting it to the first merge's
         // stale snapshot on the eventual unmerge.
         const absorbedSurvivorKey = normId(entry.id);
-        memberReviews[absorbedSurvivorKey] = snapshotFindingReview(
-            reportState.findings[absorbedSurvivorKey]
-        );
+        // If it also survives the new group, keep its original pre-merge
+        // snapshot so undo can still remove the automatic accepted verdict.
+        // Its current notes/severity/annotations stay on the live survivor and
+        // are retained separately by unmergeFindings.
+        if (absorbedSurvivorKey !== normId(merged.id)) {
+            memberReviews[absorbedSurvivorKey] = snapshotFindingReview(
+                reportState.findings[absorbedSurvivorKey]
+            );
+        }
     });
     members.forEach((id) => {
         const key = normId(id);

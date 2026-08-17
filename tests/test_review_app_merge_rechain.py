@@ -278,6 +278,40 @@ def test_rechain_preserves_intermediate_survivor_edits_for_unmerge() -> None:
     )
 
 
+def test_rechain_same_survivor_keeps_original_verdict_for_unmerge() -> None:
+    """Rechaining the same survivor must retain its first pre-merge verdict."""
+    _run(
+        """
+        reportState.findings = {
+            a: { verdict: 'rejected', severity: 'low', notes: 'original a', annotations: [] },
+            b: { verdict: 'accepted', severity: 'medium', notes: 'original b', annotations: [] },
+            c: { verdict: 'none', severity: null, notes: 'original c', annotations: [] },
+        };
+
+        mergeFindings(['a', 'b']);
+        reportState.findings.a.severity = 'critical';
+        reportState.findings.a.notes = 'edited merged survivor';
+        reportState.findings.a.annotations = [{ type: 'arrow', x: 0.75 }];
+
+        const chained = mergeFindings(['a', 'c']);
+        if (!chained || String(chained.id) !== 'a')
+            throw new Error('existing earliest survivor did not remain the chained survivor');
+        if (!unmergeFindings('a')) throw new Error('chained group did not unmerge');
+
+        const restoredA = reportState.findings.a;
+        if (restoredA.verdict !== 'rejected') {
+            throw new Error('original survivor verdict was replaced by auto-accept: '
+                + JSON.stringify(restoredA));
+        }
+        if (restoredA.severity !== 'critical'
+            || restoredA.notes !== 'edited merged survivor'
+            || restoredA.annotations[0]?.type !== 'arrow') {
+            throw new Error('current survivor edits were not retained: ' + JSON.stringify(restoredA));
+        }
+        """
+    )
+
+
 def test_merge_chains_third_duplicate_with_numeric_ids() -> None:
     """With NUMERIC finding ids, re-merging the survivor (1) + a third duplicate (3)
     must still fold into the existing 1/2 group.
