@@ -533,15 +533,18 @@ function mergeManualFrameImages(currentFrames, incomingFrames) {
     });
 }
 
-function hydrateReportState(snapshot, { showRestoreToast = false } = {}) {
+function hydrateReportState(
+    snapshot,
+    { showRestoreToast = false, discardActiveEditor = false } = {}
+) {
     if (!snapshot || typeof snapshot !== 'object') {
         return;
     }
 
-    // A synchronized snapshot supersedes any annotations currently being edited.
-    // Discard the active editor before replacing reportState so closing a stale
-    // lightbox cannot save its pre-hydration annotations back into the new state.
-    if (currentLightboxFindingId || lightboxAnnotationTool) {
+    // Reset is the only hydration that deliberately invalidates an active
+    // annotation edit. Ordinary draft/disk/cross-window hydration must not close
+    // the lightbox and silently discard a drawing in progress.
+    if (discardActiveEditor && (currentLightboxFindingId || lightboxAnnotationTool)) {
         closeLightbox({ saveAnnotations: false, restoreFocus: false });
     }
 
@@ -2480,13 +2483,16 @@ async function resetReview() {
         getOriginalFindingsList().forEach((finding) => {
             findings[normId(finding.id)] = createDefaultFindingState();
         });
-        hydrateReportState({
-            findings,
-            manualFrames: [],
-            merges: [],
-            reviewer: '',
-            modified: false,
-        });
+        hydrateReportState(
+            {
+                findings,
+                manualFrames: [],
+                merges: [],
+                reviewer: '',
+                modified: false,
+            },
+            { discardActiveEditor: true }
+        );
         try {
             localStorage.removeItem(stateSyncRuntime.draftKey);
         } catch (error) {

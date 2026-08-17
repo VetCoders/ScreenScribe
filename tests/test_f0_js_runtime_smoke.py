@@ -1263,7 +1263,10 @@ def test_f0_hydrate_discards_active_annotation_editor() -> None:
             destroy() { destroys += 1; },
         };
 
-        hydrateReportState({ findings: {}, manualFrames: [], reviewer: '' });
+        hydrateReportState(
+            { findings: {}, manualFrames: [], reviewer: '' },
+            { discardActiveEditor: true }
+        );
         closeLightbox();
 
         if (saves !== 0 || destroys !== 1) {
@@ -1276,6 +1279,39 @@ def test_f0_hydrate_discards_active_annotation_editor() -> None:
         }
         if (lightboxImg.onload !== null) {
             console.error('hydrate did not cancel the pending stale image load');
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
+def test_f0_ordinary_hydrate_preserves_active_annotation_editor() -> None:
+    """Unrelated cross-window hydration must not discard a drawing in progress."""
+    _run_review_app_smoke(
+        """
+        renderManualFrames = () => {};
+        restoreUIFromState = () => {};
+        restoreMergesToDom = () => {};
+        initAnnotationTools = () => {};
+
+        let saves = 0;
+        let destroys = 0;
+        currentLightboxFindingId = 'a';
+        const activeTool = {
+            saveAnnotations() { saves += 1; },
+            destroy() { destroys += 1; },
+        };
+        lightboxAnnotationTool = activeTool;
+
+        hydrateReportState({ findings: {}, manualFrames: [], reviewer: '' });
+
+        if (saves !== 0 || destroys !== 0 || lightboxAnnotationTool !== activeTool) {
+            console.error('ordinary hydrate discarded the active editor: '
+                + JSON.stringify({ saves, destroys, retained: lightboxAnnotationTool === activeTool }));
+            process.exitCode = 1;
+        }
+        if (currentLightboxFindingId !== 'a') {
+            console.error('ordinary hydrate cleared the active finding id');
             process.exitCode = 1;
         }
         """
