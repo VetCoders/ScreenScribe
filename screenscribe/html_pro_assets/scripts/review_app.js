@@ -2043,8 +2043,9 @@ function unmergeFindings(survivorId) {
     const currentSurvivor = snapshotFindingReview(reportState.findings[survivorKey]);
     const memberIds = Array.from(new Set((entry.member_ids || []).map(normId)));
     memberIds.forEach((memberId) => {
-        const restored = snapshots[memberId]
-            ? snapshotFindingReview(snapshots[memberId])
+        const memberSnapshot = snapshots[memberId];
+        const restored = memberSnapshot
+            ? snapshotFindingReview(memberSnapshot)
             : createDefaultFindingState();
         // Edits made on the merged card belong to the survivor when the group is
         // split, but the merge's automatic `accepted` verdict is mechanics, not
@@ -2052,7 +2053,10 @@ function unmergeFindings(survivorId) {
         // pre-merge verdict while retaining its current notes, severity and
         // annotations. Other members recover their exact snapshots.
         reportState.findings[memberId] = memberId === survivorKey
-            ? { ...currentSurvivor, verdict: restored.verdict }
+            ? {
+                ...currentSurvivor,
+                verdict: memberSnapshot ? restored.verdict : currentSurvivor.verdict,
+            }
             : restored;
     });
 

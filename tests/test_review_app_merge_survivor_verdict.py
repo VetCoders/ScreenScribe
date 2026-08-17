@@ -169,3 +169,38 @@ def test_human_merge_preserves_survivor_accepted_verdict() -> None:
             """
         )
     )
+
+
+def test_legacy_unmerge_preserves_survivor_verdict_without_snapshot() -> None:
+    """Legacy merge data without member snapshots keeps the survivor verdict."""
+    _run(
+        textwrap.dedent(
+            """
+            reportState.findings = {
+                '17': {
+                    verdict: 'rejected', severity: 'high', notes: 'keep survivor', annotations: [],
+                },
+                '18': {
+                    verdict: 'none', severity: null, notes: '', annotations: [],
+                },
+            };
+            reportState.merges = [{
+                id: 17,
+                member_ids: [17, 18],
+                // Saved before merged_member_reviews/member_reviews existed.
+                member_reviews: {},
+            }];
+
+            if (!unmergeFindings('17')) throw new Error('legacy group did not unmerge');
+            const survivor = reportState.findings['17'];
+            if (survivor.verdict !== 'rejected'
+                || survivor.severity !== 'high'
+                || survivor.notes !== 'keep survivor') {
+                throw new Error('legacy survivor state was overwritten: ' + JSON.stringify(survivor));
+            }
+            if (reportState.findings['18'].verdict !== 'none') {
+                throw new Error('legacy absorbed member did not use the unreviewed fallback');
+            }
+            """
+        )
+    )
