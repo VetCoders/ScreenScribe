@@ -939,6 +939,8 @@ def create_review_app(
         review-created work items, manual markers/results, and their image files
         are removed. The JSON replace lands before session state or image files
         are cleared, so a failed disk write leaves the current review intact.
+        Once that canonical replace commits, stale image cleanup is best-effort:
+        it must not turn a successful durable reset into a misleading HTTP 500.
         """
         await save_lock.acquire()
         try:
@@ -965,7 +967,13 @@ def create_review_app(
                 session.markers.clear()
                 session.results.clear()
                 session.last_response_id = ""
-            _sweep_orphan_manual_frames(session.output_dir, set())
+            try:
+                _sweep_orphan_manual_frames(session.output_dir, set())
+            except Exception as cleanup_exc:
+                logger.warning(
+                    "Review reset committed, but manual-frame cleanup failed: %s",
+                    cleanup_exc,
+                )
 
             return JSONResponse(
                 content={

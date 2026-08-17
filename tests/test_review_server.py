@@ -1050,6 +1050,47 @@ def test_review_server_reset_is_idempotent(
     assert json.loads(json_path.read_text(encoding="utf-8")) == baseline
 
 
+def test_review_server_reset_stays_successful_when_frame_cleanup_fails(
+    review_workspace: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A post-commit frame cleanup error must not report the durable reset as failed."""
+    import json
+
+    output_dir, report_file, video_path = review_workspace
+    json_path = output_dir / "screen_report.json"
+    json_path.write_text(
+        json.dumps(
+            {
+                "video": "screen.mov",
+                "findings": [{"id": 1}],
+                "human_review": {
+                    "reviewer": "alex",
+                    "findings": {"1": {"verdict": "accepted"}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_cleanup(_output_dir: Path, _keep: set[str]) -> int:
+        raise OSError("manual frame is locked")
+
+    monkeypatch.setattr(
+        "screenscribe.review_server._sweep_orphan_manual_frames",
+        fail_cleanup,
+    )
+    app = create_review_app(output_dir, report_file.name, video_path, _config())
+    response = TestClient(app).post("/api/reset-review")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "reset"
+    saved = json.loads(json_path.read_text(encoding="utf-8"))
+    assert "human_review" not in saved
+    assert "Review reset committed, but manual-frame cleanup failed" in caplog.text
+
+
 def test_review_server_reloads_human_review_from_disk_after_fresh_load(
     review_workspace: tuple[Path, Path, Path],
 ) -> None:
