@@ -2073,6 +2073,11 @@ function unmergeFindingGroup(survivorId) {
         return false;
     }
     restoreMergesToDom();
+    // applyMergeToDom binds the survivor id to the generated merged card. Once
+    // the final group is removed that card is detached and the original finding
+    // becomes visible again, so rebuild the preview map before future lightbox
+    // edits target a stale container.
+    initAnnotationTools();
     restoreUIFromState();
     initMergeUI();
     updateMergeBar();

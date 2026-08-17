@@ -1335,6 +1335,43 @@ def test_f0_hydrate_incoming_image_wins_over_current() -> None:
     )
 
 
+def test_f0_unmerge_rebinds_annotation_previews_to_restored_cards() -> None:
+    """The last unmerge must rebuild annotation bindings after removing its merged card."""
+    _run_review_app_smoke(
+        """
+        reportState.findings = {
+            a: { verdict: 'accepted', severity: 'high', notes: '', annotations: [] },
+            b: { verdict: 'none', severity: null, notes: '', annotations: [] },
+        };
+        reportState.merges = [{
+            id: 'a',
+            member_ids: ['a', 'b'],
+            member_reviews: {
+                a: { verdict: 'none', severity: null, notes: '', annotations: [] },
+                b: { verdict: 'none', severity: null, notes: '', annotations: [] },
+            },
+        }];
+
+        restoreMergesToDom = () => {};
+        restoreUIFromState = () => {};
+        initMergeUI = () => {};
+        updateMergeBar = () => {};
+        scheduleSharedStateSync = () => {};
+        showNotification = () => {};
+        let annotationRebinds = 0;
+        initAnnotationTools = () => { annotationRebinds += 1; };
+
+        if (!unmergeFindingGroup('a')) {
+            console.error('unmergeFindingGroup returned false');
+            process.exitCode = 1;
+        } else if (annotationRebinds !== 1) {
+            console.error('visible original card was not rebound after unmerge: ' + annotationRebinds);
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
 def test_f0_manual_frame_edit_note_persists_and_keeps_transcript() -> None:
     """R12: editing a manual-frame note PATCHes the new note to the server and
     keeps it in local state, preserving the transcript verbatim.
