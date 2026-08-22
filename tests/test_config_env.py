@@ -609,6 +609,42 @@ class TestKeyEndpointMismatchWarning:
         warnings = config.mismatch_warnings()
         assert not any("mismatch" in w.lower() for w in warnings)
 
+    @pytest.mark.parametrize(
+        ("endpoint", "expected"),
+        [
+            ("https://openai.com/v1/responses", "openai"),
+            ("https://api.openai.com/v1/responses", "openai"),
+            ("https://libraxis.cloud/v1/responses", "libraxis"),
+            ("https://api.libraxis.cloud/v1/responses", "libraxis"),
+        ],
+    )
+    def test_endpoint_provider_accepts_only_canonical_domain_boundaries(
+        self, endpoint: str, expected: str
+    ) -> None:
+        assert ScreenScribeConfig._endpoint_provider(endpoint) == expected
+
+    @pytest.mark.parametrize(
+        "endpoint",
+        [
+            "https://openai.com.evil.example/v1/responses",
+            "https://evilopenai.com/v1/responses",
+            "https://libraxis.cloud.evil.example/v1/responses",
+            "https://evillibraxis.cloud/v1/responses",
+            "not-a-url-with-openai.com-in-its-path",
+        ],
+    )
+    def test_endpoint_provider_rejects_lookalike_hosts(self, endpoint: str) -> None:
+        assert ScreenScribeConfig._endpoint_provider(endpoint) is None
+
+    def test_declared_openai_provider_blocks_lookalike_endpoint(self) -> None:
+        config = ScreenScribeConfig(
+            provider="openai",
+            llm_api_key="sk-openai-secret",  # pragma: allowlist secret
+            llm_endpoint="https://openai.com.evil.example/v1/responses",
+        )
+        errors = config.validate(providers={"llm"})
+        assert any("endpoint does not match" in error for error in errors)
+
     def test_no_key_does_not_warn_about_mismatch(self) -> None:
         config = ScreenScribeConfig()  # defaults: libraxis endpoints, no keys
         warnings = config.mismatch_warnings()
