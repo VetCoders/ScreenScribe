@@ -568,6 +568,9 @@ function hydrateReportState(
     if (resetHydration && manualFrameRuntime.currentFrame) {
         closeManualFrameModal();
     }
+    if (resetHydration && voiceNoteRuntime.recognition) {
+        discardVoiceNoteCapture();
+    }
 
     stateSyncRuntime.suppressEvents = true;
     reportState.findings = migrateFindingStates(snapshot.findings || {});
@@ -3868,6 +3871,34 @@ function stopVoiceNoteCapture() {
     }
 }
 
+function discardVoiceNoteCapture() {
+    const recognition = voiceNoteRuntime.recognition;
+    const button = voiceNoteRuntime.activeButton;
+    const findingId = voiceNoteRuntime.activeFindingId;
+
+    // Invalidate shared state and handlers before aborting: some browser
+    // implementations deliver end/error synchronously, and an already queued
+    // result callback must no longer be able to append text after reset.
+    voiceNoteRuntime.recognition = null;
+    voiceNoteRuntime.activeButton = null;
+    voiceNoteRuntime.activeFindingId = null;
+    if (recognition) {
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        try {
+            if (typeof recognition.abort === 'function') {
+                recognition.abort();
+            } else {
+                recognition.stop();
+            }
+        } catch (e) {
+            // noop
+        }
+    }
+    setVoiceNoteUi(button, findingId, false, '');
+}
+
 function startVoiceNoteCapture(button, findingId) {
     const Recognition = getSpeechRecognitionCtor();
     if (!Recognition) {
@@ -3881,6 +3912,7 @@ function startVoiceNoteCapture(button, findingId) {
     }
 
     const recognition = new Recognition();
+    const operationGeneration = normalizeResetGeneration(reportState.resetGeneration);
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = currentLang === 'pl' ? 'pl-PL' : 'en-US';
@@ -3892,6 +3924,12 @@ function startVoiceNoteCapture(button, findingId) {
     setVoiceNoteUi(button, findingId, true, t('review.voiceRecording'));
 
     recognition.onresult = (event) => {
+        if (
+            voiceNoteRuntime.recognition !== recognition
+            || normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration
+        ) {
+            return;
+        }
         const finalChunks = [];
         for (let i = event.resultIndex; i < event.results.length; i += 1) {
             const result = event.results[i];
@@ -3906,6 +3944,12 @@ function startVoiceNoteCapture(button, findingId) {
     };
 
     recognition.onerror = (event) => {
+        if (
+            voiceNoteRuntime.recognition !== recognition
+            || normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration
+        ) {
+            return;
+        }
         const message = event.error === 'not-allowed'
             ? t('review.voiceDenied')
             : `${t('review.voiceError')}: ${event.error}`;
