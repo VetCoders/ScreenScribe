@@ -328,7 +328,13 @@ class ScreenScribeConfig:
             return None
         if not parsed_host:
             return None
-        host = parsed_host.rstrip(".").lower()
+        try:
+            # HTTP clients IDNA-normalize Unicode label separators (for example
+            # U+3002) before DNS. Classify that same canonical ASCII host so the
+            # credential boundary cannot disagree with the eventual request.
+            host = parsed_host.encode("idna").decode("ascii").rstrip(".").lower()
+        except UnicodeError:
+            return None
         if host == "libraxis.cloud" or host.endswith(".libraxis.cloud"):
             return "libraxis"
         if host == "openai.com" or host.endswith(".openai.com"):

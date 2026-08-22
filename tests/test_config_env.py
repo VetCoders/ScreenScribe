@@ -614,8 +614,11 @@ class TestKeyEndpointMismatchWarning:
         [
             ("https://openai.com/v1/responses", "openai"),
             ("https://api.openai.com/v1/responses", "openai"),
+            ("https://api.openai\u3002com/v1/responses", "openai"),
+            ("https://api.openai\uff61com/v1/responses", "openai"),
             ("https://libraxis.cloud/v1/responses", "libraxis"),
             ("https://api.libraxis.cloud/v1/responses", "libraxis"),
+            ("https://api.libraxis\uff0ecloud/v1/responses", "libraxis"),
         ],
     )
     def test_endpoint_provider_accepts_only_canonical_domain_boundaries(
@@ -644,6 +647,14 @@ class TestKeyEndpointMismatchWarning:
         )
         errors = config.validate(providers={"llm"})
         assert any("endpoint does not match" in error for error in errors)
+
+    def test_unicode_separator_cannot_hide_cross_provider_credential(self) -> None:
+        config = ScreenScribeConfig(
+            llm_api_key="sk-vista-secret",  # pragma: allowlist secret
+            llm_endpoint="https://api.openai\u3002com/v1/responses",
+        )
+        errors = config.validate(providers={"llm"})
+        assert any("would be sent to OpenAI" in error for error in errors)
 
     def test_no_key_does_not_warn_about_mismatch(self) -> None:
         config = ScreenScribeConfig()  # defaults: libraxis endpoints, no keys
