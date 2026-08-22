@@ -90,8 +90,8 @@ never always-visible footer/side buttons.
   unrelated report data. Each reset advances a server-issued generation carried
   durably in the report JSON and carried by review-state, Save payloads,
   cross-window snapshots, and manual-frame requests. A newer generation outranks
-  snapshot timestamps, so delayed Save/Add/Analyze work from before the reset
-  cannot recreate cleared review state or moments, even after a server restart.
+  snapshot timestamps, so delayed Save/Add/Analyze/note/priority work from before
+  the reset cannot recreate cleared review state or moments, even after a server restart.
   Ordinary same-generation hydration preserves an annotation edit in progress;
   reset hydration discards that stale editor explicitly.
 

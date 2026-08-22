@@ -157,3 +157,69 @@ def test_manual_analysis_started_before_reset_does_not_upsert_afterward() -> Non
         }
         """
     )
+
+
+def test_manual_note_patch_started_before_reset_does_not_upsert_afterward() -> None:
+    """A delayed note PATCH continuation cannot recreate a reset frame."""
+    _run_review_app_smoke(
+        """
+        reportState.resetGeneration = 0;
+        reportState.manualFrames = [
+            { marker_id: 'm1', timestamp: 1, transcript: 'spoken', notes: 'old' },
+        ];
+
+        let resolvePatch;
+        fetch = async () => await new Promise((resolve) => { resolvePatch = resolve; });
+        let upserts = 0;
+        let renders = 0;
+        upsertManualFrame = () => { upserts += 1; };
+        renderManualFrames = () => { renders += 1; };
+        showNotification = () => {};
+
+        const pending = updateManualFrameMarker('m1', 'spoken', 'stale edit');
+        await Promise.resolve();
+        reportState.resetGeneration = 1;
+        reportState.manualFrames = [];
+        resolvePatch({ ok: true, status: 200, json: async () => ({}) });
+        await pending;
+
+        if (upserts !== 0 || renders !== 0 || reportState.manualFrames.length !== 0) {
+            console.error('stale note PATCH resurrected the frame: '
+                + JSON.stringify({ upserts, renders, frames: reportState.manualFrames }));
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
+def test_manual_priority_patch_started_before_reset_does_not_upsert_afterward() -> None:
+    """A delayed priority PATCH continuation cannot recreate a reset frame."""
+    _run_review_app_smoke(
+        """
+        reportState.resetGeneration = 0;
+        reportState.manualFrames = [
+            { marker_id: 'm1', timestamp: 1, severity: 'high', result: { severity: 'high' } },
+        ];
+
+        let resolvePatch;
+        fetch = async () => await new Promise((resolve) => { resolvePatch = resolve; });
+        let upserts = 0;
+        let renders = 0;
+        upsertManualFrame = () => { upserts += 1; };
+        renderManualFrames = () => { renders += 1; };
+        showNotification = () => {};
+
+        const pending = changeManualFrameSeverity('m1', 'low');
+        await Promise.resolve();
+        reportState.resetGeneration = 1;
+        reportState.manualFrames = [];
+        resolvePatch({ ok: true, status: 200, json: async () => ({}) });
+        await pending;
+
+        if (upserts !== 0 || renders !== 0 || reportState.manualFrames.length !== 0) {
+            console.error('stale priority PATCH resurrected the frame: '
+                + JSON.stringify({ upserts, renders, frames: reportState.manualFrames }));
+            process.exitCode = 1;
+        }
+        """
+    )

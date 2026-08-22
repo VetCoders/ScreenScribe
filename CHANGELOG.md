@@ -10,8 +10,8 @@
   reviewer and manual review state, and reports success once the canonical JSON
   commit lands even if stale frame cleanup can only emit a warning. A monotonic
   reset generation is persisted across server restarts and now invalidates stale
-  Save as well as delayed manual-frame Add/Analyze work without discarding
-  annotation edits during ordinary same-generation synchronization.
+  Save as well as delayed manual-frame Add/Analyze/note/priority work without
+  discarding annotation edits during ordinary same-generation synchronization.
 - **Fixed: the shared review/analyze shell stays usable and accessible at narrow
   widths.** Oversized moment previews are bounded, analyze header controls wrap
   on phones, active tabs keep their roving `tabindex` in sync, the sidebar

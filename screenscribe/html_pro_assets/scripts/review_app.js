@@ -3392,6 +3392,7 @@ async function deleteManualFrame(markerId) {
 // fall back to the previously persisted text, never that the UI is wrong.
 async function updateManualFrameMarker(markerId, transcript, notes) {
     const id = String(markerId);
+    const operationGeneration = normalizeResetGeneration(reportState.resetGeneration);
     const existing = reportState.manualFrames.find(
         (frame) => String(frame.marker_id) === id
     );
@@ -3418,6 +3419,10 @@ async function updateManualFrameMarker(markerId, transcript, notes) {
         if (DEBUG) console.debug('Manual frame update failed:', error);
     }
 
+    if (normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration) {
+        return;
+    }
+
     if (serverRejected) {
         showNotification(t('review.manualFrameSaveFailed'));
         return;
@@ -3438,6 +3443,7 @@ async function updateManualFrameMarker(markerId, transcript, notes) {
 // restores the select to the last persisted value.
 async function changeManualFrameSeverity(markerId, severity) {
     const id = String(markerId);
+    const operationGeneration = normalizeResetGeneration(reportState.resetGeneration);
     const existing = reportState.manualFrames.find(
         (frame) => String(frame.marker_id) === id
     );
@@ -3453,6 +3459,10 @@ async function changeManualFrameSeverity(markerId, severity) {
         ok = response.ok;
     } catch (error) {
         if (DEBUG) console.debug('Manual frame priority change failed:', error);
+    }
+
+    if (normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration) {
+        return;
     }
 
     if (!ok) {
