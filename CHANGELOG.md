@@ -15,6 +15,8 @@
   synchronization. A stale Add still returns its generation conflict if
   best-effort image cleanup can only emit a warning. Review-state snapshots are
   serialized with reset and older-epoch responses are ignored by the browser.
+  Reset also discards active manual-frame recordings without sending them to STT,
+  and invalidates any transcription already running in the prior generation.
 - **Fixed: the shared review/analyze shell stays usable and accessible at narrow
   widths.** Oversized moment previews are bounded, analyze header controls wrap
   on phones, active tabs keep their roving `tabindex` in sync, the sidebar

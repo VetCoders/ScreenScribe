@@ -790,6 +790,7 @@ def create_review_app(
     @app.post("/api/stt")
     async def transcribe_voice(
         audio: Annotated[UploadFile, File(description="Browser-recorded audio")],
+        reset_generation: int | None = None,
     ) -> JSONResponse:
         """Transcribe spoken description for a manual frame."""
         # P2-10: read in chunks and abort the moment the running total crosses
@@ -806,6 +807,11 @@ def create_review_app(
         # can compare-and-set: a VLM/STT that finished first must not be clobbered
         # by this call landing later (mirror of analyze-side).
         with session.lock:
+            if reset_generation is not None and reset_generation != session.reset_generation:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Review reset invalidated this voice transcription.",
+                )
             previous_response_id = session.last_response_id
 
         try:
@@ -829,9 +835,15 @@ def create_review_app(
             # operation already advanced the chain. NOTE: STT and VLM still share
             # one chain field here (as on the analyze side); full STT/VLM chain
             # separation is deferred design.
-            advance_response_id_cas(
-                session, previous_response_id, result.response_id, logger=logger
-            )
+            with session.lock:
+                if reset_generation is not None and reset_generation != session.reset_generation:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Review reset invalidated this voice transcription.",
+                    )
+                advance_response_id_cas(
+                    session, previous_response_id, result.response_id, logger=logger
+                )
             return JSONResponse(
                 content=serialize_stt_result(result, quality_warning=quality_warning)
             )

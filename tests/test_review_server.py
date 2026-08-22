@@ -1095,6 +1095,60 @@ def test_reset_generation_rejects_manual_mark_that_finishes_after_reset(
     assert not manual_dir.exists() or list(manual_dir.iterdir()) == []
 
 
+def test_reset_generation_rejects_stt_that_finishes_after_reset(
+    review_workspace: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A prior-epoch transcription cannot advance the reset conversation chain."""
+    import json
+    import threading
+
+    output_dir, report_file, video_path = review_workspace
+    (output_dir / "screen_report.json").write_text(
+        json.dumps({"video": "screen.mov", "findings": [{"id": 1}]}),
+        encoding="utf-8",
+    )
+    entered_stt = threading.Event()
+    release_stt = threading.Event()
+
+    def blocking_transcribe(*args: Any, **kwargs: Any) -> TranscriptionResult:
+        entered_stt.set()
+        assert release_stt.wait(timeout=5), "test did not release the blocked STT"
+        return TranscriptionResult(
+            text="stale voice note",
+            segments=[Segment(id=1, start=0.0, end=1.0, text="stale voice note")],
+            language="en",
+            response_id="stale-response-id",
+        )
+
+    monkeypatch.setattr(
+        "screenscribe.transcribe.transcribe_audio_bytes",
+        blocking_transcribe,
+    )
+    app = create_review_app(output_dir, report_file.name, video_path, _config())
+    stt_result: dict[str, Any] = {}
+
+    def post_stt() -> None:
+        stt_result["response"] = TestClient(app).post(
+            "/api/stt?reset_generation=0",
+            files={"audio": ("a.webm", VALID_BROWSER_AUDIO, "audio/webm")},
+        )
+
+    worker = threading.Thread(target=post_stt)
+    worker.start()
+    assert entered_stt.wait(timeout=5), "STT request never reached the blocked provider"
+    try:
+        reset = TestClient(app).post("/api/reset-review")
+    finally:
+        release_stt.set()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert reset.status_code == 200
+    assert stt_result["response"].status_code == 409
+    assert _reach_review_session(app).last_response_id == ""
+
+
 def test_stale_manual_mark_keeps_409_when_image_cleanup_fails(
     review_workspace: tuple[Path, Path, Path],
     monkeypatch: pytest.MonkeyPatch,

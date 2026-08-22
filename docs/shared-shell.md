@@ -98,7 +98,10 @@ never always-visible footer/side buttons.
   invalidated Add is best-effort: cleanup failures are warnings and do not turn a
   successful reset or generation-conflict response into a misleading HTTP 500.
   Review-state snapshots are serialized with Save/reset, and a delayed snapshot
-  from an older generation is discarded rather than relabeled or restored.
+  from an older generation is discarded rather than relabeled or restored. Reset
+  cancels an active manual-frame recording without transcribing it; an STT request
+  already in flight carries its starting generation and cannot advance the new
+  conversation chain after reset.
 
 The review report's findings always exist, so its downloads are not readiness-
 gated; analyze gates because its artifacts do not exist until the user marks a

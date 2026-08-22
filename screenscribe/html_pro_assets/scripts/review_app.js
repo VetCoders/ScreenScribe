@@ -569,7 +569,7 @@ function hydrateReportState(
         closeLightbox({ saveAnnotations: false, restoreFocus: false });
     }
     if (resetHydration && manualFrameRuntime.currentFrame) {
-        closeManualFrameModal();
+        closeManualFrameModal({ discardRecording: true });
     }
     if (resetHydration && voiceNoteRuntime.recognition) {
         discardVoiceNoteCapture();
@@ -3093,6 +3093,8 @@ class ReviewVoiceRecorder {
         // Tracks whether the recognizer actually returned text for the current
         // take, so the "done" status never claims speech was added when none was.
         this.hasTranscript = false;
+        this.recordingGeneration = 0;
+        this.discarded = false;
         this.onTranscript = onTranscript;
         this.onStatus = onStatus;
         this.transport = window.ScreenScribeLib.createSttTransport({
@@ -3127,11 +3129,24 @@ class ReviewVoiceRecorder {
             statusTranscribing: t('review.voiceTranscribing'),
             statusReady: `${t('review.voiceReady')}. ${t('review.voiceMicOff')}`,
             fallbackMessage: 'Voice transcription failed.',
+            endpoint: () => `/api/stt?reset_generation=${this.recordingGeneration}`,
         });
     }
 
     async start() {
+        this.recordingGeneration = normalizeResetGeneration(reportState.resetGeneration);
+        this.discarded = false;
         const started = await this.transport.start();
+        if (
+            started
+            && (
+                this.discarded
+                || normalizeResetGeneration(reportState.resetGeneration) !== this.recordingGeneration
+            )
+        ) {
+            this.discard();
+            return false;
+        }
         if (!started) showNotification(t('review.voiceDenied'));
         return started;
     }
@@ -3148,6 +3163,13 @@ class ReviewVoiceRecorder {
     destroy() {
         this.transport.destroy();
         this.isRecording = this.transport.isRecording;
+    }
+
+    discard() {
+        this.discarded = true;
+        this.transport.cancel();
+        this.isRecording = this.transport.isRecording;
+        this.isTranscribing = false;
     }
 
     get stream() {
@@ -3226,11 +3248,15 @@ function openManualFrameModal(frame) {
     if (firstFocusable) firstFocusable.focus();
 }
 
-function closeManualFrameModal() {
+function closeManualFrameModal({ discardRecording = false } = {}) {
     const modal = document.getElementById('manualFrameModal');
     if (!modal) return;
 
-    manualFrameRuntime.recorder?.destroy();
+    if (discardRecording) {
+        manualFrameRuntime.recorder?.discard();
+    } else {
+        manualFrameRuntime.recorder?.destroy();
+    }
     manualFrameRuntime.currentFrame = null;
     modal.hidden = true;
     document.body.classList.remove('modal-open');

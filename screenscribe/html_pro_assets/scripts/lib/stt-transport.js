@@ -29,7 +29,10 @@
         options?.onTranscribingChange?.(true);
         options?.onStatus?.(options?.statusTranscribing, 'busy');
         try {
-            const response = await fetch('/api/stt', {
+            const endpoint = typeof options?.endpoint === 'function'
+                ? options.endpoint()
+                : (options?.endpoint || '/api/stt');
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 body: formData,
             });
@@ -60,6 +63,7 @@
             audioChunks: [],
             stream: null,
             isRecording: false,
+            discardOnStop: false,
 
             async init() {
                 try {
@@ -80,6 +84,7 @@
                 }
 
                 this.audioChunks = [];
+                this.discardOnStop = false;
                 try {
                     this.mediaRecorder = new MediaRecorder(this.stream, {
                         mimeType: options?.mimeType || 'audio/webm;codecs=opus',
@@ -96,6 +101,12 @@
                 };
 
                 this.mediaRecorder.onstop = async () => {
+                    if (this.discardOnStop) {
+                        this.discardOnStop = false;
+                        this.audioChunks = [];
+                        options?.onDiscard?.(0);
+                        return;
+                    }
                     const audioSize = this.audioChunks.reduce((total, chunk) => {
                         const size = Number(chunk?.size || 0);
                         return total + (Number.isFinite(size) ? size : 0);
@@ -149,6 +160,16 @@
                     this.stop();
                     return;
                 }
+                this.releaseStreamTracks();
+            },
+
+            cancel() {
+                this.discardOnStop = true;
+                if (this.mediaRecorder && this.isRecording) {
+                    this.stop();
+                    return;
+                }
+                this.audioChunks = [];
                 this.releaseStreamTracks();
             },
         };

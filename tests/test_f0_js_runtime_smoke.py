@@ -1525,6 +1525,71 @@ def test_f0_ordinary_hydrate_preserves_active_annotation_editor() -> None:
     )
 
 
+def test_f0_reset_discards_manual_frame_recording_without_stt() -> None:
+    """Closing the manual-frame modal for reset drops audio instead of posting it."""
+    _run_review_app_smoke(
+        """
+        let fetchCalls = 0;
+        let trackStops = 0;
+        fetch = async () => {
+            fetchCalls += 1;
+            return { ok: true, status: 200, json: async () => ({ text: 'stale' }) };
+        };
+        navigator.mediaDevices.getUserMedia = async () => ({
+            getTracks: () => [{ stop: () => { trackStops += 1; } }],
+        });
+
+        class FakeMediaRecorder {
+            constructor() {
+                this.ondataavailable = null;
+                this.onstop = null;
+                FakeMediaRecorder.instance = this;
+            }
+            start() {}
+            stop() {
+                this.ondataavailable?.({ data: { size: 8 } });
+                this.stopPromise = Promise.resolve(this.onstop?.());
+            }
+        }
+        MediaRecorder = FakeMediaRecorder;
+
+        const modal = {
+            hidden: false,
+            __focusTrapHandler: null,
+            removeEventListener() {},
+        };
+        document.getElementById = (id) => id === 'manualFrameModal' ? modal : null;
+        restoreUIFromState = () => {};
+        restoreMergesToDom = () => {};
+        renderManualFrames = () => {};
+        initAnnotationTools = () => {};
+
+        manualFrameRuntime.recorder = new ReviewVoiceRecorder(() => {}, () => {});
+        manualFrameRuntime.currentFrame = { timestamp: 1 };
+        reportState.resetGeneration = 0;
+        if (!await manualFrameRuntime.recorder.start()) {
+            throw new Error('manual-frame recorder did not start');
+        }
+
+        hydrateReportState({
+            findings: {}, manualFrames: [], reviewer: '', resetGeneration: 1,
+        });
+        await FakeMediaRecorder.instance.stopPromise;
+
+        if (fetchCalls !== 0 || trackStops !== 1) {
+            console.error('reset transcribed or leaked recording resources: '
+                + JSON.stringify({ fetchCalls, trackStops }));
+            process.exitCode = 1;
+        }
+        if (manualFrameRuntime.currentFrame !== null
+            || manualFrameRuntime.recorder.isRecording) {
+            console.error('reset left manual-frame recording active');
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
 def test_f0_manual_frame_empty_transcript_placeholder_not_saved() -> None:
     """The "no spoken description" placeholder must never be saved as transcript.
 
