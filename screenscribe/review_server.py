@@ -156,6 +156,15 @@ def _manual_frame_data_url(frame_base64: str) -> str:
 
 
 MANUAL_FRAMES_DIRNAME = "manual_frames"
+REVIEW_RESET_GENERATION_KEY = "review_reset_generation"
+
+
+def _report_reset_generation(report_data: dict[str, Any]) -> int:
+    """Return the persisted review-reset epoch, defaulting legacy reports to zero."""
+    value = report_data.get(REVIEW_RESET_GENERATION_KEY, 0)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
 
 
 def _validated_image_ext(frame_bytes: bytes) -> str:
@@ -412,6 +421,15 @@ def create_review_app(
         except Exception:
             Path(tmp_name).unlink(missing_ok=True)
             raise
+
+    # A reset epoch is report-owned state, not process-owned state. Hydrate it
+    # before any request can accept work from a client that predates a restart.
+    try:
+        _, initial_report_data = load_report_json()
+    except Exception as exc:
+        logger.debug("Review reset generation not hydrated at startup: %s", exc)
+    else:
+        session.reset_generation = _report_reset_generation(initial_report_data)
 
     def _finding_verdict(human: dict[str, Any]) -> str:
         # legacy migration: confirmed -> verdict — read either the new
@@ -950,6 +968,10 @@ def create_review_app(
         _, report_data = load_report_json()
         state = build_review_state_from_report(report_data)
         with session.lock:
+            session.reset_generation = max(
+                session.reset_generation,
+                _report_reset_generation(report_data),
+            )
             session_markers = list(session.markers.values())
             reset_generation = session.reset_generation
         hydrate_state_with_session_frames(state, session_markers)
@@ -970,6 +992,14 @@ def create_review_app(
         await save_lock.acquire()
         try:
             json_path, report_data = load_report_json()
+            with session.lock:
+                reset_generation = (
+                    max(
+                        session.reset_generation,
+                        _report_reset_generation(report_data),
+                    )
+                    + 1
+                )
             report_data.pop("human_review", None)
             report_data.pop("manual_review", None)
 
@@ -986,11 +1016,11 @@ def create_review_app(
                 else:
                     report_data.pop("work_items", None)
 
+            report_data[REVIEW_RESET_GENERATION_KEY] = reset_generation
             write_report_json_atomic(json_path, report_data)
 
             with session.lock:
-                session.reset_generation += 1
-                reset_generation = session.reset_generation
+                session.reset_generation = reset_generation
                 session.markers.clear()
                 session.results.clear()
                 session.last_response_id = ""
@@ -1061,12 +1091,38 @@ def create_review_app(
         # would overwrite with a stale snapshot and drop this save's verdicts.
         await save_lock.acquire()
         try:
-            with session.lock:
-                markers = list(session.markers.values())
-                results = list(session.results.values())
-
             # Load existing report
             json_path, report_data = load_report_json()
+
+            try:
+                review = await request.json()
+            except Exception:
+                review = None
+            requested_generation = (
+                review.get("resetGeneration", 0) if isinstance(review, dict) else 0
+            )
+            if (
+                isinstance(requested_generation, bool)
+                or not isinstance(requested_generation, int)
+                or requested_generation < 0
+            ):
+                raise HTTPException(status_code=422, detail="Invalid review reset generation.")
+
+            with session.lock:
+                session.reset_generation = max(
+                    session.reset_generation,
+                    _report_reset_generation(report_data),
+                )
+                current_generation = session.reset_generation
+                markers = list(session.markers.values())
+                results = list(session.results.values())
+            if requested_generation != current_generation:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Review reset invalidated this save.",
+                )
+
+            report_data[REVIEW_RESET_GENERATION_KEY] = current_generation
 
             # Update with manual findings
             # We map ManualFrameResult to a format compatible with UnifiedFinding for the report
@@ -1115,10 +1171,6 @@ def create_review_app(
             # clients post without one). The canonical report.json keeps every
             # finding; rejected ones stay, explicitly marked, so a re-run or a
             # downstream agent knows the human already dismissed them.
-            try:
-                review = await request.json()
-            except Exception:
-                review = None
             if isinstance(review, dict) and review.get("findings") is not None:
                 findings_review: dict[str, Any] = {}
                 rejected_ids: list[Any] = []

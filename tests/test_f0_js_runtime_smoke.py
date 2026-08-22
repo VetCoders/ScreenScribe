@@ -311,6 +311,7 @@ def test_f0_review_export_speaks_verdict_not_confirmed() -> None:
         reportState.findings = { f1: { verdict: 'accepted', notes: 'ok' } };
         reportState.manualFrames = [];
         reportState.reviewer = 'tester';
+        reportState.resetGeneration = 3;
 
         const data = buildReviewData();
         const f = data.findings[0];
@@ -320,6 +321,10 @@ def test_f0_review_export_speaks_verdict_not_confirmed() -> None:
         }
         if ('confirmed' in f || ('confirmed' in (f.human_review || {}))) {
             console.error('legacy "confirmed" leaked into export payload');
+            process.exitCode = 1;
+        }
+        if (data.resetGeneration !== 3) {
+            console.error('reset generation missing from save payload: ' + JSON.stringify(data));
             process.exitCode = 1;
         }
         """

@@ -88,11 +88,12 @@ never always-visible footer/side buttons.
   reviewer name, human verdicts, notes, manual merge overlays, manual moments,
   and review-created work items while preserving the generated findings and
   unrelated report data. Each reset advances a server-issued generation carried
-  by review-state, cross-window snapshots, and manual-frame requests. A newer
-  generation outranks snapshot timestamps, so delayed Add/Analyze work from
-  before the reset cannot recreate cleared moments. Ordinary same-generation
-  hydration preserves an annotation edit in progress; reset hydration discards
-  that stale editor explicitly.
+  durably in the report JSON and carried by review-state, Save payloads,
+  cross-window snapshots, and manual-frame requests. A newer generation outranks
+  snapshot timestamps, so delayed Save/Add/Analyze work from before the reset
+  cannot recreate cleared review state or moments, even after a server restart.
+  Ordinary same-generation hydration preserves an annotation edit in progress;
+  reset hydration discards that stale editor explicitly.
 
 The review report's findings always exist, so its downloads are not readiness-
 gated; analyze gates because its artifacts do not exist until the user marks a

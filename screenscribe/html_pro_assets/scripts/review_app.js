@@ -2295,6 +2295,7 @@ function buildReviewData() {
         video: document.body.dataset.videoName,
         reviewed_at: new Date().toISOString(),
         reviewer: reportState.reviewer,
+        resetGeneration: normalizeResetGeneration(reportState.resetGeneration),
         findings: reviewedFindings,
         manual_frames: manualFrames,
     };

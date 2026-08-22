@@ -1022,6 +1022,7 @@ def test_review_server_reset_returns_to_generated_report_state(
     assert saved["findings"] == [{"id": 1}, {"id": 2}]
     assert saved["pipeline_metadata"] == {"keep": True}
     assert saved["work_items"] == [{"id": "pipeline-1", "source": "pipeline_detection"}]
+    assert saved["review_reset_generation"] == 1
     assert "human_review" not in saved
     assert "manual_review" not in saved
     assert list(manual_dir.iterdir()) == []
@@ -1107,9 +1108,88 @@ def test_review_server_reset_is_idempotent(
     app = create_review_app(output_dir, report_file.name, video_path, _config())
     client = TestClient(app)
 
-    assert client.post("/api/reset-review").status_code == 200
-    assert client.post("/api/reset-review").status_code == 200
-    assert json.loads(json_path.read_text(encoding="utf-8")) == baseline
+    first = client.post("/api/reset-review")
+    second = client.post("/api/reset-review")
+    assert first.status_code == 200
+    assert first.json()["resetGeneration"] == 1
+    assert second.status_code == 200
+    assert second.json()["resetGeneration"] == 2
+    assert json.loads(json_path.read_text(encoding="utf-8")) == {
+        **baseline,
+        "review_reset_generation": 2,
+    }
+
+
+def test_review_reset_generation_survives_server_restart(
+    review_workspace: tuple[Path, Path, Path],
+) -> None:
+    """A fresh app for the same report resumes the durable reset epoch."""
+    import json
+
+    output_dir, report_file, video_path = review_workspace
+    json_path = output_dir / "screen_report.json"
+    json_path.write_text(
+        json.dumps({"video": "screen.mov", "findings": [{"id": 1}]}),
+        encoding="utf-8",
+    )
+
+    first_client = TestClient(
+        create_review_app(output_dir, report_file.name, video_path, _config())
+    )
+    assert first_client.post("/api/reset-review").json()["resetGeneration"] == 1
+
+    restarted_client = TestClient(
+        create_review_app(output_dir, report_file.name, video_path, _config())
+    )
+    assert restarted_client.get("/api/review-state").json()["resetGeneration"] == 1
+    assert restarted_client.post("/api/reset-review").json()["resetGeneration"] == 2
+    assert json.loads(json_path.read_text(encoding="utf-8"))["review_reset_generation"] == 2
+
+
+def test_review_server_save_rejects_generation_from_before_reset(
+    review_workspace: tuple[Path, Path, Path],
+) -> None:
+    """A queued Save cannot restore review overlays after reset commits."""
+    import json
+
+    output_dir, report_file, video_path = review_workspace
+    json_path = output_dir / "screen_report.json"
+    json_path.write_text(
+        json.dumps({"video": "screen.mov", "findings": [{"id": 1}]}),
+        encoding="utf-8",
+    )
+    client = TestClient(create_review_app(output_dir, report_file.name, video_path, _config()))
+    assert client.post("/api/reset-review").json()["resetGeneration"] == 1
+
+    stale = client.post(
+        "/api/save",
+        json={
+            "resetGeneration": 0,
+            "reviewer": "stale reviewer",
+            "reviewed_at": "2026-08-23T00:00:00Z",
+            "findings": [{"id": 1, "human_review": {"verdict": "accepted", "notes": "stale"}}],
+            "manual_frames": [],
+        },
+    )
+    assert stale.status_code == 409
+    saved = json.loads(json_path.read_text(encoding="utf-8"))
+    assert saved["review_reset_generation"] == 1
+    assert "human_review" not in saved
+
+    current = client.post(
+        "/api/save",
+        json={
+            "resetGeneration": 1,
+            "reviewer": "current reviewer",
+            "reviewed_at": "2026-08-23T00:01:00Z",
+            "findings": [{"id": 1, "human_review": {"verdict": "accepted", "notes": "current"}}],
+            "manual_frames": [],
+        },
+    )
+    assert current.status_code == 200
+    assert json.loads(json_path.read_text(encoding="utf-8"))["human_review"]["reviewer"] == (
+        "current reviewer"
+    )
 
 
 def test_review_server_reset_stays_successful_when_frame_cleanup_fails(
