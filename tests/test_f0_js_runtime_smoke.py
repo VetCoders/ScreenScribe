@@ -179,11 +179,54 @@ def test_f0_review_app_loads_without_referenceerror() -> None:
     """The script evaluates and exposes the core review functions."""
     _run_review_app_smoke(
         """
-        for (const name of ['buildTodoMarkdown', 'buildReviewData', 'handleChangeEvent', 'normalizeVerdict']) {
+        for (const name of [
+            'buildTodoMarkdown', 'buildReviewData', 'handleChangeEvent',
+            'normalizeVerdict', 'unmergeFindings', 'resetReview'
+        ]) {
             if (typeof eval(name) !== 'function') {
                 console.error('missing top-level function: ' + name);
                 process.exitCode = 1;
             }
+        }
+        """
+    )
+
+
+def test_f0_moments_counter_includes_visible_rejected_and_manual_moments() -> None:
+    """The tab count is logical visible cards + manual moments, independent of verdict."""
+    _run_review_app_smoke(
+        """
+        const articles = [
+            { dataset: { findingId: 'a', verdict: 'accepted', severity: 'high' } },
+            { dataset: { findingId: 'b', verdict: 'rejected', severity: 'low' } },
+            { dataset: { findingId: 'c', verdict: 'none', severity: 'medium', mergedAway: 'true' } },
+        ];
+        const tabButton = {
+            title: '',
+            ariaLabel: '',
+            setAttribute(name, value) { if (name === 'aria-label') this.ariaLabel = value; },
+        };
+        const tabCount = {
+            textContent: '0',
+            closest() { return tabButton; },
+        };
+        document.querySelectorAll = (selector) => selector === '.finding' ? articles : [];
+        document.getElementById = (id) => id === 'findings-count' ? tabCount : null;
+        reportState.findings = {
+            a: { verdict: 'accepted' },
+            b: { verdict: 'rejected' },
+        };
+        reportState.manualFrames = [{ marker_id: 'manual-1' }];
+
+        updateReviewMeta();
+
+        if (tabCount.textContent !== '3') {
+            console.error('expected accepted + rejected + manual = 3, got ' + tabCount.textContent);
+            process.exitCode = 1;
+        }
+        if (!tabButton.ariaLabel.includes('3')) {
+            console.error('accessible count description missing: ' + tabButton.ariaLabel);
+            process.exitCode = 1;
         }
         """
     )
@@ -268,6 +311,7 @@ def test_f0_review_export_speaks_verdict_not_confirmed() -> None:
         reportState.findings = { f1: { verdict: 'accepted', notes: 'ok' } };
         reportState.manualFrames = [];
         reportState.reviewer = 'tester';
+        reportState.resetGeneration = 3;
 
         const data = buildReviewData();
         const f = data.findings[0];
@@ -277,6 +321,147 @@ def test_f0_review_export_speaks_verdict_not_confirmed() -> None:
         }
         if ('confirmed' in f || ('confirmed' in (f.human_review || {}))) {
             console.error('legacy "confirmed" leaked into export payload');
+            process.exitCode = 1;
+        }
+        if (data.resetGeneration !== 3) {
+            console.error('reset generation missing from save payload: ' + JSON.stringify(data));
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
+def test_f0_language_switch_relocalizes_dynamic_merged_card() -> None:
+    """A rendered merged card updates all chrome and image text alternatives."""
+    _run_review_app_smoke(
+        """
+        class MiniElement {
+            constructor(tagName) {
+                this.tagName = String(tagName).toUpperCase();
+                this.className = '';
+                this.children = [];
+                this.parentNode = null;
+                this.dataset = {};
+                this.attributes = {};
+                this.textContent = '';
+                this.placeholder = '';
+                this.classList = {
+                    contains: (name) => this.className.split(/\\s+/).includes(name),
+                    toggle: (name, enabled) => {
+                        const names = new Set(this.className.split(/\\s+/).filter(Boolean));
+                        if (enabled) names.add(name); else names.delete(name);
+                        this.className = Array.from(names).join(' ');
+                    },
+                };
+            }
+            appendChild(child) { child.parentNode = this; this.children.push(child); return child; }
+            addEventListener() {}
+            setAttribute(name, value) {
+                this.attributes[name] = String(value);
+                if (name === 'placeholder') this.placeholder = String(value);
+            }
+            getAttribute(name) { return this.attributes[name] ?? null; }
+            matches(selector) {
+                if (selector === '[data-i18n]' || selector === '[data-i18n-attr]'
+                    || selector === '[data-i18n-title]' || selector === '[data-i18n-alt]'
+                    || selector === '[data-i18n-tpl]') {
+                    return this.getAttribute(selector.slice(1, -1)) !== null;
+                }
+                if (selector === 'img.thumbnail[data-merged-timestamp]') {
+                    return this.tagName === 'IMG'
+                        && this.classList.contains('thumbnail')
+                        && this.dataset.mergedTimestamp !== undefined;
+                }
+                if (selector.startsWith('.') && !selector.includes(' ')) {
+                    return this.classList.contains(selector.slice(1).split('[')[0]);
+                }
+                return false;
+            }
+            querySelectorAll(selector) {
+                const found = [];
+                const visit = (node) => {
+                    node.children.forEach((child) => {
+                        if (child.matches(selector)) found.push(child);
+                        visit(child);
+                    });
+                };
+                visit(this);
+                return found;
+            }
+            querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+            closest(selector) {
+                let node = this;
+                while (node) {
+                    if (node.matches(selector)) return node;
+                    node = node.parentNode;
+                }
+                return null;
+            }
+        }
+
+        const root = new MiniElement('body');
+        root.dataset.mode = 'review';
+        document.body = root;
+        document.createElement = (tagName) => new MiniElement(tagName);
+        document.querySelectorAll = (selector) => root.querySelectorAll(selector);
+        // Keep setLanguage away from unrelated metadata rendering; this witness
+        // is scoped to the merged card itself.
+        document.querySelector = () => null;
+        document.getElementById = () => null;
+
+        reportState.findings = {
+            '1': { verdict: 'accepted', severity: 'high', notes: 'keep me' },
+        };
+        const card = renderMergedCard({
+            id: 1,
+            category: 'bug',
+            timestamp: 1,
+            timestamp_formatted: '00:01.000',
+            screenshot: 'data:image/png;base64,x',
+            merged_from_ids: [2],
+            unified_analysis: {
+                severity: 'high',
+                summary: 'summary',
+                action_items: ['fix it'],
+                affected_components: ['toolbar'],
+            },
+        });
+        root.appendChild(card);
+
+        setLanguage('pl', { persist: false });
+
+        const translated = (key) => card.querySelectorAll('[data-i18n]').find(
+            (el) => el.getAttribute('data-i18n') === key
+        );
+        const checks = [
+            ['category', card.querySelector('.finding-title')?.textContent, 'BŁĄD'],
+            ['badge', card.querySelector('.merged-badge')?.textContent, 'SCALONE'],
+            ['unmerge', translated('review.unmergeFinding')?.textContent, 'Rozłącz'],
+            ['summary', card.querySelector('.merged-summary-label')?.textContent, 'Podsumowanie:'],
+            ['actions', card.querySelector('.merged-actions-label')?.textContent, 'Sugestie AI:'],
+            ['components', card.querySelector('.merged-components-label')?.textContent, 'Powiązane komponenty'],
+            ['provenance', card.querySelector('.merged-from-label')?.textContent, 'Scalone z'],
+            ['verdict', card.querySelector('.merged-verdict-label')?.textContent, 'Potwierdzone?'],
+            ['reject control', translated('review.noFalseAlarm')?.textContent, 'Nie / Fałszywy alarm'],
+            ['priority', card.querySelector('.merged-severity-label')?.textContent, 'Zmień priorytet'],
+            ['high option', translated('review.high')?.textContent, 'Wysokie'],
+            ['notes', card.querySelector('.merged-notes-label')?.textContent, 'Notatki / Akcje'],
+            ['annotation hint', translated('media.manualFrameAnnotateHint')?.textContent, 'Kliknij, aby adnotować'],
+        ];
+        for (const [name, actual, expected] of checks) {
+            if (actual !== expected) {
+                console.error(name + ' stayed stale: ' + JSON.stringify({ actual, expected }));
+                process.exitCode = 1;
+            }
+        }
+        const image = card.querySelector('.thumbnail');
+        if (image?.alt !== 'Screenshot scalonego znaleziska o 00:01.000') {
+            console.error('merged screenshot alt stayed stale: ' + image?.alt);
+            process.exitCode = 1;
+        }
+        const notesArea = card.querySelector('.merged-notes-area');
+        if (notesArea?.placeholder !== 'Twoje uwagi, akcje do podjęcia...') {
+            console.error('merged notes placeholder stayed stale: ' + notesArea?.placeholder);
             process.exitCode = 1;
         }
         """
@@ -687,6 +872,71 @@ def test_f4_restore_uses_newer_draft_state_over_stale_sync() -> None:
         if (reportState.manualFrames.length !== 1
             || reportState.manualFrames[0].marker_id !== 'kept-frame') {
             console.error('newer draft manual frame was not restored: ' + JSON.stringify(reportState.manualFrames));
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
+def test_f4_reset_generation_beats_later_stale_timestamps() -> None:
+    """A newer reset epoch outranks savedAt in restore and cross-tab sync."""
+    _run_review_app_smoke(
+        """
+        const staleDraft = {
+            savedAt: '2026-06-17T12:05:00.000Z',
+            state: { resetGeneration: 0, findings: { f1: { verdict: 'accepted' } } },
+        };
+        const resetSync = {
+            savedAt: '2026-06-17T12:04:00.000Z',
+            state: { resetGeneration: 1, findings: {}, manualFrames: [] },
+        };
+        const chosen = chooseReviewRestoreEnvelope(staleDraft, resetSync);
+        if (chosen.envelope !== resetSync || chosen.source !== 'sync') {
+            console.error('later stale draft beat the reset generation');
+            process.exitCode = 1;
+        }
+
+        reportState.resetGeneration = 1;
+        stateSyncRuntime.lastLocalSavedAt = Date.parse('2026-06-17T12:04:00.000Z');
+        if (isIncomingReviewEnvelopeFresher(staleDraft)) {
+            console.error('old-generation envelope was accepted because its timestamp was later');
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
+def test_f4_hydrate_rejects_snapshot_from_older_reset_generation() -> None:
+    """A delayed disk response cannot restore review state cleared by reset."""
+    _run_review_app_smoke(
+        """
+        let renders = 0;
+        restoreUIFromState = () => { renders += 1; };
+        restoreMergesToDom = () => {};
+        renderManualFrames = () => {};
+        initAnnotationTools = () => {};
+
+        reportState.findings = {};
+        reportState.manualFrames = [];
+        reportState.reviewer = '';
+        reportState.modified = false;
+        reportState.resetGeneration = 2;
+
+        hydrateReportState({
+            findings: { stale: { verdict: 'accepted', notes: 'pre-reset' } },
+            manualFrames: [{ marker_id: 'stale-frame' }],
+            reviewer: 'stale reviewer',
+            modified: false,
+            resetGeneration: 1,
+        });
+
+        if (Object.keys(reportState.findings).length !== 0
+            || reportState.manualFrames.length !== 0
+            || reportState.reviewer !== ''
+            || reportState.resetGeneration !== 2
+            || renders !== 0) {
+            console.error('older reset generation hydrated stale state: '
+                + JSON.stringify({ state: reportState, renders }));
             process.exitCode = 1;
         }
         """
@@ -1189,6 +1439,157 @@ def test_f0_hydrate_preserves_manual_frame_image_on_lightweight_snapshot() -> No
     )
 
 
+def test_f0_hydrate_discards_active_annotation_editor() -> None:
+    """A synchronized reset must not let a stale lightbox resurrect annotations."""
+    _run_review_app_smoke(
+        """
+        renderManualFrames = () => {};
+        restoreUIFromState = () => {};
+        restoreMergesToDom = () => {};
+        initAnnotationTools = () => {};
+
+        const lightbox = {
+            classList: { remove() {} },
+            setAttribute() {},
+            removeEventListener() {},
+            __focusTrapHandler: null,
+        };
+        const lightboxImg = { onload: () => { throw new Error('stale onload fired'); } };
+        const lightboxToolbar = { style: { display: 'flex' } };
+        document.getElementById = (id) => ({
+            lightbox,
+            'lightbox-img': lightboxImg,
+            'lightbox-toolbar': lightboxToolbar,
+        }[id] || null);
+
+        let saves = 0;
+        let destroys = 0;
+        currentLightboxFindingId = 'a';
+        lightboxAnnotationTool = {
+            saveAnnotations() { saves += 1; },
+            destroy() { destroys += 1; },
+        };
+
+        hydrateReportState(
+            { findings: {}, manualFrames: [], reviewer: '' },
+            { discardActiveEditor: true }
+        );
+        closeLightbox();
+
+        if (saves !== 0 || destroys !== 1) {
+            console.error('hydrate saved or retained the stale editor: ' + JSON.stringify({ saves, destroys }));
+            process.exitCode = 1;
+        }
+        if (lightboxAnnotationTool !== null || currentLightboxFindingId !== null) {
+            console.error('hydrate left stale lightbox state alive');
+            process.exitCode = 1;
+        }
+        if (lightboxImg.onload !== null) {
+            console.error('hydrate did not cancel the pending stale image load');
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
+def test_f0_ordinary_hydrate_preserves_active_annotation_editor() -> None:
+    """Unrelated cross-window hydration must not discard a drawing in progress."""
+    _run_review_app_smoke(
+        """
+        renderManualFrames = () => {};
+        restoreUIFromState = () => {};
+        restoreMergesToDom = () => {};
+        initAnnotationTools = () => {};
+
+        let saves = 0;
+        let destroys = 0;
+        currentLightboxFindingId = 'a';
+        const activeTool = {
+            saveAnnotations() { saves += 1; },
+            destroy() { destroys += 1; },
+        };
+        lightboxAnnotationTool = activeTool;
+
+        hydrateReportState({ findings: {}, manualFrames: [], reviewer: '' });
+
+        if (saves !== 0 || destroys !== 0 || lightboxAnnotationTool !== activeTool) {
+            console.error('ordinary hydrate discarded the active editor: '
+                + JSON.stringify({ saves, destroys, retained: lightboxAnnotationTool === activeTool }));
+            process.exitCode = 1;
+        }
+        if (currentLightboxFindingId !== 'a') {
+            console.error('ordinary hydrate cleared the active finding id');
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
+def test_f0_reset_discards_manual_frame_recording_without_stt() -> None:
+    """Closing the manual-frame modal for reset drops audio instead of posting it."""
+    _run_review_app_smoke(
+        """
+        let fetchCalls = 0;
+        let trackStops = 0;
+        fetch = async () => {
+            fetchCalls += 1;
+            return { ok: true, status: 200, json: async () => ({ text: 'stale' }) };
+        };
+        navigator.mediaDevices.getUserMedia = async () => ({
+            getTracks: () => [{ stop: () => { trackStops += 1; } }],
+        });
+
+        class FakeMediaRecorder {
+            constructor() {
+                this.ondataavailable = null;
+                this.onstop = null;
+                FakeMediaRecorder.instance = this;
+            }
+            start() {}
+            stop() {
+                this.ondataavailable?.({ data: { size: 8 } });
+                this.stopPromise = Promise.resolve(this.onstop?.());
+            }
+        }
+        MediaRecorder = FakeMediaRecorder;
+
+        const modal = {
+            hidden: false,
+            __focusTrapHandler: null,
+            removeEventListener() {},
+        };
+        document.getElementById = (id) => id === 'manualFrameModal' ? modal : null;
+        restoreUIFromState = () => {};
+        restoreMergesToDom = () => {};
+        renderManualFrames = () => {};
+        initAnnotationTools = () => {};
+
+        manualFrameRuntime.recorder = new ReviewVoiceRecorder(() => {}, () => {});
+        manualFrameRuntime.currentFrame = { timestamp: 1 };
+        reportState.resetGeneration = 0;
+        if (!await manualFrameRuntime.recorder.start()) {
+            throw new Error('manual-frame recorder did not start');
+        }
+
+        hydrateReportState({
+            findings: {}, manualFrames: [], reviewer: '', resetGeneration: 1,
+        });
+        await FakeMediaRecorder.instance.stopPromise;
+
+        if (fetchCalls !== 0 || trackStops !== 1) {
+            console.error('reset transcribed or leaked recording resources: '
+                + JSON.stringify({ fetchCalls, trackStops }));
+            process.exitCode = 1;
+        }
+        if (manualFrameRuntime.currentFrame !== null
+            || manualFrameRuntime.recorder.isRecording) {
+            console.error('reset left manual-frame recording active');
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
 def test_f0_manual_frame_empty_transcript_placeholder_not_saved() -> None:
     """The "no spoken description" placeholder must never be saved as transcript.
 
@@ -1286,6 +1687,43 @@ def test_f0_hydrate_incoming_image_wins_over_current() -> None:
 
         if (reportState.manualFrames[0].frameDataUrl !== 'data:image/jpeg;base64,NEW') {
             console.error('incoming image should win over the in-memory one: ' + JSON.stringify(reportState.manualFrames[0].frameDataUrl));
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
+def test_f0_unmerge_rebinds_annotation_previews_to_restored_cards() -> None:
+    """The last unmerge must rebuild annotation bindings after removing its merged card."""
+    _run_review_app_smoke(
+        """
+        reportState.findings = {
+            a: { verdict: 'accepted', severity: 'high', notes: '', annotations: [] },
+            b: { verdict: 'none', severity: null, notes: '', annotations: [] },
+        };
+        reportState.merges = [{
+            id: 'a',
+            member_ids: ['a', 'b'],
+            member_reviews: {
+                a: { verdict: 'none', severity: null, notes: '', annotations: [] },
+                b: { verdict: 'none', severity: null, notes: '', annotations: [] },
+            },
+        }];
+
+        restoreMergesToDom = () => {};
+        restoreUIFromState = () => {};
+        initMergeUI = () => {};
+        updateMergeBar = () => {};
+        scheduleSharedStateSync = () => {};
+        showNotification = () => {};
+        let annotationRebinds = 0;
+        initAnnotationTools = () => { annotationRebinds += 1; };
+
+        if (!unmergeFindingGroup('a')) {
+            console.error('unmergeFindingGroup returned false');
+            process.exitCode = 1;
+        } else if (annotationRebinds !== 1) {
+            console.error('visible original card was not rebound after unmerge: ' + annotationRebinds);
             process.exitCode = 1;
         }
         """

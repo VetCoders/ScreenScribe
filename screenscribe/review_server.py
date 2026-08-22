@@ -66,6 +66,7 @@ class ManualFrameRequest(BaseModel):
     frame_base64: str = Field(..., max_length=MAX_FRAME_BASE64_CHARS)
     transcript: str = ""
     notes: str = ""
+    reset_generation: int = Field(0, ge=0)
 
 
 class ManualFrameUpdateRequest(BaseModel):
@@ -133,6 +134,7 @@ class ReviewSession:
     markers: dict[str, ManualFrameMarker] = field(default_factory=dict)
     results: dict[str, ManualFrameResult] = field(default_factory=dict)
     last_response_id: str = ""
+    reset_generation: int = 0
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -154,6 +156,15 @@ def _manual_frame_data_url(frame_base64: str) -> str:
 
 
 MANUAL_FRAMES_DIRNAME = "manual_frames"
+REVIEW_RESET_GENERATION_KEY = "review_reset_generation"
+
+
+def _report_reset_generation(report_data: dict[str, Any]) -> int:
+    """Return the persisted review-reset epoch, defaulting legacy reports to zero."""
+    value = report_data.get(REVIEW_RESET_GENERATION_KEY, 0)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return int(value)
 
 
 def _validated_image_ext(frame_bytes: bytes) -> str:
@@ -394,6 +405,32 @@ def create_review_app(
             raise HTTPException(status_code=500, detail="Report JSON is invalid.")
         return json_path, data
 
+    def write_report_json_atomic(json_path: Path, report_data: dict[str, Any]) -> None:
+        """Durably replace the selected report JSON without exposing a torn write."""
+        import json
+
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            dir=str(json_path.parent), prefix=".report-", suffix=".json.tmp"
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                json.dump(report_data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_name, json_path)
+        except Exception:
+            Path(tmp_name).unlink(missing_ok=True)
+            raise
+
+    # A reset epoch is report-owned state, not process-owned state. Hydrate it
+    # before any request can accept work from a client that predates a restart.
+    try:
+        _, initial_report_data = load_report_json()
+    except Exception as exc:
+        logger.debug("Review reset generation not hydrated at startup: %s", exc)
+    else:
+        session.reset_generation = _report_reset_generation(initial_report_data)
+
     def _finding_verdict(human: dict[str, Any]) -> str:
         # legacy migration: confirmed -> verdict — read either the new
         # `verdict` string or the old boolean `confirmed` from report.json.
@@ -418,6 +455,15 @@ def create_review_app(
             # would recompute the merged review with empty members and silently
             # drop the evidence. Mirror of the merged_from_ids hydrate above.
             "member_annotations": list(human.get("member_annotations") or []),
+            # Exact pre-merge reviewer states make a saved human merge reversible.
+            # Older reports omit this additive field; the client then restores
+            # absorbed members as unreviewed while keeping the survivor's edits.
+            "merged_member_reviews": dict(human.get("merged_member_reviews") or {}),
+            # Keep the actual survivor separate from the derived merged union so
+            # cold-reload unmerge can restore each member without duplicating an
+            # absorbed member's notes or priority onto the survivor.
+            "merged_survivor_review": dict(human.get("merged_survivor_review") or {}),
+            "merged_review_baseline": dict(human.get("merged_review_baseline") or {}),
         }
 
     def work_item_from_review_finding(finding: dict[str, Any]) -> WorkItem:
@@ -749,6 +795,7 @@ def create_review_app(
     @app.post("/api/stt")
     async def transcribe_voice(
         audio: Annotated[UploadFile, File(description="Browser-recorded audio")],
+        reset_generation: int | None = None,
     ) -> JSONResponse:
         """Transcribe spoken description for a manual frame."""
         # P2-10: read in chunks and abort the moment the running total crosses
@@ -765,6 +812,11 @@ def create_review_app(
         # can compare-and-set: a VLM/STT that finished first must not be clobbered
         # by this call landing later (mirror of analyze-side).
         with session.lock:
+            if reset_generation is not None and reset_generation != session.reset_generation:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Review reset invalidated this voice transcription.",
+                )
             previous_response_id = session.last_response_id
 
         try:
@@ -788,9 +840,15 @@ def create_review_app(
             # operation already advanced the chain. NOTE: STT and VLM still share
             # one chain field here (as on the analyze side); full STT/VLM chain
             # separation is deferred design.
-            advance_response_id_cas(
-                session, previous_response_id, result.response_id, logger=logger
-            )
+            with session.lock:
+                if reset_generation is not None and reset_generation != session.reset_generation:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Review reset invalidated this voice transcription.",
+                    )
+                advance_response_id_cas(
+                    session, previous_response_id, result.response_id, logger=logger
+                )
             return JSONResponse(
                 content=serialize_stt_result(result, quality_warning=quality_warning)
             )
@@ -814,6 +872,13 @@ def create_review_app(
         in-memory base64 is gone. The base64 is still kept on the live marker for
         immediate analysis/hydrate within the session.
         """
+        with session.lock:
+            if request.reset_generation != session.reset_generation:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Review reset invalidated this manual frame.",
+                )
+
         marker_id = str(uuid.uuid4())
         frame_path = store_manual_frame_image(session.output_dir, marker_id, request.frame_base64)
         marker = ManualFrameMarker(
@@ -825,10 +890,32 @@ def create_review_app(
             status="pending",
             frame_path=frame_path,
         )
+        stale_generation = False
         with session.lock:
-            session.markers[marker_id] = marker
+            stale_generation = request.reset_generation != session.reset_generation
+            if not stale_generation:
+                session.markers[marker_id] = marker
+        if stale_generation:
+            try:
+                _remove_manual_frame_image(session.output_dir, frame_path)
+            except Exception as cleanup_exc:
+                logger.warning(
+                    "Manual frame invalidated by reset, but stale image cleanup failed "
+                    "for marker %s: %s",
+                    marker_id,
+                    cleanup_exc,
+                )
+            raise HTTPException(
+                status_code=409,
+                detail="Review reset invalidated this manual frame.",
+            )
         return JSONResponse(
-            content={"marker_id": marker_id, "status": "pending", "frame_path": frame_path}
+            content={
+                "marker_id": marker_id,
+                "status": "pending",
+                "frame_path": frame_path,
+                "resetGeneration": request.reset_generation,
+            }
         )
 
     @app.delete("/api/manual-mark/{marker_id}")
@@ -903,22 +990,124 @@ def create_review_app(
         with a renderable frameDataUrl, so the client can drop base64 frames
         from its localStorage draft and still restore the image after a reload.
         """
-        _, report_data = load_report_json()
-        state = build_review_state_from_report(report_data)
-        with session.lock:
-            session_markers = list(session.markers.values())
-        hydrate_state_with_session_frames(state, session_markers)
-        return JSONResponse(content=state)
+        # A snapshot must pair report overlays and the reset epoch from one
+        # serialized point in time. Otherwise a reset can land between reading
+        # the old report and sampling the new session generation, producing old
+        # findings mislabeled as authoritative for the new epoch.
+        async with save_lock:
+            _, report_data = load_report_json()
+            state = build_review_state_from_report(report_data)
+            with session.lock:
+                session.reset_generation = max(
+                    session.reset_generation,
+                    _report_reset_generation(report_data),
+                )
+                session_markers = list(session.markers.values())
+                reset_generation = session.reset_generation
+            hydrate_state_with_session_frames(state, session_markers)
+            state["resetGeneration"] = reset_generation
+            return JSONResponse(content=state)
+
+    @app.post("/api/reset-review")
+    async def reset_review_state() -> JSONResponse:
+        """Reset the report to its generated, pre-review state.
+
+        The generated findings remain canonical. Only human-review overlays,
+        review-created work items, manual markers/results, and their image files
+        are removed. The JSON replace lands before session state or image files
+        are cleared, so a failed disk write leaves the current review intact.
+        Once that canonical replace commits, stale image cleanup is best-effort:
+        it must not turn a successful durable reset into a misleading HTTP 500.
+        """
+        await save_lock.acquire()
+        try:
+            json_path, report_data = load_report_json()
+            with session.lock:
+                reset_generation = (
+                    max(
+                        session.reset_generation,
+                        _report_reset_generation(report_data),
+                    )
+                    + 1
+                )
+            report_data.pop("human_review", None)
+            report_data.pop("manual_review", None)
+
+            work_items = report_data.get("work_items")
+            if isinstance(work_items, list):
+                retained = [
+                    item
+                    for item in work_items
+                    if not isinstance(item, dict)
+                    or item.get("source") not in {"review_detection", "review_manual_frame"}
+                ]
+                if retained:
+                    report_data["work_items"] = retained
+                else:
+                    report_data.pop("work_items", None)
+
+            report_data[REVIEW_RESET_GENERATION_KEY] = reset_generation
+            write_report_json_atomic(json_path, report_data)
+
+            with session.lock:
+                session.reset_generation = reset_generation
+                session.markers.clear()
+                session.results.clear()
+                session.last_response_id = ""
+            try:
+                _sweep_orphan_manual_frames(session.output_dir, set())
+            except Exception as cleanup_exc:
+                logger.warning(
+                    "Review reset committed, but manual-frame cleanup failed: %s",
+                    cleanup_exc,
+                )
+
+            return JSONResponse(
+                content={
+                    "status": "reset",
+                    "state": {
+                        "findings": {},
+                        "manualFrames": [],
+                        "reviewer": "",
+                        "modified": False,
+                        "resetGeneration": reset_generation,
+                    },
+                    "resetGeneration": reset_generation,
+                }
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error("Failed to reset review state: %s", exc)
+            raise HTTPException(status_code=500, detail="Failed to reset review state.") from exc
+        finally:
+            save_lock.release()
 
     @app.post("/api/manual-analyze/{marker_id}")
-    async def analyze_manual_frame(marker_id: str) -> JSONResponse:
+    async def analyze_manual_frame(
+        marker_id: str, reset_generation: int | None = None
+    ) -> JSONResponse:
         """Run VLM analysis for one manual frame."""
         # BH14: analyze_single_marker makes a blocking ~120s VLM HTTP call.
         # Running it directly in this async handler would freeze the event loop
         # for the whole analysis, blocking every other request. Offload to the
         # threadpool (mirror of analyze-side /api/analyze BH4). The
         # HTTPException(404) for an unknown marker still propagates unchanged.
+        with session.lock:
+            if reset_generation is not None and reset_generation != session.reset_generation:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Review reset invalidated this manual frame analysis.",
+                )
         outcome = await run_in_threadpool(analyze_single_marker, marker_id)
+        with session.lock:
+            current_generation = session.reset_generation
+        if reset_generation is not None and reset_generation != current_generation:
+            raise HTTPException(
+                status_code=409,
+                detail="Review reset invalidated this manual frame analysis.",
+            )
+        outcome["resetGeneration"] = current_generation
         return JSONResponse(content=outcome)
 
     # Under /api/ so the Host+Origin+session-token guards cover it — a write
@@ -927,19 +1116,43 @@ def create_review_app(
     async def save_review_state(request: Request) -> dict[str, Any]:
         """Persist the human review (verdicts, notes, annotations) plus manual
         markers and results to the disk report.json."""
-        import json
-
         # Serialize the entire load->merge->write cycle: a concurrent save must
         # not load report.json before this one's atomic replace lands, or it
         # would overwrite with a stale snapshot and drop this save's verdicts.
         await save_lock.acquire()
         try:
-            with session.lock:
-                markers = list(session.markers.values())
-                results = list(session.results.values())
-
             # Load existing report
             json_path, report_data = load_report_json()
+
+            try:
+                review = await request.json()
+            except Exception:
+                review = None
+            requested_generation = (
+                review.get("resetGeneration", 0) if isinstance(review, dict) else 0
+            )
+            if (
+                isinstance(requested_generation, bool)
+                or not isinstance(requested_generation, int)
+                or requested_generation < 0
+            ):
+                raise HTTPException(status_code=422, detail="Invalid review reset generation.")
+
+            with session.lock:
+                session.reset_generation = max(
+                    session.reset_generation,
+                    _report_reset_generation(report_data),
+                )
+                current_generation = session.reset_generation
+                markers = list(session.markers.values())
+                results = list(session.results.values())
+            if requested_generation != current_generation:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Review reset invalidated this save.",
+                )
+
+            report_data[REVIEW_RESET_GENERATION_KEY] = current_generation
 
             # Update with manual findings
             # We map ManualFrameResult to a format compatible with UnifiedFinding for the report
@@ -988,10 +1201,6 @@ def create_review_app(
             # clients post without one). The canonical report.json keeps every
             # finding; rejected ones stay, explicitly marked, so a re-run or a
             # downstream agent knows the human already dismissed them.
-            try:
-                review = await request.json()
-            except Exception:
-                review = None
             if isinstance(review, dict) and review.get("findings") is not None:
                 findings_review: dict[str, Any] = {}
                 rejected_ids: list[Any] = []
@@ -1051,31 +1260,8 @@ def create_review_app(
                     for marker in markers
                 ]
 
-            # BH30: write report.json atomically. The previous direct
-            # ``open(json_path, "w")`` truncated the file in place, so a crash
-            # mid-write (process killed, disk full) could leave a half-written,
-            # unparseable report.json — destroying the reviewer's saved state.
-            # Write to a temp file in the same directory, then os.replace it in.
-            # ``os.replace`` is atomic on the same filesystem, so a crash before
-            # the replace leaves the previous report.json fully intact.
-            tmp_fd, tmp_name = tempfile.mkstemp(
-                dir=str(json_path.parent), prefix=".report-", suffix=".json.tmp"
-            )
-            try:
-                with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-                    json.dump(report_data, f, indent=2, ensure_ascii=False)
-                    # Flush Python + OS buffers to the platter before the atomic
-                    # replace. Without fsync, os.replace can commit the rename
-                    # while the temp file's bytes are still in the OS page cache,
-                    # so a crash right after leaves report.json pointing at a
-                    # zero/short file — the exact data-loss os.replace is meant to
-                    # prevent.
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(tmp_name, json_path)
-            except Exception:
-                Path(tmp_name).unlink(missing_ok=True)
-                raise
+            # BH30: replace atomically only after the complete payload is fsynced.
+            write_report_json_atomic(json_path, report_data)
 
             # Sweep orphaned manual-frame images only after report.json is durably
             # written (finding 156). The keep-set is the full live reference set:

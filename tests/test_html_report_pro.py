@@ -93,6 +93,14 @@ def test_en_render_symmetric() -> None:
         assert label in visible, f"EN render missing expected label: {label!r}"
 
 
+def test_review_form_labels_target_priority_and_notes_controls() -> None:
+    html_doc = _render("en")
+    assert 'for="finding-priority-1"' in html_doc
+    assert 'id="finding-priority-1"' in html_doc
+    assert 'for="finding-notes-1"' in html_doc
+    assert 'id="finding-notes-1"' in html_doc
+
+
 def test_finding_category_badge_is_localized() -> None:
     """Finding category badges render through i18n, not as the raw EN enum (FW-05).
 

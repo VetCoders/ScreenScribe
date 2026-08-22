@@ -212,3 +212,24 @@ def test_spacebar_handler_ignores_native_controls_and_form_fields() -> None:
         })();
         """
     )
+
+
+def test_precise_time_rounds_milliseconds_with_carry() -> None:
+    _run_video_player_node_test(
+        """
+        (() => {
+            const player = new ScreenScribePlayer();
+            const cases = [
+                [4.9999, '00:05.000'],
+                [59.9999, '01:00.000'],
+                [60.0004, '01:00.000'],
+            ];
+            for (const [value, expected] of cases) {
+                const actual = player.formatTimePrecise(value);
+                if (actual !== expected) {
+                    throw new Error(`formatTimePrecise(${value})=${actual}, expected ${expected}`);
+                }
+            }
+        })();
+        """
+    )

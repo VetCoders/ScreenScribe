@@ -70,3 +70,61 @@ def test_bh11_old_recognizer_onend_does_not_clobber_new_session() -> None:
         }
         """
     )
+
+
+def test_reset_hydration_aborts_voice_note_and_ignores_queued_result() -> None:
+    """Reset invalidates an active recognizer and any already queued transcript."""
+    _run_review_app_smoke(
+        """
+        const instances = [];
+        function FakeRecognition() {
+            this.continuous = false; this.interimResults = false; this.lang = '';
+            this.onresult = null; this.onerror = null; this.onend = null;
+            this.abortCalls = 0;
+            this.start = () => {};
+            this.stop = () => {};
+            this.abort = () => { this.abortCalls += 1; };
+            instances.push(this);
+        }
+        window.SpeechRecognition = FakeRecognition;
+
+        restoreUIFromState = () => {};
+        restoreMergesToDom = () => {};
+        renderManualFrames = () => {};
+        initAnnotationTools = () => {};
+        let appended = 0;
+        appendVoiceTextToNotes = () => { appended += 1; };
+
+        const button = { classList: { toggle() {} }, textContent: '' };
+        reportState.resetGeneration = 0;
+        startVoiceNoteCapture(button, 'f1');
+        const recognition = instances[0];
+        const queuedResult = recognition.onresult;
+
+        hydrateReportState({
+            findings: {}, manualFrames: [], reviewer: '', resetGeneration: 1,
+        });
+
+        if (recognition.abortCalls !== 1) {
+            console.error('reset did not abort recognition: ' + recognition.abortCalls);
+            process.exitCode = 1;
+        }
+        if (voiceNoteRuntime.recognition !== null
+            || voiceNoteRuntime.activeButton !== null
+            || voiceNoteRuntime.activeFindingId !== null) {
+            console.error('reset left voice runtime active');
+            process.exitCode = 1;
+        }
+
+        // Simulate a browser callback that was queued before handlers were
+        // detached. Its captured generation/session guards must still reject it.
+        queuedResult({
+            resultIndex: 0,
+            results: [{ isFinal: true, 0: { transcript: 'stale voice note' } }],
+        });
+        if (appended !== 0) {
+            console.error('queued voice result recreated notes after reset');
+            process.exitCode = 1;
+        }
+        """
+    )

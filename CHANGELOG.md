@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **Fixed: HTML Pro review changes can be safely undone or reset.** Human merge
+  groups now expose Unmerge, preserve source review snapshots through chained
+  merges, restore the survivor's pre-merge verdict without losing later notes,
+  priorities, or annotations, distinguish actual survivor edits from the merged
+  union after reload, and rebind visible annotation previews after the split.
+  Reset review atomically returns to generated findings, clears the
+  reviewer and manual review state, and reports success once the canonical JSON
+  commit lands even if stale frame cleanup can only emit a warning. A monotonic
+  reset generation is persisted across server restarts and now invalidates stale
+  Save as well as delayed manual-frame Add/Analyze/note/priority and voice-note
+  work without discarding annotation edits during ordinary same-generation
+  synchronization. A stale Add still returns its generation conflict if
+  best-effort image cleanup can only emit a warning. Review-state snapshots are
+  serialized with reset and older-epoch responses are ignored by the browser.
+  Reset also discards active manual-frame recordings without sending them to STT,
+  and invalidates any transcription already running in the prior generation.
+- **Fixed: the shared review/analyze shell stays usable and accessible at narrow
+  widths.** Oversized moment previews are bounded, analyze header controls wrap
+  on phones, active tabs keep their roving `tabindex` in sync, the sidebar
+  separator reports consistent pixel bounds, and the live Moments counter
+  counts every visible logical card (including rejected cards) plus manual
+  moments. Switching language now also relocalizes all dynamically rendered
+  merged-card labels, controls, provenance, hints, and screenshot text
+  alternatives.
+
 ## [0.1.18] - 2026-08-08
 
 - **Fixed: `review` opens the report when the video name contains spaces.** The

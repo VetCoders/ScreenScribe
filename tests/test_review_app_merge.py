@@ -138,7 +138,17 @@ def _run_merge(extra_assertions: str) -> None:
         const driver = `
             reportState.reviewer = 'qa';
             reportState.manualFrames = [];
-            reportState.findings = {{}};
+            reportState.findings = {{
+                a: {{
+                    verdict: 'accepted', severity: 'high', notes: 'keep survivor',
+                    annotations: [{{ type: 'rect', x: 0.1, y: 0.2 }}],
+                }},
+                b: {{
+                    verdict: 'rejected', severity: 'low', notes: 'member note',
+                    annotations: [{{ type: 'arrow', x1: 0.2, y1: 0.3 }}],
+                }},
+                c: {{ verdict: 'none', severity: null, notes: '', annotations: [] }},
+            }};
             reportState.merges = [];
             const merged = mergeFindings(['a', 'b']);
             if (!merged) throw new Error('mergeFindings returned null');
@@ -235,5 +245,54 @@ def test_merge_summary_override_is_editable() -> None:
         const m = data2.findings.find((f) => f.id === 'a');
         if (m.unified_analysis.summary !== 'Reviewer edited summary')
             throw new Error('editable summary override not honored: ' + m.unified_analysis.summary);
+        """
+    )
+
+
+def test_merge_persists_member_review_snapshots_for_durable_unmerge() -> None:
+    """Saved merge data retains each member's pre-merge reviewer state."""
+    _run_merge(
+        """
+        const snapshots = byId['a'].human_review.merged_member_reviews || {};
+        if (snapshots.b.verdict !== 'rejected' || snapshots.b.notes !== 'member note')
+            throw new Error('absorbed member snapshot missing: ' + JSON.stringify(snapshots));
+        if ((snapshots.b.annotations || [])[0]?.type !== 'arrow')
+            throw new Error('absorbed member annotations missing from snapshot');
+        const actual = byId['a'].human_review.merged_survivor_review || {};
+        const baseline = byId['a'].human_review.merged_review_baseline || {};
+        if (actual.notes !== 'keep survivor' || actual.severity !== 'high')
+            throw new Error('actual survivor state missing: ' + JSON.stringify(actual));
+        if (baseline.notes !== 'keep survivor\\\\n\\\\nmember note'
+            || baseline.severity !== 'high')
+            throw new Error('merged review baseline missing: ' + JSON.stringify(baseline));
+        """
+    )
+
+
+def test_unmerge_restores_members_and_keeps_current_survivor_edits() -> None:
+    """Unmerge returns N source findings without losing review work."""
+    _run_merge(
+        """
+        reportState.findings.a.notes = 'edited while merged';
+        reportState.findings.a.severity = 'critical';
+        // Exercise the none -> auto-accepted -> undo path explicitly. The
+        // harness starts a as accepted for the other merge assertions.
+        reportState.merges[0].member_reviews.a.verdict = 'none';
+        if (!unmergeFindings('a')) throw new Error('unmergeFindings returned false');
+        if (reportState.merges.length !== 0) throw new Error('merge entry survived unmerge');
+        if (reportState.findings.a.notes !== 'edited while merged'
+            || reportState.findings.a.severity !== 'critical')
+            throw new Error('current survivor edits were lost');
+        if (reportState.findings.a.verdict !== 'none')
+            throw new Error('unmerge kept the merge-generated accepted verdict');
+        if (reportState.findings.b.verdict !== 'rejected'
+            || reportState.findings.b.notes !== 'member note')
+            throw new Error('absorbed member review was not restored: '
+                + JSON.stringify(reportState.findings.b));
+        const restored = buildReviewData().findings;
+        if (restored.length !== 3)
+            throw new Error('unmerge did not restore all source findings: ' + restored.length);
+        if (restored.some((finding) => (finding.merged_from_ids || []).length > 0))
+            throw new Error('unmerge leaked merge provenance into deliverable');
         """
     )

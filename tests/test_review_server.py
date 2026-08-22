@@ -965,6 +965,393 @@ def test_review_server_save_merges_human_review(
     assert len(saved["findings"]) == 2
 
 
+def test_review_server_reset_returns_to_generated_report_state(
+    review_workspace: tuple[Path, Path, Path],
+) -> None:
+    """Reset removes only review overlays and their durable manual-frame files."""
+    import json
+
+    output_dir, report_file, video_path = review_workspace
+    json_path = output_dir / "screen_report.json"
+    manual_dir = output_dir / "manual_frames"
+    manual_dir.mkdir()
+    (manual_dir / "manual-1.jpg").write_bytes(b"review-only-frame")
+    json_path.write_text(
+        json.dumps(
+            {
+                "video": "screen.mov",
+                "findings": [{"id": 1}, {"id": 2}],
+                "human_review": {
+                    "reviewer": "alex",
+                    "findings": {"1": {"verdict": "accepted"}},
+                    "manual_frames": [
+                        {"marker_id": "manual-1", "frame_path": "manual_frames/manual-1.jpg"}
+                    ],
+                },
+                "manual_review": {
+                    "markers": [
+                        {"marker_id": "manual-1", "frame_path": "manual_frames/manual-1.jpg"}
+                    ],
+                    "results": [],
+                },
+                "work_items": [
+                    {"id": "1", "source": "review_detection"},
+                    {"id": "manual-1", "source": "review_manual_frame"},
+                    {"id": "pipeline-1", "source": "pipeline_detection"},
+                ],
+                "pipeline_metadata": {"keep": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    app = create_review_app(output_dir, report_file.name, video_path, _config())
+    client = TestClient(app)
+
+    response = client.post("/api/reset-review")
+
+    assert response.status_code == 200
+    assert response.json()["state"] == {
+        "findings": {},
+        "manualFrames": [],
+        "reviewer": "",
+        "modified": False,
+        "resetGeneration": 1,
+    }
+    saved = json.loads(json_path.read_text(encoding="utf-8"))
+    assert saved["findings"] == [{"id": 1}, {"id": 2}]
+    assert saved["pipeline_metadata"] == {"keep": True}
+    assert saved["work_items"] == [{"id": "pipeline-1", "source": "pipeline_detection"}]
+    assert saved["review_reset_generation"] == 1
+    assert "human_review" not in saved
+    assert "manual_review" not in saved
+    assert list(manual_dir.iterdir()) == []
+    assert client.get("/api/review-state").json() == {
+        "findings": {},
+        "manualFrames": [],
+        "reviewer": "",
+        "modified": False,
+        "resetGeneration": 1,
+    }
+
+
+def test_reset_generation_rejects_manual_mark_that_finishes_after_reset(
+    review_workspace: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A capture that began in the previous generation cannot survive reset."""
+    import json
+    import threading
+
+    import screenscribe.review_server as review_server_module
+
+    output_dir, report_file, video_path = review_workspace
+    (output_dir / "screen_report.json").write_text(
+        json.dumps({"video": "screen.mov", "findings": [{"id": 1}]}),
+        encoding="utf-8",
+    )
+    entered_store = threading.Event()
+    release_store = threading.Event()
+    original_store = review_server_module.store_manual_frame_image
+
+    def blocking_store(target_dir: Path, marker_id: str, frame_base64: str) -> str:
+        entered_store.set()
+        assert release_store.wait(timeout=5), "test did not release the blocked mark"
+        return original_store(target_dir, marker_id, frame_base64)
+
+    monkeypatch.setattr(review_server_module, "store_manual_frame_image", blocking_store)
+    app = create_review_app(output_dir, report_file.name, video_path, _config())
+    mark_result: dict[str, Any] = {}
+
+    def post_mark() -> None:
+        mark_result["response"] = TestClient(app).post(
+            "/api/manual-mark",
+            json={
+                "timestamp": 1.0,
+                "frame_base64": PNG_1X1_BASE64,
+                "transcript": "old generation",
+                "notes": "",
+                "reset_generation": 0,
+            },
+        )
+
+    worker = threading.Thread(target=post_mark)
+    worker.start()
+    assert entered_store.wait(timeout=5), "manual mark never reached the blocked store"
+    try:
+        reset = TestClient(app).post("/api/reset-review")
+    finally:
+        release_store.set()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert reset.status_code == 200
+    assert reset.json()["resetGeneration"] == 1
+    assert mark_result["response"].status_code == 409
+    state = TestClient(app).get("/api/review-state").json()
+    assert state["resetGeneration"] == 1
+    assert state["manualFrames"] == []
+    manual_dir = output_dir / "manual_frames"
+    assert not manual_dir.exists() or list(manual_dir.iterdir()) == []
+
+
+def test_reset_generation_rejects_stt_that_finishes_after_reset(
+    review_workspace: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A prior-epoch transcription cannot advance the reset conversation chain."""
+    import json
+    import threading
+
+    output_dir, report_file, video_path = review_workspace
+    (output_dir / "screen_report.json").write_text(
+        json.dumps({"video": "screen.mov", "findings": [{"id": 1}]}),
+        encoding="utf-8",
+    )
+    entered_stt = threading.Event()
+    release_stt = threading.Event()
+
+    def blocking_transcribe(*args: Any, **kwargs: Any) -> TranscriptionResult:
+        entered_stt.set()
+        assert release_stt.wait(timeout=5), "test did not release the blocked STT"
+        return TranscriptionResult(
+            text="stale voice note",
+            segments=[Segment(id=1, start=0.0, end=1.0, text="stale voice note")],
+            language="en",
+            response_id="stale-response-id",
+        )
+
+    monkeypatch.setattr(
+        "screenscribe.transcribe.transcribe_audio_bytes",
+        blocking_transcribe,
+    )
+    app = create_review_app(output_dir, report_file.name, video_path, _config())
+    stt_result: dict[str, Any] = {}
+
+    def post_stt() -> None:
+        stt_result["response"] = TestClient(app).post(
+            "/api/stt?reset_generation=0",
+            files={"audio": ("a.webm", VALID_BROWSER_AUDIO, "audio/webm")},
+        )
+
+    worker = threading.Thread(target=post_stt)
+    worker.start()
+    assert entered_stt.wait(timeout=5), "STT request never reached the blocked provider"
+    try:
+        reset = TestClient(app).post("/api/reset-review")
+    finally:
+        release_stt.set()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert reset.status_code == 200
+    assert stt_result["response"].status_code == 409
+    assert _reach_review_session(app).last_response_id == ""
+
+
+def test_stale_manual_mark_keeps_409_when_image_cleanup_fails(
+    review_workspace: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Best-effort stale-image cleanup must not replace epoch conflict with 500."""
+    import json
+    import threading
+
+    import screenscribe.review_server as review_server_module
+
+    output_dir, report_file, video_path = review_workspace
+    (output_dir / "screen_report.json").write_text(
+        json.dumps({"video": "screen.mov", "findings": [{"id": 1}]}),
+        encoding="utf-8",
+    )
+    entered_store = threading.Event()
+    release_store = threading.Event()
+    original_store = review_server_module.store_manual_frame_image
+
+    def blocking_store(target_dir: Path, marker_id: str, frame_base64: str) -> str:
+        entered_store.set()
+        assert release_store.wait(timeout=5), "test did not release the blocked mark"
+        return original_store(target_dir, marker_id, frame_base64)
+
+    def fail_stale_cleanup(_output_dir: Path, _frame_path: str) -> None:
+        raise PermissionError("locked stale frame")
+
+    monkeypatch.setattr(review_server_module, "store_manual_frame_image", blocking_store)
+    monkeypatch.setattr(
+        review_server_module,
+        "_remove_manual_frame_image",
+        fail_stale_cleanup,
+    )
+    app = create_review_app(output_dir, report_file.name, video_path, _config())
+    mark_result: dict[str, Any] = {}
+
+    def post_mark() -> None:
+        mark_result["response"] = TestClient(app).post(
+            "/api/manual-mark",
+            json={
+                "timestamp": 1.0,
+                "frame_base64": PNG_1X1_BASE64,
+                "transcript": "old generation",
+                "notes": "",
+                "reset_generation": 0,
+            },
+        )
+
+    worker = threading.Thread(target=post_mark)
+    worker.start()
+    assert entered_store.wait(timeout=5), "manual mark never reached the blocked store"
+    try:
+        reset = TestClient(app).post("/api/reset-review")
+    finally:
+        release_store.set()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert reset.status_code == 200
+    assert mark_result["response"].status_code == 409
+    assert "stale image cleanup failed" in caplog.text
+    assert TestClient(app).get("/api/review-state").json()["manualFrames"] == []
+
+
+def test_review_server_reset_is_idempotent(
+    review_workspace: tuple[Path, Path, Path],
+) -> None:
+    """Repeating reset on an already-clean report is a successful no-op."""
+    import json
+
+    output_dir, report_file, video_path = review_workspace
+    json_path = output_dir / "screen_report.json"
+    baseline = {"video": "screen.mov", "findings": [{"id": 1}]}
+    json_path.write_text(json.dumps(baseline), encoding="utf-8")
+    app = create_review_app(output_dir, report_file.name, video_path, _config())
+    client = TestClient(app)
+
+    first = client.post("/api/reset-review")
+    second = client.post("/api/reset-review")
+    assert first.status_code == 200
+    assert first.json()["resetGeneration"] == 1
+    assert second.status_code == 200
+    assert second.json()["resetGeneration"] == 2
+    assert json.loads(json_path.read_text(encoding="utf-8")) == {
+        **baseline,
+        "review_reset_generation": 2,
+    }
+
+
+def test_review_reset_generation_survives_server_restart(
+    review_workspace: tuple[Path, Path, Path],
+) -> None:
+    """A fresh app for the same report resumes the durable reset epoch."""
+    import json
+
+    output_dir, report_file, video_path = review_workspace
+    json_path = output_dir / "screen_report.json"
+    json_path.write_text(
+        json.dumps({"video": "screen.mov", "findings": [{"id": 1}]}),
+        encoding="utf-8",
+    )
+
+    first_client = TestClient(
+        create_review_app(output_dir, report_file.name, video_path, _config())
+    )
+    assert first_client.post("/api/reset-review").json()["resetGeneration"] == 1
+
+    restarted_client = TestClient(
+        create_review_app(output_dir, report_file.name, video_path, _config())
+    )
+    assert restarted_client.get("/api/review-state").json()["resetGeneration"] == 1
+    assert restarted_client.post("/api/reset-review").json()["resetGeneration"] == 2
+    assert json.loads(json_path.read_text(encoding="utf-8"))["review_reset_generation"] == 2
+
+
+def test_review_server_save_rejects_generation_from_before_reset(
+    review_workspace: tuple[Path, Path, Path],
+) -> None:
+    """A queued Save cannot restore review overlays after reset commits."""
+    import json
+
+    output_dir, report_file, video_path = review_workspace
+    json_path = output_dir / "screen_report.json"
+    json_path.write_text(
+        json.dumps({"video": "screen.mov", "findings": [{"id": 1}]}),
+        encoding="utf-8",
+    )
+    client = TestClient(create_review_app(output_dir, report_file.name, video_path, _config()))
+    assert client.post("/api/reset-review").json()["resetGeneration"] == 1
+
+    stale = client.post(
+        "/api/save",
+        json={
+            "resetGeneration": 0,
+            "reviewer": "stale reviewer",
+            "reviewed_at": "2026-08-23T00:00:00Z",
+            "findings": [{"id": 1, "human_review": {"verdict": "accepted", "notes": "stale"}}],
+            "manual_frames": [],
+        },
+    )
+    assert stale.status_code == 409
+    saved = json.loads(json_path.read_text(encoding="utf-8"))
+    assert saved["review_reset_generation"] == 1
+    assert "human_review" not in saved
+
+    current = client.post(
+        "/api/save",
+        json={
+            "resetGeneration": 1,
+            "reviewer": "current reviewer",
+            "reviewed_at": "2026-08-23T00:01:00Z",
+            "findings": [{"id": 1, "human_review": {"verdict": "accepted", "notes": "current"}}],
+            "manual_frames": [],
+        },
+    )
+    assert current.status_code == 200
+    assert json.loads(json_path.read_text(encoding="utf-8"))["human_review"]["reviewer"] == (
+        "current reviewer"
+    )
+
+
+def test_review_server_reset_stays_successful_when_frame_cleanup_fails(
+    review_workspace: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A post-commit frame cleanup error must not report the durable reset as failed."""
+    import json
+
+    output_dir, report_file, video_path = review_workspace
+    json_path = output_dir / "screen_report.json"
+    json_path.write_text(
+        json.dumps(
+            {
+                "video": "screen.mov",
+                "findings": [{"id": 1}],
+                "human_review": {
+                    "reviewer": "alex",
+                    "findings": {"1": {"verdict": "accepted"}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_cleanup(_output_dir: Path, _keep: set[str]) -> int:
+        raise OSError("manual frame is locked")
+
+    monkeypatch.setattr(
+        "screenscribe.review_server._sweep_orphan_manual_frames",
+        fail_cleanup,
+    )
+    app = create_review_app(output_dir, report_file.name, video_path, _config())
+    response = TestClient(app).post("/api/reset-review")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "reset"
+    saved = json.loads(json_path.read_text(encoding="utf-8"))
+    assert "human_review" not in saved
+    assert "Review reset committed, but manual-frame cleanup failed" in caplog.text
+
+
 def test_review_server_reloads_human_review_from_disk_after_fresh_load(
     review_workspace: tuple[Path, Path, Path],
 ) -> None:
@@ -1780,6 +2167,19 @@ def test_review_state_returns_merged_from_ids(
                             "verdict": "accepted",
                             "notes": "survivor",
                             "merged_from_ids": [18, 26, 27],
+                            "merged_member_reviews": {
+                                "18": {"verdict": "rejected", "notes": "restore me"}
+                            },
+                            "merged_survivor_review": {
+                                "verdict": "none",
+                                "severity": "low",
+                                "notes": "survivor before merge",
+                            },
+                            "merged_review_baseline": {
+                                "verdict": "accepted",
+                                "severity": "high",
+                                "notes": "survivor\n\nrestore me",
+                            },
                         },
                         "6": {"verdict": "accepted", "notes": "standalone"},
                     }
@@ -1797,6 +2197,19 @@ def test_review_state_returns_merged_from_ids(
 
     survivor = findings.get("17", {})
     assert survivor.get("merged_from_ids") == [18, 26, 27], survivor
+    assert survivor.get("merged_member_reviews") == {
+        "18": {"verdict": "rejected", "notes": "restore me"}
+    }
+    assert survivor.get("merged_survivor_review") == {
+        "verdict": "none",
+        "severity": "low",
+        "notes": "survivor before merge",
+    }
+    assert survivor.get("merged_review_baseline") == {
+        "verdict": "accepted",
+        "severity": "high",
+        "notes": "survivor\n\nrestore me",
+    }
     # A standalone finding carries an empty trail, never a missing key.
     assert findings.get("6", {}).get("merged_from_ids") == []
 
@@ -1985,6 +2398,87 @@ def _reach_review_session(app: Any) -> Any:
             if isinstance(val, mod.ReviewSession):
                 return val
     raise AssertionError("could not reach ReviewSession")
+
+
+def _reach_review_save_lock(app: Any) -> Any:
+    """Walk route closures to find the per-report asyncio serialization lock."""
+    import asyncio
+
+    for route in app.routes:
+        endpoint = getattr(route, "endpoint", None)
+        closure = getattr(endpoint, "__closure__", None)
+        if not closure:
+            continue
+        for cell in closure:
+            val = cell.cell_contents
+            if isinstance(val, asyncio.Lock):
+                return val
+    raise AssertionError("could not reach review save lock")
+
+
+def test_review_state_snapshot_serializes_with_reset_lock(
+    review_workspace: tuple[Path, Path, Path],
+) -> None:
+    """Review data and reset generation must come from one serialized instant."""
+    import asyncio
+    import json
+
+    import httpx
+
+    output_dir, report_file, video_path = review_workspace
+    json_path = output_dir / "screen_report.json"
+    json_path.write_text(
+        json.dumps(
+            {
+                "video": "screen.mov",
+                "findings": [{"id": 1}],
+                "human_review": {
+                    "reviewer": "old reviewer",
+                    "findings": {"1": {"verdict": "accepted", "notes": "old"}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    app = create_review_app(output_dir, report_file.name, video_path, _config())
+    save_lock = _reach_review_save_lock(app)
+    session = _reach_review_session(app)
+    token = app.state.session_token
+
+    async def _run() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://127.0.0.1",
+            headers={"X-ScreenScribe-Token": token},
+        ) as client:
+            async with save_lock:
+                pending = asyncio.create_task(client.get("/api/review-state"))
+                await asyncio.sleep(0)
+                assert not pending.done(), "review-state bypassed reset/save serialization"
+                json_path.write_text(
+                    json.dumps(
+                        {
+                            "video": "screen.mov",
+                            "findings": [{"id": 1}],
+                            "review_reset_generation": 1,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                with session.lock:
+                    session.reset_generation = 1
+            response = await pending
+            assert response.status_code == 200
+            assert response.json() == {
+                "findings": {},
+                "manualFrames": [],
+                "reviewer": "",
+                "modified": False,
+                "resetGeneration": 1,
+            }
+
+    asyncio.run(_run())
 
 
 def test_concurrent_manual_analyses_last_response_id_uses_cas(

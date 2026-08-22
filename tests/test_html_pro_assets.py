@@ -65,6 +65,32 @@ def test_report_viewer_partials_have_no_inline_onclick() -> None:
     assert not offenders, "inline onclick still present in partials: " + ", ".join(offenders)
 
 
+def test_merged_review_controls_use_distinct_ids_from_hidden_originals() -> None:
+    """Generated merge cards must not duplicate ids from hidden source cards."""
+    review_app = assets.load_js_review_app()
+
+    assert "'merged-finding-priority-' + merged.id" in review_app
+    assert "'merged-finding-notes-' + merged.id" in review_app
+    assert "sevSelect.id = 'finding-priority-' + merged.id" not in review_app
+    assert "notesArea.id = 'finding-notes-' + merged.id" not in review_app
+
+
+def test_reset_copy_and_styling_disclose_destructive_scope() -> None:
+    """Reset names the reviewer field it clears and is visibly destructive at rest."""
+    review_app = assets.load_js_review_app()
+    i18n_js = assets.load_js_i18n_runtime()
+    css = load_css()
+
+    assert "updateFindingsTabCount(articles.length)" in review_app
+    assert "getEffectiveSeverity" not in review_app
+    assert "This clears the reviewer name" in i18n_js
+    assert "usunięcie nazwy recenzenta" in i18n_js
+    assert "w tym odrzucone" in i18n_js
+    assert ".export-buttons button.btn-reset-review {" in css
+    assert "color: var(--color-error)" in css
+    assert "--color-danger" not in css
+
+
 def test_stylesheets_have_no_webfont_imports() -> None:
     """The report is an offline evidence bundle: opening it must not trigger
     any network request. No @import in any shipped stylesheet; brand fonts
@@ -456,6 +482,8 @@ def test_review_js_focus_traps_and_keyboard_nav_presence_smoke() -> None:
     # activateTab / setLanguage keep ARIA state in sync.
     assert "aria-selected" in js
     assert "aria-pressed" in js
+    assert "button.tabIndex = isActive ? 0 : -1" in js
+    assert "document.documentElement.lang = lang" in js
 
     # Resizer is keyboard-operable.
     assert "resizer.tabIndex = 0" in js
@@ -463,6 +491,37 @@ def test_review_js_focus_traps_and_keyboard_nav_presence_smoke() -> None:
 
     # Clickable thumbnails become keyboard-operable buttons.
     assert "img.setAttribute('role', 'button')" in js
+
+
+def test_shared_shell_layout_controller_tracks_real_header_height() -> None:
+    layout_js = assets.load_js_lib_layout_control()
+    assert "ResizeObserver" in layout_js
+    assert "getBoundingClientRect().height" in layout_js
+    assert "--header-height" in layout_js
+
+
+def test_mobile_header_uses_non_clipping_grid_and_i18n_keeps_merged_labels() -> None:
+    css = assets.load_css()
+    i18n_js = assets.load_js_i18n_runtime()
+    assert "@media (max-width: 600px)" in css
+    assert "grid-template-columns: minmax(0, 1fr) auto" in css
+    assert 'body[data-surface-id="analyze"] .app-header' in css
+    assert 'body[data-surface-id="analyze"] .header-right' in css
+    assert "flex-wrap: wrap" in css
+    assert "justify-content: flex-start" in css
+    assert '"mergedEvidence": "Merged evidence frames"' in i18n_js
+    assert '"mergedEvidence": "Scalone klatki dowodowe"' in i18n_js
+
+
+def test_sidebar_resizer_aria_uses_pixel_bounds_consistently() -> None:
+    review_js = assets.load_js_review_app()
+    analyze_js = assets.load_js_analyze_dashboard()
+    for js in (review_js, analyze_js):
+        assert "aria-valuemin', String(Math.round(minPx))" in js
+        assert "aria-valuemax', String(Math.round(maxPx))" in js
+        assert "aria-valuenow', String(Math.round(nextWidth))" in js
+        assert "aria-valuemin', '0'" not in js
+        assert "aria-valuemax', '100'" not in js
 
 
 def test_dashboard_js_focus_restore_and_keyboard_controls_presence_smoke() -> None:
@@ -492,6 +551,7 @@ def test_dashboard_js_focus_restore_and_keyboard_controls_presence_smoke() -> No
     assert "initTabKeyboard(tabButtons" in js
     assert "ArrowRight" in tab_js
     assert "setAttribute('aria-selected'" in js
+    assert "b.tabIndex = isActive ? 0 : -1" in js
     assert "nextBtn.focus()" in tab_js
 
     # Lang toggle keeps aria-pressed in sync.

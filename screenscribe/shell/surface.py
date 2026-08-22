@@ -85,6 +85,7 @@ REVIEW_SURFACE = SurfaceConfig(
     },
     scripts=[
         "i18n",
+        "lib/layout-control",
         "lib/language-control",
         "lib/stt-transport",
         "lib/tab-keyboard",
@@ -126,6 +127,7 @@ ANALYZE_SURFACE = SurfaceConfig(
     extra_styles=["analyze_dashboard"],
     scripts=[
         "i18n",
+        "lib/layout-control",
         "lib/language-control",
         "lib/stt-transport",
         "lib/tab-keyboard",

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 
+from screenscribe.html_pro.assets import load_css
 from screenscribe.html_pro.renderer import render_html_report_pro
 
 
@@ -112,4 +113,15 @@ def test_unmerged_finding_has_no_merged_evidence_block() -> None:
         errors=[],
         language="en",
     )
-    assert "finding-merged-frames" not in html
+    assert "finding-merged-frames" not in _strip_embedded_payloads(html)
+
+
+def test_merged_frame_thumbnails_are_visually_bounded() -> None:
+    """Absorbed 3K frames must stay thumbnails, not expand to natural size."""
+    css = load_css()
+    rule = re.search(r"\.merged-frame-thumb\s*\{(?P<body>[^}]*)\}", css, re.DOTALL)
+    assert rule is not None, "merged-frame-thumb has no dedicated CSS rule"
+    body = rule.group("body")
+    assert "max-inline-size" in body or "max-width" in body
+    assert "max-block-size" in body or "max-height" in body
+    assert "object-fit" in body

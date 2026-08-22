@@ -22,6 +22,7 @@ from ..html_pro.assets import (
     load_js_i18n_runtime,
     load_js_jszip,
     load_js_lib_language_control,
+    load_js_lib_layout_control,
     load_js_lib_stt_transport,
     load_js_lib_tab_keyboard,
     load_js_review_app,
@@ -50,6 +51,7 @@ _SERVER_I18N: dict[str, dict[str, dict[str, str]]] = {
             "reviewer": "Reviewer:",
             "reviewerPlaceholder": "Your name",
             "saveToDisk": "Save review",
+            "resetReview": "Reset review",
             "exportTodo": "Export TODO",
             "exportJson": "Export JSON",
             "exportZip": "Export ZIP",
@@ -120,6 +122,7 @@ _SERVER_I18N: dict[str, dict[str, dict[str, str]]] = {
             "reviewer": "Recenzent:",
             "reviewerPlaceholder": "Twoje imię i nazwisko",
             "saveToDisk": "Zapisz recenzję",
+            "resetReview": "Resetuj recenzję",
             "exportTodo": "Eksportuj TODO",
             "exportJson": "Eksportuj JSON",
             "exportZip": "Eksportuj ZIP",
@@ -175,6 +178,7 @@ _STYLE_LOADERS: Mapping[str, Callable[[], str]] = {
 }
 _SCRIPT_LOADERS: Mapping[str, Callable[[], str]] = {
     "i18n": load_js_i18n_runtime,
+    "lib/layout-control": load_js_lib_layout_control,
     "lib/language-control": load_js_lib_language_control,
     "lib/stt-transport": load_js_lib_stt_transport,
     "lib/tab-keyboard": load_js_lib_tab_keyboard,
@@ -251,6 +255,7 @@ def _render_tab(
         f'data-tab="{html.escape(tab.id, quote=True)}"',
         'role="tab"',
         f'aria-selected="{str(active).lower()}"',
+        f'tabindex="{0 if active else -1}"',
         f'aria-controls="tab-{html.escape(tab.id, quote=True)}"',
     ]
     label = (

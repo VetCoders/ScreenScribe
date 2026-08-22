@@ -58,12 +58,17 @@ const reportState = {
     manualFrames: [],
     // Human-merge groups: each is { id, member_ids: [...], summary_override }.
     // `id` is the surviving (earliest-timestamp) finding id; the union of every
-    // member is recomputed from the original findings at export/build time so the
-    // editable summary is the only mutable state we persist here.
+    // member is recomputed from the original findings at export/build time. The
+    // editable summary plus pre-merge member review snapshots are persisted so
+    // the fold remains reversible after Save/reload.
     merges: [],
     reviewer: '',
     modified: false,
-    reportId: ''
+    reportId: '',
+    // Monotonic server-issued epoch for destructive review resets. Shared
+    // snapshots and manual-frame requests carry it so work started before a
+    // reset cannot overwrite the reset afterwards.
+    resetGeneration: 0,
 };
 
 const WINDOW_MODES = {
@@ -120,6 +125,49 @@ function createDefaultFindingState() {
         verdict: 'none',
         severity: null,
         notes: ''
+    };
+}
+
+function snapshotFindingReview(state) {
+    const source = state && typeof state === 'object' ? state : {};
+    return {
+        verdict: normalizeVerdict(source.verdict),
+        severity: source.severity || null,
+        notes: source.notes || '',
+        annotations: Array.isArray(source.annotations)
+            ? source.annotations.map((annotation) => ({ ...annotation }))
+            : [],
+    };
+}
+
+function reviewFieldEquals(left, right) {
+    return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function populatedReviewSnapshot(candidate) {
+    return candidate && typeof candidate === 'object' && Object.keys(candidate).length > 0
+        ? candidate
+        : null;
+}
+
+function resolveMergedSurvivorReview(entry, currentState) {
+    const current = snapshotFindingReview(currentState);
+    if (!entry || !entry.merged_review_baseline) {
+        return current;
+    }
+    const baseline = snapshotFindingReview(entry.merged_review_baseline);
+    const saved = snapshotFindingReview(entry.survivor_review || current);
+    return {
+        verdict: current.verdict,
+        severity: reviewFieldEquals(current.severity, baseline.severity)
+            ? saved.severity
+            : current.severity,
+        notes: reviewFieldEquals(current.notes, baseline.notes)
+            ? saved.notes
+            : current.notes,
+        annotations: reviewFieldEquals(current.annotations, baseline.annotations)
+            ? saved.annotations
+            : current.annotations,
     };
 }
 
@@ -236,6 +284,7 @@ function activateTab(tabId, { persist = true } = {}) {
         const isActive = button.dataset.tab === nextTabId;
         button.classList.toggle('active', isActive);
         button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        button.tabIndex = isActive ? 0 : -1;
     });
 
     document.querySelectorAll('.tab-content').forEach((content) => {
@@ -343,6 +392,7 @@ function buildPersistableState(modified) {
         merges: Array.isArray(reportState.merges) ? reportState.merges : [],
         reviewer: reportState.reviewer,
         modified,
+        resetGeneration: reportState.resetGeneration,
     };
 }
 
@@ -397,6 +447,14 @@ function rememberLocalSavedAt(savedAt) {
 }
 
 function isIncomingReviewEnvelopeFresher(envelope) {
+    const incomingGeneration = resetGenerationFromEnvelope(envelope);
+    const localGeneration = normalizeResetGeneration(reportState.resetGeneration);
+    // A destructive reset is authoritative regardless of wall-clock ordering.
+    // Conversely, a late write from work started before that reset must never
+    // win merely because its savedAt timestamp is newer.
+    if (incomingGeneration !== localGeneration) {
+        return incomingGeneration > localGeneration;
+    }
     const incoming = savedAtTime(envelope);
     // No usable timestamp on the incoming snapshot (legacy/older writer): it
     // cannot be proven stale, so let it through rather than silently dropping it.
@@ -519,9 +577,33 @@ function mergeManualFrameImages(currentFrames, incomingFrames) {
     });
 }
 
-function hydrateReportState(snapshot, { showRestoreToast = false } = {}) {
+function hydrateReportState(
+    snapshot,
+    { showRestoreToast = false, discardActiveEditor = false } = {}
+) {
     if (!snapshot || typeof snapshot !== 'object') {
         return;
+    }
+
+    const currentResetGeneration = normalizeResetGeneration(reportState.resetGeneration);
+    const incomingResetGeneration = normalizeResetGeneration(snapshot.resetGeneration);
+    if (incomingResetGeneration < currentResetGeneration) {
+        return;
+    }
+    const resetAdvanced = incomingResetGeneration > currentResetGeneration;
+    const resetHydration = discardActiveEditor || resetAdvanced;
+
+    // Reset is the only hydration that deliberately invalidates an active
+    // annotation edit. Ordinary draft/disk/cross-window hydration must not close
+    // the lightbox and silently discard a drawing in progress.
+    if (resetHydration && (currentLightboxFindingId || lightboxAnnotationTool)) {
+        closeLightbox({ saveAnnotations: false, restoreFocus: false });
+    }
+    if (resetHydration && manualFrameRuntime.currentFrame) {
+        closeManualFrameModal({ discardRecording: true });
+    }
+    if (resetHydration && voiceNoteRuntime.recognition) {
+        discardVoiceNoteCapture();
     }
 
     stateSyncRuntime.suppressEvents = true;
@@ -532,6 +614,7 @@ function hydrateReportState(snapshot, { showRestoreToast = false } = {}) {
     reportState.merges = Array.isArray(snapshot.merges) ? snapshot.merges : [];
     reportState.reviewer = snapshot.reviewer || '';
     reportState.modified = Boolean(snapshot.modified);
+    reportState.resetGeneration = Math.max(currentResetGeneration, incomingResetGeneration);
     stateSyncRuntime.suppressEvents = false;
 
     const reviewerInput = document.getElementById('reviewer-name');
@@ -612,10 +695,12 @@ async function hydrateReportStateFromDisk({ enrichManualFrameImagesOnly = false 
             || (snapshot?.findings && Object.keys(snapshot.findings).length > 0)
             || (Array.isArray(snapshot?.manualFrames) && snapshot.manualFrames.length > 0)
         );
-        if (!hasDiskState || reportState.modified) {
+        const resetAdvanced = normalizeResetGeneration(snapshot?.resetGeneration)
+            > normalizeResetGeneration(reportState.resetGeneration);
+        if ((!hasDiskState && !resetAdvanced) || (reportState.modified && !resetAdvanced)) {
             return;
         }
-        hydrateReportState(snapshot);
+        hydrateReportState(snapshot, { discardActiveEditor: resetAdvanced });
     } catch (error) {
         if (DEBUG) console.debug('No persisted review state available:', error);
     }
@@ -638,12 +723,30 @@ function savedAtTime(envelope) {
     return Number.isFinite(time) ? time : null;
 }
 
+function normalizeResetGeneration(value) {
+    const generation = Number(value);
+    return Number.isInteger(generation) && generation >= 0 ? generation : 0;
+}
+
+function resetGenerationFromEnvelope(envelope) {
+    const state = envelope?.state || envelope;
+    return normalizeResetGeneration(state?.resetGeneration);
+}
+
 function chooseReviewRestoreEnvelope(draftEnvelope, syncEnvelope) {
     if (!draftEnvelope) {
         return { envelope: syncEnvelope, source: 'sync' };
     }
     if (!syncEnvelope) {
         return { envelope: draftEnvelope, source: 'draft' };
+    }
+
+    const draftGeneration = resetGenerationFromEnvelope(draftEnvelope);
+    const syncGeneration = resetGenerationFromEnvelope(syncEnvelope);
+    if (draftGeneration !== syncGeneration) {
+        return syncGeneration > draftGeneration
+            ? { envelope: syncEnvelope, source: 'sync' }
+            : { envelope: draftEnvelope, source: 'draft' };
     }
 
     const draftTime = savedAtTime(draftEnvelope);
@@ -995,18 +1098,24 @@ function openLightbox(img) {
     }
 }
 
-function closeLightbox() {
+function closeLightbox({ saveAnnotations = true, restoreFocus = true } = {}) {
     const lightbox = document.getElementById('lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
     const lightboxToolbar = document.getElementById('lightbox-toolbar');
 
-    // Save annotations before closing
-    if (lightboxAnnotationTool && currentLightboxFindingId) {
-        lightboxAnnotationTool.saveAnnotations();
+    // Cancel a pending image load so it cannot create a new annotation editor
+    // after a synchronized reset has already dismissed the lightbox.
+    if (lightboxImg) lightboxImg.onload = null;
 
-        // Update thumbnail canvas with new annotations
-        const thumbnailTool = annotationTools.get(currentLightboxFindingId);
-        if (thumbnailTool) {
-            thumbnailTool.refreshFromState();
+    if (lightboxAnnotationTool) {
+        if (saveAnnotations && currentLightboxFindingId) {
+            lightboxAnnotationTool.saveAnnotations();
+
+            // Update thumbnail canvas with new annotations
+            const thumbnailTool = annotationTools.get(currentLightboxFindingId);
+            if (thumbnailTool) {
+                thumbnailTool.refreshFromState();
+            }
         }
         lightboxAnnotationTool.destroy();
     }
@@ -1021,7 +1130,7 @@ function closeLightbox() {
         lightbox.__focusTrapHandler = null;
     }
     // Restore focus to the thumbnail (or whatever opened the lightbox).
-    if (lightboxReturnFocus && typeof lightboxReturnFocus.focus === 'function') {
+    if (restoreFocus && lightboxReturnFocus && typeof lightboxReturnFocus.focus === 'function') {
         lightboxReturnFocus.focus();
     }
     lightboxReturnFocus = null;
@@ -1164,17 +1273,11 @@ function bindThumbnailClicks(scope = document) {
 
 // Shared function to build review data - used by both JSON and ZIP export
 // =============================================================================
-// REVIEW META: live counters + findings filtering (stats cards are filters).
-// Rejected findings ("false alarm") disappear from the default list and all
-// deliverables; they stay reachable through the "Rejected" filter and are
-// recorded explicitly in saves/exports so they are not re-flagged later.
+// REVIEW META: live counter for logical moments represented in the review.
+// Rejected findings remain visible (dimmed + struck through) and therefore stay
+// in the tab count. Exports still record them separately so they are not
+// re-flagged later. A human merge counts as one logical moment, not N cards.
 // =============================================================================
-
-function getEffectiveSeverity(article) {
-    const findingId = article.dataset.findingId;
-    const override = reportState.findings[findingId]?.severity;
-    return override || article.dataset.severity || 'medium';
-}
 
 function getReviewStatus(article) {
     if (article.dataset.verdict === 'accepted') return 'accepted';
@@ -1190,18 +1293,7 @@ function updateReviewMeta() {
     const articles = Array.from(document.querySelectorAll('.finding')).filter(
         (article) => article.dataset.mergedAway !== 'true'
     );
-    const counts = { total: 0, critical: 0, high: 0, medium: 0, low: 0,
-        accepted: 0, rejected: 0, none: 0 };
-    articles.forEach((article) => {
-        const status = getReviewStatus(article);
-        counts[status] += 1;
-        if (status !== 'rejected') {
-            counts.total += 1;
-            const sev = getEffectiveSeverity(article);
-            if (counts[sev] !== undefined) counts[sev] += 1;
-        }
-    });
-    updateFindingsTabCount(counts.total);
+    updateFindingsTabCount(articles.length);
 }
 
 // =============================================================================
@@ -1514,6 +1606,7 @@ function mergeFindings(ids) {
     const expanded = [];
     const seen = new Set();
     const remaining = [];
+    const absorbedMerges = [];
     const pushMember = (id) => {
         const key = normId(id);
         if (seen.has(key)) return;
@@ -1528,6 +1621,7 @@ function mergeFindings(ids) {
     const selectedKeys = new Set(ids.map(normId));
     for (const m of reportState.merges) {
         if (selectedKeys.has(normId(m.id))) {
+            absorbedMerges.push(m);
             (m.member_ids || []).forEach(pushMember);
         } else {
             remaining.push(m);
@@ -1540,18 +1634,60 @@ function mergeFindings(ids) {
     if (group.length < 2) return null;
 
     const merged = mergeFindingGroup(group, null);
+    const memberReviews = {};
+    let retainedSurvivorReview = null;
+    absorbedMerges.forEach((entry) => {
+        Object.entries(entry.member_reviews || {}).forEach(([id, review]) => {
+            memberReviews[normId(id)] = snapshotFindingReview(review);
+        });
+        // Hidden members cannot change while folded, so their original
+        // snapshots stay authoritative. The visible survivor can be edited,
+        // however; when an earlier finding absorbs this group, preserve that
+        // current state instead of silently reverting it to the first merge's
+        // stale snapshot on the eventual unmerge.
+        const absorbedSurvivorKey = normId(entry.id);
+        const absorbedSurvivorReview = resolveMergedSurvivorReview(
+            entry,
+            reportState.findings[absorbedSurvivorKey]
+        );
+        // If it also survives the new group, keep its original pre-merge
+        // snapshot so undo can still remove the automatic accepted verdict.
+        // Its current notes/severity/annotations stay on the live survivor and
+        // are retained separately by unmergeFindings.
+        if (absorbedSurvivorKey !== normId(merged.id)) {
+            memberReviews[absorbedSurvivorKey] = absorbedSurvivorReview;
+        } else {
+            retainedSurvivorReview = absorbedSurvivorReview;
+        }
+    });
+    members.forEach((id) => {
+        const key = normId(id);
+        if (!memberReviews[key]) {
+            memberReviews[key] = snapshotFindingReview(reportState.findings[key]);
+        }
+    });
     reportState.merges = remaining;
-    reportState.merges.push({
+    const mergeEntry = {
         id: merged.id,
         member_ids: members,
         summary_override: null,
-    });
+        member_reviews: memberReviews,
+        survivor_review: null,
+        merged_review_baseline: null,
+    };
+    reportState.merges.push(mergeEntry);
 
     // Review state: the surviving finding is treated as accepted (the reviewer
     // deliberately kept it); absorbed members revert to "none" so they neither
     // ship as standalone findings nor leak into the rejected[] summary.
     if (!reportState.findings[merged.id]) {
         reportState.findings[merged.id] = createDefaultFindingState();
+    }
+    if (retainedSurvivorReview) {
+        reportState.findings[merged.id] = {
+            ...reportState.findings[merged.id],
+            ...retainedSurvivorReview,
+        };
     }
     reportState.findings[merged.id].verdict = 'accepted';
     for (const id of members) {
@@ -1561,6 +1697,8 @@ function mergeFindings(ids) {
         if (normId(id) === normId(merged.id)) continue;
         if (reportState.findings[id]) reportState.findings[id].verdict = 'none';
     }
+    mergeEntry.survivor_review = snapshotFindingReview(reportState.findings[merged.id]);
+    mergeEntry.merged_review_baseline = snapshotFindingReview(reportState.findings[merged.id]);
 
     reportState.modified = true;
     scheduleSharedStateSync();
@@ -1671,6 +1809,24 @@ function buildMergedReviewEntry(merged) {
     // Absorbed members' annotations are preserved as evidence (never rasterized
     // onto the survivor's image), so reviewer markup on members is not lost.
     if (r.memberAnnotations.length) human_review.member_annotations = r.memberAnnotations;
+    const mergeEntry = (reportState.merges || []).find(
+        (entry) => normId(entry.id) === normId(merged.id)
+    );
+    if (mergeEntry?.member_reviews && Object.keys(mergeEntry.member_reviews).length > 0) {
+        human_review.merged_member_reviews = mergeEntry.member_reviews;
+    }
+    if (mergeEntry) {
+        human_review.merged_survivor_review = resolveMergedSurvivorReview(
+            mergeEntry,
+            reportState.findings[normId(merged.id)]
+        );
+        human_review.merged_review_baseline = snapshotFindingReview({
+            verdict: r.verdict,
+            severity: r.severity,
+            notes: r.notes,
+            annotations: r.annotations,
+        });
+    }
     const result = { ...rest, human_review };
     if (merged.screenshot_path) {
         result.screenshot_path = merged.screenshot_path;
@@ -1711,6 +1867,27 @@ function updateMergeBar() {
         t('review.mergeFindingsBtn') + (count >= 2 ? ` (${count})` : '');
 }
 
+const MERGED_LIST_SEPARATOR = ', ';
+
+function refreshMergedCardDynamicTranslations(root = document) {
+    root.querySelectorAll('.finding-merged').forEach((article) => {
+        const rawCategory = article.dataset.mergedCategory || '';
+        const title = article.querySelector('.finding-title');
+        if (title) {
+            const catKey = 'review.category_' + rawCategory;
+            const catLabel = rawCategory ? t(catKey) : '';
+            title.textContent = (
+                catLabel && catLabel !== catKey ? catLabel : rawCategory
+            ).toUpperCase();
+        }
+        article.querySelectorAll('img.thumbnail[data-merged-timestamp]').forEach((img) => {
+            img.alt = t('review.mergedScreenshotAlt', {
+                ts: img.dataset.mergedTimestamp || '',
+            });
+        });
+    });
+}
+
 function renderMergedCard(merged) {
     const ua = merged.unified_analysis || {};
     const article = document.createElement('article');
@@ -1725,6 +1902,7 @@ function renderMergedCard(merged) {
     article.dataset.verdict = currentVerdict;
     article.dataset.severity = ua.severity || 'medium';
     article.dataset.merged = 'true';
+    article.dataset.mergedCategory = (merged.category || '').toString();
 
     const header = document.createElement('div');
     header.className = 'finding-header';
@@ -1738,22 +1916,31 @@ function renderMergedCard(merged) {
     const mergeCheckbox = document.createElement('input');
     mergeCheckbox.type = 'checkbox';
     mergeCheckbox.className = 'merge-select';
-    mergeCheckbox.setAttribute('aria-label', t('review.mergeSelectLabel'));
+    mergeCheckbox.setAttribute('aria-label', t('review.mergeSelectLabel', { id: merged.id }));
     mergeWrap.appendChild(mergeCheckbox);
     header.appendChild(mergeWrap);
     const title = document.createElement('span');
     title.className = 'finding-title';
     // Localize the category badge instead of upper-casing the raw EN enum; an
     // unmapped category falls back to its own upper-cased value.
-    const rawCategory = (merged.category || '').toString();
+    const rawCategory = article.dataset.mergedCategory;
     const catKey = 'review.category_' + rawCategory;
     const catLabel = rawCategory ? t(catKey) : '';
     title.textContent = (catLabel && catLabel !== catKey ? catLabel : rawCategory).toUpperCase();
     const badge = document.createElement('span');
     badge.className = 'severity-badge merged-badge';
+    badge.setAttribute('data-i18n', 'review.mergedBadge');
     badge.textContent = t('review.mergedBadge');
     header.appendChild(title);
     header.appendChild(badge);
+    const unmergeButton = document.createElement('button');
+    unmergeButton.type = 'button';
+    unmergeButton.className = 'btn-secondary unmerge-finding-btn';
+    unmergeButton.dataset.action = 'unmerge-finding';
+    unmergeButton.dataset.findingId = normId(merged.id);
+    unmergeButton.setAttribute('data-i18n', 'review.unmergeFinding');
+    unmergeButton.textContent = t('review.unmergeFinding');
+    header.appendChild(unmergeButton);
     article.appendChild(header);
 
     const content = document.createElement('div');
@@ -1763,6 +1950,8 @@ function renderMergedCard(merged) {
     const summaryField = document.createElement('div');
     summaryField.className = 'review-field merged-summary-field';
     const summaryLabel = document.createElement('label');
+    summaryLabel.className = 'merged-summary-label';
+    summaryLabel.setAttribute('data-i18n', 'review.findingSummary');
     summaryLabel.textContent = t('review.findingSummary');
     const summaryTextarea = document.createElement('textarea');
     summaryTextarea.className = 'merged-summary';
@@ -1785,15 +1974,27 @@ function renderMergedCard(merged) {
     if ((ua.action_items || []).length) {
         const actions = document.createElement('div');
         actions.className = 'ai-suggestions';
-        actions.textContent =
-            t('review.aiSuggestions') + ' ' + ua.action_items.join(', ');
+        const actionsLabel = document.createElement('span');
+        actionsLabel.className = 'merged-actions-label';
+        actionsLabel.setAttribute('data-i18n', 'review.aiSuggestions');
+        actionsLabel.textContent = t('review.aiSuggestions');
+        const actionsValue = document.createElement('span');
+        actionsValue.textContent = ' ' + ua.action_items.join(MERGED_LIST_SEPARATOR);
+        actions.appendChild(actionsLabel);
+        actions.appendChild(actionsValue);
         content.appendChild(actions);
     }
     if ((ua.affected_components || []).length) {
         const comps = document.createElement('div');
         comps.className = 'merged-components';
-        comps.textContent =
-            t('review.affectedComponents') + ': ' + ua.affected_components.join(', ');
+        const compsLabel = document.createElement('span');
+        compsLabel.className = 'merged-components-label';
+        compsLabel.setAttribute('data-i18n', 'review.affectedComponents');
+        compsLabel.textContent = t('review.affectedComponents');
+        const compsValue = document.createElement('span');
+        compsValue.textContent = ': ' + ua.affected_components.join(MERGED_LIST_SEPARATOR);
+        comps.appendChild(compsLabel);
+        comps.appendChild(compsValue);
         content.appendChild(comps);
     }
 
@@ -1801,7 +2002,14 @@ function renderMergedCard(merged) {
     from.className = 'merged-from';
     // Human-facing trail shows every source (surviving id + absorbed ids).
     const sources = [merged.id, ...(merged.merged_from_ids || [])];
-    from.textContent = t('review.mergedFromLabel') + ': ' + sources.join(', ');
+    const fromLabel = document.createElement('span');
+    fromLabel.className = 'merged-from-label';
+    fromLabel.setAttribute('data-i18n', 'review.mergedFromLabel');
+    fromLabel.textContent = t('review.mergedFromLabel');
+    const fromValue = document.createElement('span');
+    fromValue.textContent = ': ' + sources.join(MERGED_LIST_SEPARATOR);
+    from.appendChild(fromLabel);
+    from.appendChild(fromValue);
     content.appendChild(from);
 
     // The survivor's screenshot, as an inspect/annotate surface — a merged
@@ -1817,11 +2025,19 @@ function renderMergedCard(merged) {
         img.className = 'thumbnail';
         img.src = merged.screenshot;
         img.setAttribute('data-full', merged.screenshot);
+        img.dataset.mergedTimestamp = (
+            merged.timestamp_formatted || formatPreciseTime(merged.timestamp || 0)
+        );
+        img.alt = t('review.mergedScreenshotAlt', {
+            ts: img.dataset.mergedTimestamp,
+        });
+        img.setAttribute('data-i18n-title', 'media.manualFrameZoomTitle');
         img.title = t('media.manualFrameZoomTitle');
         const svg = document.createElement('svg');
         svg.className = 'annotation-svg';
         const hint = document.createElement('div');
         hint.className = 'annotation-hint';
+        hint.setAttribute('data-i18n', 'media.manualFrameAnnotateHint');
         hint.textContent = t('media.manualFrameAnnotateHint');
         container.appendChild(img);
         container.appendChild(svg);
@@ -1848,6 +2064,8 @@ function renderMergedCard(merged) {
     const verdictField = document.createElement('div');
     verdictField.className = 'review-field';
     const verdictLabel = document.createElement('label');
+    verdictLabel.className = 'merged-verdict-label';
+    verdictLabel.setAttribute('data-i18n', 'review.verdict');
     verdictLabel.textContent = t('review.verdict');
     verdictField.appendChild(verdictLabel);
     const radioGroup = document.createElement('div');
@@ -1862,6 +2080,7 @@ function renderMergedCard(merged) {
         radio.setAttribute('value', value);
         if (currentVerdict === value) radio.checked = true;
         const span = document.createElement('span');
+        span.setAttribute('data-i18n', labelKey);
         span.textContent = t(labelKey);
         wrap.appendChild(radio);
         wrap.appendChild(span);
@@ -1873,15 +2092,20 @@ function renderMergedCard(merged) {
     const sevField = document.createElement('div');
     sevField.className = 'review-field';
     const sevLabel = document.createElement('label');
+    sevLabel.className = 'merged-severity-label';
+    sevLabel.setAttribute('data-i18n', 'review.changePriority');
     sevLabel.textContent = t('review.changePriority');
-    sevField.appendChild(sevLabel);
     const sevSelect = document.createElement('select');
     sevSelect.className = 'severity-select';
+    sevSelect.id = 'merged-finding-priority-' + merged.id;
+    sevLabel.htmlFor = sevSelect.id;
+    sevField.appendChild(sevLabel);
     [['', 'review.noChange'], ['critical', 'review.critical'], ['high', 'review.high'],
         ['medium', 'review.medium'], ['low', 'review.low']].forEach(([value, labelKey]) => {
         const opt = document.createElement('option');
         opt.value = value;
         opt.setAttribute('value', value);
+        opt.setAttribute('data-i18n', labelKey);
         opt.textContent = t(labelKey);
         sevSelect.appendChild(opt);
     });
@@ -1893,9 +2117,15 @@ function renderMergedCard(merged) {
     const notesField = document.createElement('div');
     notesField.className = 'review-field notes';
     const notesLabel = document.createElement('label');
+    notesLabel.className = 'merged-notes-label';
+    notesLabel.setAttribute('data-i18n', 'review.notes');
     notesLabel.textContent = t('review.notes');
-    notesField.appendChild(notesLabel);
     const notesArea = document.createElement('textarea');
+    notesArea.className = 'merged-notes-area';
+    notesArea.id = 'merged-finding-notes-' + merged.id;
+    notesLabel.htmlFor = notesArea.id;
+    notesField.appendChild(notesLabel);
+    notesArea.setAttribute('data-i18n', 'review.notesPlaceholder');
     notesArea.setAttribute('placeholder', t('review.notesPlaceholder'));
     notesArea.value = state.notes || '';
     notesField.appendChild(notesArea);
@@ -1967,14 +2197,86 @@ function ensureMergeEntry(merged) {
     reportState.merges = Array.isArray(reportState.merges) ? reportState.merges : [];
     let entry = reportState.merges.find((x) => normId(x.id) === normId(merged.id));
     if (!entry) {
+        const hydratedReview = reportState.findings[normId(merged.id)] || {};
+        const memberReviews = hydratedReview.merged_member_reviews || {};
+        const persistedSurvivor = populatedReviewSnapshot(
+            hydratedReview.merged_survivor_review
+        );
+        const persistedBaseline = populatedReviewSnapshot(
+            hydratedReview.merged_review_baseline
+        );
         entry = {
             id: normId(merged.id),
             member_ids: [merged.id, ...(merged.merged_from_ids || [])].map(normId),
             summary_override: null,
+            member_reviews: memberReviews,
+            survivor_review: snapshotFindingReview(
+                persistedSurvivor
+                || memberReviews[normId(merged.id)]
+                || hydratedReview
+            ),
+            merged_review_baseline: snapshotFindingReview(
+                persistedBaseline || hydratedReview
+            ),
         };
         reportState.merges.push(entry);
     }
     return entry;
+}
+
+function unmergeFindings(survivorId) {
+    const survivorKey = normId(survivorId);
+    const entry = (reportState.merges || []).find(
+        (candidate) => normId(candidate.id) === survivorKey
+    );
+    if (!entry) return false;
+
+    const snapshots = entry.member_reviews || {};
+    const currentSurvivor = snapshotFindingReview(reportState.findings[survivorKey]);
+    const actualSurvivor = resolveMergedSurvivorReview(entry, currentSurvivor);
+    const memberIds = Array.from(new Set((entry.member_ids || []).map(normId)));
+    memberIds.forEach((memberId) => {
+        const memberSnapshot = snapshots[memberId];
+        const restored = memberSnapshot
+            ? snapshotFindingReview(memberSnapshot)
+            : createDefaultFindingState();
+        // Edits made on the merged card belong to the survivor when the group is
+        // split, but the merge's automatic `accepted` verdict is mechanics, not
+        // a new reviewer decision. Undo therefore restores the survivor's
+        // pre-merge verdict while retaining its current notes, severity and
+        // annotations. Other members recover their exact snapshots.
+        reportState.findings[memberId] = memberId === survivorKey
+            ? {
+                ...actualSurvivor,
+                verdict: memberSnapshot ? restored.verdict : actualSurvivor.verdict,
+            }
+            : restored;
+    });
+
+    reportState.merges = (reportState.merges || []).filter(
+        (candidate) => normId(candidate.id) !== survivorKey
+    );
+    reportState.modified = true;
+    return true;
+}
+
+function unmergeFindingGroup(survivorId) {
+    if (!unmergeFindings(survivorId)) {
+        showNotification(t('review.unmergeUnavailable'));
+        return false;
+    }
+    restoreMergesToDom();
+    // applyMergeToDom binds the survivor id to the generated merged card. Once
+    // the final group is removed that card is detached and the original finding
+    // becomes visible again, so rebuild the preview map before future lightbox
+    // edits target a stale container.
+    initAnnotationTools();
+    restoreUIFromState();
+    initMergeUI();
+    updateMergeBar();
+    scheduleSharedStateSync();
+    showNotification(t('review.unmergeDone'));
+    return true;
 }
 
 // Replay every persisted/data-side merge group into the DOM, idempotently. Used
@@ -2035,7 +2337,9 @@ function initMergeUI() {
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.className = 'merge-select';
-        checkbox.setAttribute('aria-label', t('review.mergeSelectLabel'));
+        checkbox.setAttribute('aria-label', t('review.mergeSelectLabel', {
+            id: article.dataset.findingId || '',
+        }));
         wrap.appendChild(checkbox);
         header.insertBefore(wrap, header.firstChild);
     });
@@ -2133,6 +2437,7 @@ function buildReviewData() {
         video: document.body.dataset.videoName,
         reviewed_at: new Date().toISOString(),
         reviewer: reportState.reviewer,
+        resetGeneration: normalizeResetGeneration(reportState.resetGeneration),
         findings: reviewedFindings,
         manual_frames: manualFrames,
     };
@@ -2340,6 +2645,57 @@ async function saveReviewToDisk() {
     } catch (error) {
         if (DEBUG) console.error('Save to disk failed:', error);
         showNotification(t('review.saveFailed', { message: error.message }));
+    }
+}
+
+async function resetReview() {
+    if (!confirm(t('review.resetReviewConfirm'))) {
+        return;
+    }
+
+    const button = document.querySelector('[data-action="reset-review"]');
+    if (button) button.disabled = true;
+    try {
+        let resetGeneration = normalizeResetGeneration(reportState.resetGeneration) + 1;
+        if (!isStaticDemo()) {
+            const response = await fetch('/api/reset-review', {
+                method: 'POST',
+                headers: { 'Accept': 'application/json' },
+            });
+            const payload = await fetchJsonOrThrow(response, 'Failed to reset review.');
+            resetGeneration = normalizeResetGeneration(
+                payload.resetGeneration ?? payload.state?.resetGeneration
+            );
+        }
+
+        const findings = {};
+        getOriginalFindingsList().forEach((finding) => {
+            findings[normId(finding.id)] = createDefaultFindingState();
+        });
+        hydrateReportState(
+            {
+                findings,
+                manualFrames: [],
+                merges: [],
+                reviewer: '',
+                modified: false,
+                resetGeneration,
+            },
+            { discardActiveEditor: true }
+        );
+        try {
+            localStorage.removeItem(stateSyncRuntime.draftKey);
+        } catch (error) {
+            if (DEBUG) console.debug('Could not clear review draft:', error);
+        }
+        reportState.modified = false;
+        persistSharedState();
+        showNotification(t('review.resetReviewDone'));
+    } catch (error) {
+        if (DEBUG) console.error('Reset review failed:', error);
+        showNotification(t('review.resetReviewFailed', { message: error.message }));
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
@@ -2813,6 +3169,8 @@ class ReviewVoiceRecorder {
         // Tracks whether the recognizer actually returned text for the current
         // take, so the "done" status never claims speech was added when none was.
         this.hasTranscript = false;
+        this.recordingGeneration = 0;
+        this.discarded = false;
         this.onTranscript = onTranscript;
         this.onStatus = onStatus;
         this.transport = window.ScreenScribeLib.createSttTransport({
@@ -2847,11 +3205,24 @@ class ReviewVoiceRecorder {
             statusTranscribing: t('review.voiceTranscribing'),
             statusReady: `${t('review.voiceReady')}. ${t('review.voiceMicOff')}`,
             fallbackMessage: 'Voice transcription failed.',
+            endpoint: () => `/api/stt?reset_generation=${this.recordingGeneration}`,
         });
     }
 
     async start() {
+        this.recordingGeneration = normalizeResetGeneration(reportState.resetGeneration);
+        this.discarded = false;
         const started = await this.transport.start();
+        if (
+            started
+            && (
+                this.discarded
+                || normalizeResetGeneration(reportState.resetGeneration) !== this.recordingGeneration
+            )
+        ) {
+            this.discard();
+            return false;
+        }
         if (!started) showNotification(t('review.voiceDenied'));
         return started;
     }
@@ -2868,6 +3239,13 @@ class ReviewVoiceRecorder {
     destroy() {
         this.transport.destroy();
         this.isRecording = this.transport.isRecording;
+    }
+
+    discard() {
+        this.discarded = true;
+        this.transport.cancel();
+        this.isRecording = this.transport.isRecording;
+        this.isTranscribing = false;
     }
 
     get stream() {
@@ -2914,6 +3292,7 @@ function setManualFrameStatus(message, tone = '') {
 }
 
 function openManualFrameModal(frame) {
+    frame._resetGeneration = normalizeResetGeneration(reportState.resetGeneration);
     manualFrameRuntime.currentFrame = frame;
 
     const modal = document.getElementById('manualFrameModal');
@@ -2945,11 +3324,15 @@ function openManualFrameModal(frame) {
     if (firstFocusable) firstFocusable.focus();
 }
 
-function closeManualFrameModal() {
+function closeManualFrameModal({ discardRecording = false } = {}) {
     const modal = document.getElementById('manualFrameModal');
     if (!modal) return;
 
-    manualFrameRuntime.recorder?.destroy();
+    if (discardRecording) {
+        manualFrameRuntime.recorder?.discard();
+    } else {
+        manualFrameRuntime.recorder?.destroy();
+    }
     manualFrameRuntime.currentFrame = null;
     modal.hidden = true;
     document.body.classList.remove('modal-open');
@@ -2995,9 +3378,9 @@ function manualFrameEffectiveSeverity(frame) {
     return modelSeverity === 'none' ? '' : (modelSeverity || '');
 }
 
-// Single source of truth for the "Momenty (N)" tab counter: the live AI
-// findings total (not-rejected .finding articles, as computed by
-// updateReviewMeta) plus manual moments. Only the #findings-count span text is
+// Single source of truth for the "Momenty (N)" tab counter: every logical AI
+// moment currently represented by a visible card (including rejected) plus
+// manual moments. Only the #findings-count span text is
 // touched, so the server-rendered button structure — and the shell DOM contract
 // asserting <span id="findings-count">N</span> — stays intact. The AI count is
 // always supplied fresh by updateReviewMeta, so nothing is cached and the total
@@ -3005,7 +3388,14 @@ function manualFrameEffectiveSeverity(frame) {
 function updateFindingsTabCount(aiFindingsCount) {
     const tabCount = document.getElementById('findings-count');
     if (!tabCount) return;
-    tabCount.textContent = String(aiFindingsCount + reportState.manualFrames.length);
+    const total = aiFindingsCount + reportState.manualFrames.length;
+    tabCount.textContent = String(total);
+    const tabButton = tabCount.closest('.tab-btn');
+    if (tabButton) {
+        const description = t('review.momentsCountDescription', { count: total });
+        tabButton.title = description;
+        tabButton.setAttribute('aria-label', description);
+    }
 }
 
 function renderManualFrames() {
@@ -3170,6 +3560,7 @@ async function deleteManualFrame(markerId) {
 // fall back to the previously persisted text, never that the UI is wrong.
 async function updateManualFrameMarker(markerId, transcript, notes) {
     const id = String(markerId);
+    const operationGeneration = normalizeResetGeneration(reportState.resetGeneration);
     const existing = reportState.manualFrames.find(
         (frame) => String(frame.marker_id) === id
     );
@@ -3196,6 +3587,10 @@ async function updateManualFrameMarker(markerId, transcript, notes) {
         if (DEBUG) console.debug('Manual frame update failed:', error);
     }
 
+    if (normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration) {
+        return;
+    }
+
     if (serverRejected) {
         showNotification(t('review.manualFrameSaveFailed'));
         return;
@@ -3216,6 +3611,7 @@ async function updateManualFrameMarker(markerId, transcript, notes) {
 // restores the select to the last persisted value.
 async function changeManualFrameSeverity(markerId, severity) {
     const id = String(markerId);
+    const operationGeneration = normalizeResetGeneration(reportState.resetGeneration);
     const existing = reportState.manualFrames.find(
         (frame) => String(frame.marker_id) === id
     );
@@ -3231,6 +3627,10 @@ async function changeManualFrameSeverity(markerId, severity) {
         ok = response.ok;
     } catch (error) {
         if (DEBUG) console.debug('Manual frame priority change failed:', error);
+    }
+
+    if (normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration) {
+        return;
     }
 
     if (!ok) {
@@ -3288,6 +3688,13 @@ async function saveManualNote(markerId) {
 // ANALYZE sidebar: marking is the durable act, analysis is optional and
 // separate. Returns the marker_id so analyze can reuse an already-marked frame.
 async function markManualFrame(current, transcript, notes) {
+    const operationGeneration = normalizeResetGeneration(reportState.resetGeneration);
+    if (!Number.isInteger(current._resetGeneration)) {
+        current._resetGeneration = operationGeneration;
+    }
+    if (current._resetGeneration !== operationGeneration) {
+        return null;
+    }
     if (current.marker_id) {
         // BH28: the frame is already marked, but the reviewer may have edited its
         // notes/transcript afterwards (e.g. typed more, then hit Analyze). Without
@@ -3295,7 +3702,9 @@ async function markManualFrame(current, transcript, notes) {
         // dropped on reload — and a later analyze ran against the stale server
         // copy. Persist the edit to the server marker so the change is durable.
         await updateManualFrameMarker(current.marker_id, transcript, notes);
-        return current.marker_id;
+        return normalizeResetGeneration(reportState.resetGeneration) === operationGeneration
+            ? current.marker_id
+            : null;
     }
     // BH10 in-flight idempotency: Add and Analyze can both call markManualFrame on
     // the same frame before the first POST resolves (the marker_id guard above
@@ -3312,9 +3721,17 @@ async function markManualFrame(current, transcript, notes) {
                     frame_base64: current.frameBase64,
                     transcript,
                     notes,
+                    reset_generation: operationGeneration,
                 }),
             });
             const markPayload = await fetchJsonOrThrow(markResponse, t('review.manualFrameSaveFailed'));
+            const responseGeneration = normalizeResetGeneration(
+                markPayload.resetGeneration ?? operationGeneration
+            );
+            if (normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration
+                || responseGeneration !== operationGeneration) {
+                return null;
+            }
             current.marker_id = markPayload.marker_id;
             upsertManualFrame({
                 marker_id: markPayload.marker_id,
@@ -3347,7 +3764,8 @@ async function addManualFrame() {
     try {
         if (addBtn) addBtn.disabled = true;
         setManualFrameStatus(t('review.statusSavingFrame'), 'busy');
-        await markManualFrame(current, transcript, notes);
+        const markerId = await markManualFrame(current, transcript, notes);
+        if (!markerId) return;
         showNotification(t('review.manualFrameAdded'));
         closeManualFrameModal();
     } catch (error) {
@@ -3362,6 +3780,7 @@ async function addManualFrame() {
 async function analyzeManualFrame() {
     const current = manualFrameRuntime.currentFrame;
     if (!current) return;
+    const operationGeneration = normalizeResetGeneration(reportState.resetGeneration);
 
     const transcript = readManualFrameTranscript();
     const notes = document.getElementById('manualFrameNotes')?.value || '';
@@ -3374,12 +3793,20 @@ async function analyzeManualFrame() {
         // Reuse an already-marked frame; otherwise mark it first so analyze
         // never silently discards the capture.
         const markerId = await markManualFrame(current, transcript, notes);
+        if (!markerId || normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration) {
+            return;
+        }
 
         setManualFrameStatus(t('review.statusRunningAnalysis'), 'busy');
-        const analyzeResponse = await fetch(`/api/manual-analyze/${markerId}`, {
-            method: 'POST',
-        });
+        const analyzeResponse = await fetch(
+            `/api/manual-analyze/${markerId}?reset_generation=${operationGeneration}`,
+            { method: 'POST' }
+        );
         const analyzePayload = await fetchJsonOrThrow(analyzeResponse, t('review.manualFrameAnalysisFailed'));
+
+        if (normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration) {
+            return;
+        }
 
         if (analyzePayload.status !== 'completed' || !analyzePayload.result) {
             throw new Error(analyzePayload.error || t('review.manualFrameAnalysisFailed'));
@@ -3609,6 +4036,34 @@ function stopVoiceNoteCapture() {
     }
 }
 
+function discardVoiceNoteCapture() {
+    const recognition = voiceNoteRuntime.recognition;
+    const button = voiceNoteRuntime.activeButton;
+    const findingId = voiceNoteRuntime.activeFindingId;
+
+    // Invalidate shared state and handlers before aborting: some browser
+    // implementations deliver end/error synchronously, and an already queued
+    // result callback must no longer be able to append text after reset.
+    voiceNoteRuntime.recognition = null;
+    voiceNoteRuntime.activeButton = null;
+    voiceNoteRuntime.activeFindingId = null;
+    if (recognition) {
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        try {
+            if (typeof recognition.abort === 'function') {
+                recognition.abort();
+            } else {
+                recognition.stop();
+            }
+        } catch (e) {
+            // noop
+        }
+    }
+    setVoiceNoteUi(button, findingId, false, '');
+}
+
 function startVoiceNoteCapture(button, findingId) {
     const Recognition = getSpeechRecognitionCtor();
     if (!Recognition) {
@@ -3622,6 +4077,7 @@ function startVoiceNoteCapture(button, findingId) {
     }
 
     const recognition = new Recognition();
+    const operationGeneration = normalizeResetGeneration(reportState.resetGeneration);
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = currentLang === 'pl' ? 'pl-PL' : 'en-US';
@@ -3633,6 +4089,12 @@ function startVoiceNoteCapture(button, findingId) {
     setVoiceNoteUi(button, findingId, true, t('review.voiceRecording'));
 
     recognition.onresult = (event) => {
+        if (
+            voiceNoteRuntime.recognition !== recognition
+            || normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration
+        ) {
+            return;
+        }
         const finalChunks = [];
         for (let i = event.resultIndex; i < event.results.length; i += 1) {
             const result = event.results[i];
@@ -3647,6 +4109,12 @@ function startVoiceNoteCapture(button, findingId) {
     };
 
     recognition.onerror = (event) => {
+        if (
+            voiceNoteRuntime.recognition !== recognition
+            || normalizeResetGeneration(reportState.resetGeneration) !== operationGeneration
+        ) {
+            return;
+        }
         const message = event.error === 'not-allowed'
             ? t('review.voiceDenied')
             : `${t('review.voiceError')}: ${event.error}`;
@@ -3695,6 +4163,11 @@ function initVoiceNotes() {
 function initExportActions() {
     const handlers = {
         'save-review': saveReviewToDisk,
+        'reset-review': resetReview,
+        'unmerge-finding': (event) => {
+            const button = event.target.closest('[data-finding-id]');
+            if (button) unmergeFindingGroup(button.dataset.findingId);
+        },
         'export-todo': exportTodoList,
         'export-json': exportReviewedJSON,
         'export-zip': exportReviewedZIP,
@@ -3727,6 +4200,7 @@ function initSidebarResize() {
     const resizer = document.getElementById('sidebarResizer');
     const sidebar = document.querySelector('.sidebar');
     if (!resizer || !sidebar) return;
+    const panel = document.querySelector('.review-column') || sidebar;
 
     const storageKey = 'screenscribe_sidebar_width';
     let dragState = null;
@@ -3749,6 +4223,8 @@ function initSidebarResize() {
         const { minPx, maxPx } = getResizeBounds();
         const nextWidth = Math.min(maxPx, Math.max(minPx, width));
         document.documentElement.style.setProperty('--sidebar-width', `${nextWidth}px`);
+        resizer.setAttribute('aria-valuemin', String(Math.round(minPx)));
+        resizer.setAttribute('aria-valuemax', String(Math.round(maxPx)));
         resizer.setAttribute('aria-valuenow', String(Math.round(nextWidth)));
         if (persist) {
             try {
@@ -3759,30 +4235,33 @@ function initSidebarResize() {
         }
     };
 
+    let restoredWidth = false;
     try {
         const savedWidth = Number(localStorage.getItem(storageKey));
         if (savedWidth) {
             applySidebarWidth(savedWidth, false);
+            restoredWidth = true;
         }
     } catch (error) {
         console.debug('Failed to restore sidebar width', error);
     }
+    if (!restoredWidth) {
+        applySidebarWidth(panel.getBoundingClientRect().width, false);
+    }
 
     // Keyboard resize: the separator is focusable and Arrow keys nudge the
-    // width; Home/End jump to the max/min bound (WCAG 2.1.1 keyboard access).
+    // width; Home/End jump to the min/max bound (WCAG 2.1.1 keyboard access).
     const KEY_STEP = 24;
     resizer.tabIndex = 0;
-    resizer.setAttribute('aria-valuemin', '0');
-    resizer.setAttribute('aria-valuemax', '100');
     resizer.addEventListener('keydown', (event) => {
         if (isMobileLayout()) return;
         const { minPx, maxPx } = getResizeBounds();
-        const current = sidebar.getBoundingClientRect().width;
+        const current = panel.getBoundingClientRect().width;
         let next = null;
         if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next = current + KEY_STEP;
         else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next = current - KEY_STEP;
-        else if (event.key === 'Home') next = maxPx;
-        else if (event.key === 'End') next = minPx;
+        else if (event.key === 'Home') next = minPx;
+        else if (event.key === 'End') next = maxPx;
         if (next === null) return;
         event.preventDefault();
         applySidebarWidth(next);
@@ -3792,7 +4271,7 @@ function initSidebarResize() {
         if (isMobileLayout()) return;
         dragState = {
             startX: event.clientX,
-            startWidth: sidebar.getBoundingClientRect().width
+            startWidth: panel.getBoundingClientRect().width
         };
         document.body.classList.add('is-resizing');
         if (resizer.setPointerCapture) {
@@ -3823,7 +4302,7 @@ function initSidebarResize() {
             document.body.classList.remove('is-resizing');
             return;
         }
-        applySidebarWidth(sidebar.getBoundingClientRect().width, false);
+        applySidebarWidth(panel.getBoundingClientRect().width, false);
     });
 }
 
@@ -3834,6 +4313,7 @@ let currentLang = getInitialReportLanguage();
 function setLanguage(lang, { persist = true } = {}) {
     if (!hasI18nLanguage(lang)) return;
     currentLang = lang;
+    document.documentElement.lang = lang;
 
     // Update toggle buttons
     document.querySelectorAll('.lang-toggle button').forEach(btn => {
@@ -3841,8 +4321,17 @@ function setLanguage(lang, { persist = true } = {}) {
         btn.classList.toggle('active', isActive);
         btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
     });
+    document.querySelectorAll('.merge-select').forEach((checkbox) => {
+        const id = checkbox.closest('.finding')?.dataset.findingId || '';
+        checkbox.setAttribute('aria-label', t('review.mergeSelectLabel', { id }));
+    });
+    document.querySelectorAll('.unmerge-finding-btn').forEach((button) => {
+        button.textContent = t('review.unmergeFinding');
+    });
 
     applyTranslations(document);
+    refreshMergedCardDynamicTranslations(document);
+    updateMergeBar();
 
     // Tab labels carry data-i18n spans, so applyTranslations above already
     // localizes them. The summary/export buttons hold no count; only re-set

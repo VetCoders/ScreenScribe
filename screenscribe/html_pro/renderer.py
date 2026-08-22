@@ -256,6 +256,8 @@ def _render_finding(f: dict[str, Any], index: int, language: str = "en") -> str:
     """Render a single finding as an article element."""
     finding_id = f.get("id", index)
     finding_id_attr = html.escape(str(finding_id), quote=True)
+    priority_control_id = f"finding-priority-{finding_id_attr}"
+    notes_control_id = f"finding-notes-{finding_id_attr}"
     category = f.get("category", "unknown")
     # Category badges must speak the report language, not leak the raw EN enum
     # (BUG/PERFORMANCE/...). Route through i18n; an unmapped category falls back
@@ -401,8 +403,8 @@ def _render_finding(f: dict[str, Any], index: int, language: str = "en") -> str:
                     </div>
                 </div>
                 <div class="review-field">
-                    <label data-i18n="changePriority">{html.escape(_t("changePriority", language))}</label>
-                    <select class="severity-select">
+                    <label for="{priority_control_id}" data-i18n="changePriority">{html.escape(_t("changePriority", language))}</label>
+                    <select id="{priority_control_id}" class="severity-select">
                         <option value="" data-i18n="noChange">{html.escape(_t("noChange", language))}</option>
                         <option value="critical" data-i18n="critical">{html.escape(_t("critical", language))}</option>
                         <option value="high" data-i18n="high">{html.escape(_t("high", language))}</option>
@@ -412,7 +414,7 @@ def _render_finding(f: dict[str, Any], index: int, language: str = "en") -> str:
                 </div>
             </div>
             <div class="review-field notes">
-                <label data-i18n="notes">{html.escape(_t("notes", language))}</label>
+                <label for="{notes_control_id}" data-i18n="notes">{html.escape(_t("notes", language))}</label>
                 {f'<div class="ai-suggestions"><strong data-i18n="aiSuggestions">{html.escape(_t("aiSuggestions", language))}</strong> {html.escape(action_items_display)}</div>' if action_items_display else ""}
                 <div class="notes-toolbar">
                     <button type="button"
@@ -424,7 +426,7 @@ def _render_finding(f: dict[str, Any], index: int, language: str = "en") -> str:
                     </button>
                     <span class="notes-mic-status" data-finding-id="{finding_id_attr}"></span>
                 </div>
-                <textarea placeholder="{html.escape(_t("notesPlaceholder", language), quote=True)}" data-i18n="notesPlaceholder"></textarea>
+                <textarea placeholder="{html.escape(_t("notesPlaceholder", language), quote=True)}" id="{notes_control_id}" data-i18n="notesPlaceholder"></textarea>
             </div>
         </div>
     </article>

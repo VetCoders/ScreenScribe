@@ -350,9 +350,10 @@ class ScreenScribePlayer {
 
     formatTimePrecise(seconds) {
         const safe = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
-        const m = Math.floor(safe / 60);
-        const s = Math.floor(safe % 60);
-        const ms = Math.floor((safe % 1) * 1000);
+        const totalMilliseconds = Math.round(safe * 1000);
+        const m = Math.floor(totalMilliseconds / 60000);
+        const s = Math.floor((totalMilliseconds % 60000) / 1000);
+        const ms = totalMilliseconds % 1000;
         return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
     }
 
