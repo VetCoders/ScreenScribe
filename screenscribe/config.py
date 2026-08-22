@@ -5,6 +5,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from .keywords import KeywordsConfig
@@ -238,7 +239,7 @@ class ScreenScribeConfig:
         libraxis_endpoints = [
             ep
             for provider, ep in endpoint_by_provider.items()
-            if provider in providers and "libraxis" in ep
+            if provider in providers and self._endpoint_provider(ep) == "libraxis"
         ]
         for ep in libraxis_endpoints:
             if "/v1/chat/completions" in ep:
@@ -321,10 +322,22 @@ class ScreenScribeConfig:
     @staticmethod
     def _endpoint_provider(endpoint: str) -> str | None:
         """Best-effort provider tag from an endpoint host. None when unknown."""
-        host = endpoint.lower()
-        if "libraxis" in host:
+        try:
+            parsed_host = urlsplit(endpoint).hostname
+        except ValueError:
+            return None
+        if not parsed_host:
+            return None
+        try:
+            # HTTP clients IDNA-normalize Unicode label separators (for example
+            # U+3002) before DNS. Classify that same canonical ASCII host so the
+            # credential boundary cannot disagree with the eventual request.
+            host = parsed_host.encode("idna").decode("ascii").rstrip(".").lower()
+        except UnicodeError:
+            return None
+        if host == "libraxis.cloud" or host.endswith(".libraxis.cloud"):
             return "libraxis"
-        if "openai.com" in host:
+        if host == "openai.com" or host.endswith(".openai.com"):
             return "openai"
         return None
 

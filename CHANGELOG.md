@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [0.1.19] - 2026-08-23
+
+- **Security: provider endpoints are classified by canonical DNS host boundaries.**
+  OpenAI and LibraxisAI detection now parses the URL hostname and accepts only
+  the provider's exact domain or a real subdomain after IDNA normalization, so
+  lookalike hosts and Unicode-equivalent DNS separators cannot bypass the
+  credential boundary. The development-only Semgrep dependency chain is also
+  refreshed to patched MCP and cryptography releases; these tools are not
+  included in the published runtime wheel.
 - **Fixed: HTML Pro review changes can be safely undone or reset.** Human merge
   groups now expose Unmerge, preserve source review snapshots through chained
   merges, restore the survivor's pre-merge verdict without losing later notes,
