@@ -1095,6 +1095,71 @@ def test_reset_generation_rejects_manual_mark_that_finishes_after_reset(
     assert not manual_dir.exists() or list(manual_dir.iterdir()) == []
 
 
+def test_stale_manual_mark_keeps_409_when_image_cleanup_fails(
+    review_workspace: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Best-effort stale-image cleanup must not replace epoch conflict with 500."""
+    import json
+    import threading
+
+    import screenscribe.review_server as review_server_module
+
+    output_dir, report_file, video_path = review_workspace
+    (output_dir / "screen_report.json").write_text(
+        json.dumps({"video": "screen.mov", "findings": [{"id": 1}]}),
+        encoding="utf-8",
+    )
+    entered_store = threading.Event()
+    release_store = threading.Event()
+    original_store = review_server_module.store_manual_frame_image
+
+    def blocking_store(target_dir: Path, marker_id: str, frame_base64: str) -> str:
+        entered_store.set()
+        assert release_store.wait(timeout=5), "test did not release the blocked mark"
+        return original_store(target_dir, marker_id, frame_base64)
+
+    def fail_stale_cleanup(_output_dir: Path, _frame_path: str) -> None:
+        raise PermissionError("locked stale frame")
+
+    monkeypatch.setattr(review_server_module, "store_manual_frame_image", blocking_store)
+    monkeypatch.setattr(
+        review_server_module,
+        "_remove_manual_frame_image",
+        fail_stale_cleanup,
+    )
+    app = create_review_app(output_dir, report_file.name, video_path, _config())
+    mark_result: dict[str, Any] = {}
+
+    def post_mark() -> None:
+        mark_result["response"] = TestClient(app).post(
+            "/api/manual-mark",
+            json={
+                "timestamp": 1.0,
+                "frame_base64": PNG_1X1_BASE64,
+                "transcript": "old generation",
+                "notes": "",
+                "reset_generation": 0,
+            },
+        )
+
+    worker = threading.Thread(target=post_mark)
+    worker.start()
+    assert entered_store.wait(timeout=5), "manual mark never reached the blocked store"
+    try:
+        reset = TestClient(app).post("/api/reset-review")
+    finally:
+        release_store.set()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert reset.status_code == 200
+    assert mark_result["response"].status_code == 409
+    assert "stale image cleanup failed" in caplog.text
+    assert TestClient(app).get("/api/review-state").json()["manualFrames"] == []
+
+
 def test_review_server_reset_is_idempotent(
     review_workspace: tuple[Path, Path, Path],
 ) -> None:

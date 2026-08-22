@@ -94,7 +94,9 @@ never always-visible footer/side buttons.
   work from before the reset cannot recreate cleared review state or moments,
   even after a server restart. Ordinary same-generation hydration preserves an
   annotation edit in progress; reset hydration discards that stale editor and
-  aborts active voice recognition explicitly.
+  aborts active voice recognition explicitly. Cleanup after a committed reset or
+  invalidated Add is best-effort: cleanup failures are warnings and do not turn a
+  successful reset or generation-conflict response into a misleading HTTP 500.
 
 The review report's findings always exist, so its downloads are not readiness-
 gated; analyze gates because its artifacts do not exist until the user marks a

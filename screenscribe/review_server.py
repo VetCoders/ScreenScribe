@@ -879,7 +879,15 @@ def create_review_app(
             if not stale_generation:
                 session.markers[marker_id] = marker
         if stale_generation:
-            _remove_manual_frame_image(session.output_dir, frame_path)
+            try:
+                _remove_manual_frame_image(session.output_dir, frame_path)
+            except Exception as cleanup_exc:
+                logger.warning(
+                    "Manual frame invalidated by reset, but stale image cleanup failed "
+                    "for marker %s: %s",
+                    marker_id,
+                    cleanup_exc,
+                )
             raise HTTPException(
                 status_code=409,
                 detail="Review reset invalidated this manual frame.",

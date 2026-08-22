@@ -12,7 +12,8 @@
   reset generation is persisted across server restarts and now invalidates stale
   Save as well as delayed manual-frame Add/Analyze/note/priority and voice-note
   work without discarding annotation edits during ordinary same-generation
-  synchronization.
+  synchronization. A stale Add still returns its generation conflict if
+  best-effort image cleanup can only emit a warning.
 - **Fixed: the shared review/analyze shell stays usable and accessible at narrow
   widths.** Oversized moment previews are bounded, analyze header controls wrap
   on phones, active tabs keep their roving `tabindex` in sync, the sidebar
