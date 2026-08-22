@@ -164,7 +164,7 @@ def _report_reset_generation(report_data: dict[str, Any]) -> int:
     value = report_data.get(REVIEW_RESET_GENERATION_KEY, 0)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return 0
-    return value
+    return int(value)
 
 
 def _validated_image_ext(frame_bytes: bytes) -> str:

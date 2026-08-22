@@ -1805,6 +1805,8 @@ function updateMergeBar() {
         t('review.mergeFindingsBtn') + (count >= 2 ? ` (${count})` : '');
 }
 
+const MERGED_LIST_SEPARATOR = ', ';
+
 function refreshMergedCardDynamicTranslations(root = document) {
     root.querySelectorAll('.finding-merged').forEach((article) => {
         const rawCategory = article.dataset.mergedCategory || '';
@@ -1915,7 +1917,7 @@ function renderMergedCard(merged) {
         actionsLabel.setAttribute('data-i18n', 'review.aiSuggestions');
         actionsLabel.textContent = t('review.aiSuggestions');
         const actionsValue = document.createElement('span');
-        actionsValue.textContent = ' ' + ua.action_items.join(', ');
+        actionsValue.textContent = ' ' + ua.action_items.join(MERGED_LIST_SEPARATOR);
         actions.appendChild(actionsLabel);
         actions.appendChild(actionsValue);
         content.appendChild(actions);
@@ -1928,7 +1930,7 @@ function renderMergedCard(merged) {
         compsLabel.setAttribute('data-i18n', 'review.affectedComponents');
         compsLabel.textContent = t('review.affectedComponents');
         const compsValue = document.createElement('span');
-        compsValue.textContent = ': ' + ua.affected_components.join(', ');
+        compsValue.textContent = ': ' + ua.affected_components.join(MERGED_LIST_SEPARATOR);
         comps.appendChild(compsLabel);
         comps.appendChild(compsValue);
         content.appendChild(comps);
@@ -1943,7 +1945,7 @@ function renderMergedCard(merged) {
     fromLabel.setAttribute('data-i18n', 'review.mergedFromLabel');
     fromLabel.textContent = t('review.mergedFromLabel');
     const fromValue = document.createElement('span');
-    fromValue.textContent = ': ' + sources.join(', ');
+    fromValue.textContent = ': ' + sources.join(MERGED_LIST_SEPARATOR);
     from.appendChild(fromLabel);
     from.appendChild(fromValue);
     content.appendChild(from);
