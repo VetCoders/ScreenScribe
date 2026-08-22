@@ -331,6 +331,143 @@ def test_f0_review_export_speaks_verdict_not_confirmed() -> None:
     )
 
 
+def test_f0_language_switch_relocalizes_dynamic_merged_card() -> None:
+    """A rendered merged card updates all chrome and image text alternatives."""
+    _run_review_app_smoke(
+        """
+        class MiniElement {
+            constructor(tagName) {
+                this.tagName = String(tagName).toUpperCase();
+                this.className = '';
+                this.children = [];
+                this.parentNode = null;
+                this.dataset = {};
+                this.attributes = {};
+                this.textContent = '';
+                this.placeholder = '';
+                this.classList = {
+                    contains: (name) => this.className.split(/\\s+/).includes(name),
+                    toggle: (name, enabled) => {
+                        const names = new Set(this.className.split(/\\s+/).filter(Boolean));
+                        if (enabled) names.add(name); else names.delete(name);
+                        this.className = Array.from(names).join(' ');
+                    },
+                };
+            }
+            appendChild(child) { child.parentNode = this; this.children.push(child); return child; }
+            addEventListener() {}
+            setAttribute(name, value) {
+                this.attributes[name] = String(value);
+                if (name === 'placeholder') this.placeholder = String(value);
+            }
+            getAttribute(name) { return this.attributes[name] ?? null; }
+            matches(selector) {
+                if (selector === '[data-i18n]' || selector === '[data-i18n-attr]'
+                    || selector === '[data-i18n-title]' || selector === '[data-i18n-alt]'
+                    || selector === '[data-i18n-tpl]') {
+                    return this.getAttribute(selector.slice(1, -1)) !== null;
+                }
+                if (selector === 'img.thumbnail[data-merged-timestamp]') {
+                    return this.tagName === 'IMG'
+                        && this.classList.contains('thumbnail')
+                        && this.dataset.mergedTimestamp !== undefined;
+                }
+                if (selector.startsWith('.') && !selector.includes(' ')) {
+                    return this.classList.contains(selector.slice(1).split('[')[0]);
+                }
+                return false;
+            }
+            querySelectorAll(selector) {
+                const found = [];
+                const visit = (node) => {
+                    node.children.forEach((child) => {
+                        if (child.matches(selector)) found.push(child);
+                        visit(child);
+                    });
+                };
+                visit(this);
+                return found;
+            }
+            querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+            closest(selector) {
+                let node = this;
+                while (node) {
+                    if (node.matches(selector)) return node;
+                    node = node.parentNode;
+                }
+                return null;
+            }
+        }
+
+        const root = new MiniElement('body');
+        root.dataset.mode = 'review';
+        document.body = root;
+        document.createElement = (tagName) => new MiniElement(tagName);
+        document.querySelectorAll = (selector) => root.querySelectorAll(selector);
+        // Keep setLanguage away from unrelated metadata rendering; this witness
+        // is scoped to the merged card itself.
+        document.querySelector = () => null;
+        document.getElementById = () => null;
+
+        reportState.findings = {
+            '1': { verdict: 'accepted', severity: 'high', notes: 'keep me' },
+        };
+        const card = renderMergedCard({
+            id: 1,
+            category: 'bug',
+            timestamp: 1,
+            timestamp_formatted: '00:01.000',
+            screenshot: 'data:image/png;base64,x',
+            merged_from_ids: [2],
+            unified_analysis: {
+                severity: 'high',
+                summary: 'summary',
+                action_items: ['fix it'],
+                affected_components: ['toolbar'],
+            },
+        });
+        root.appendChild(card);
+
+        setLanguage('pl', { persist: false });
+
+        const translated = (key) => card.querySelectorAll('[data-i18n]').find(
+            (el) => el.getAttribute('data-i18n') === key
+        );
+        const checks = [
+            ['category', card.querySelector('.finding-title')?.textContent, 'BŁĄD'],
+            ['badge', card.querySelector('.merged-badge')?.textContent, 'SCALONE'],
+            ['unmerge', translated('review.unmergeFinding')?.textContent, 'Rozłącz'],
+            ['summary', card.querySelector('.merged-summary-label')?.textContent, 'Podsumowanie:'],
+            ['actions', card.querySelector('.merged-actions-label')?.textContent, 'Sugestie AI:'],
+            ['components', card.querySelector('.merged-components-label')?.textContent, 'Powiązane komponenty'],
+            ['provenance', card.querySelector('.merged-from-label')?.textContent, 'Scalone z'],
+            ['verdict', card.querySelector('.merged-verdict-label')?.textContent, 'Potwierdzone?'],
+            ['reject control', translated('review.noFalseAlarm')?.textContent, 'Nie / Fałszywy alarm'],
+            ['priority', card.querySelector('.merged-severity-label')?.textContent, 'Zmień priorytet'],
+            ['high option', translated('review.high')?.textContent, 'Wysokie'],
+            ['notes', card.querySelector('.merged-notes-label')?.textContent, 'Notatki / Akcje'],
+            ['annotation hint', translated('media.manualFrameAnnotateHint')?.textContent, 'Kliknij, aby adnotować'],
+        ];
+        for (const [name, actual, expected] of checks) {
+            if (actual !== expected) {
+                console.error(name + ' stayed stale: ' + JSON.stringify({ actual, expected }));
+                process.exitCode = 1;
+            }
+        }
+        const image = card.querySelector('.thumbnail');
+        if (image?.alt !== 'Screenshot scalonego znaleziska o 00:01.000') {
+            console.error('merged screenshot alt stayed stale: ' + image?.alt);
+            process.exitCode = 1;
+        }
+        const notesArea = card.querySelector('.merged-notes-area');
+        if (notesArea?.placeholder !== 'Twoje uwagi, akcje do podjęcia...') {
+            console.error('merged notes placeholder stayed stale: ' + notesArea?.placeholder);
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
 def test_f0_original_findings_embed_malformed_does_not_crash() -> None:
     """getOriginalFindingsList degrades to [] on a bad #original-findings embed.
 

@@ -110,7 +110,10 @@ moment.
 visible AI finding card, including rejected cards, plus every manual moment. A
 human merge replaces N source cards with one logical card, so the count decreases
 by `N - 1`; unmerge restores the source-card count. Rejection never changes the
-count because the rejected card remains visible and auditable.
+count because the rejected card remains visible and auditable. Dynamically
+rendered merged cards participate in the same language switch as static report
+chrome, including their labels, controls, provenance, hints, category, and
+screenshot text alternatives.
 
 Human merges are reversible. The draft and saved survivor keep additive
 `member_reviews` / `merged_member_reviews` snapshots of the source findings.

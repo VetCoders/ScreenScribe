@@ -18,7 +18,9 @@
   on phones, active tabs keep their roving `tabindex` in sync, the sidebar
   separator reports consistent pixel bounds, and the live Moments counter
   counts every visible logical card (including rejected cards) plus manual
-  moments.
+  moments. Switching language now also relocalizes all dynamically rendered
+  merged-card labels, controls, provenance, hints, and screenshot text
+  alternatives.
 
 ## [0.1.18] - 2026-08-08
 

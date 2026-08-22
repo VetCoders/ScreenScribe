@@ -1805,6 +1805,25 @@ function updateMergeBar() {
         t('review.mergeFindingsBtn') + (count >= 2 ? ` (${count})` : '');
 }
 
+function refreshMergedCardDynamicTranslations(root = document) {
+    root.querySelectorAll('.finding-merged').forEach((article) => {
+        const rawCategory = article.dataset.mergedCategory || '';
+        const title = article.querySelector('.finding-title');
+        if (title) {
+            const catKey = 'review.category_' + rawCategory;
+            const catLabel = rawCategory ? t(catKey) : '';
+            title.textContent = (
+                catLabel && catLabel !== catKey ? catLabel : rawCategory
+            ).toUpperCase();
+        }
+        article.querySelectorAll('img.thumbnail[data-merged-timestamp]').forEach((img) => {
+            img.alt = t('review.mergedScreenshotAlt', {
+                ts: img.dataset.mergedTimestamp || '',
+            });
+        });
+    });
+}
+
 function renderMergedCard(merged) {
     const ua = merged.unified_analysis || {};
     const article = document.createElement('article');
@@ -1819,6 +1838,7 @@ function renderMergedCard(merged) {
     article.dataset.verdict = currentVerdict;
     article.dataset.severity = ua.severity || 'medium';
     article.dataset.merged = 'true';
+    article.dataset.mergedCategory = (merged.category || '').toString();
 
     const header = document.createElement('div');
     header.className = 'finding-header';
@@ -1839,12 +1859,13 @@ function renderMergedCard(merged) {
     title.className = 'finding-title';
     // Localize the category badge instead of upper-casing the raw EN enum; an
     // unmapped category falls back to its own upper-cased value.
-    const rawCategory = (merged.category || '').toString();
+    const rawCategory = article.dataset.mergedCategory;
     const catKey = 'review.category_' + rawCategory;
     const catLabel = rawCategory ? t(catKey) : '';
     title.textContent = (catLabel && catLabel !== catKey ? catLabel : rawCategory).toUpperCase();
     const badge = document.createElement('span');
     badge.className = 'severity-badge merged-badge';
+    badge.setAttribute('data-i18n', 'review.mergedBadge');
     badge.textContent = t('review.mergedBadge');
     header.appendChild(title);
     header.appendChild(badge);
@@ -1853,6 +1874,7 @@ function renderMergedCard(merged) {
     unmergeButton.className = 'btn-secondary unmerge-finding-btn';
     unmergeButton.dataset.action = 'unmerge-finding';
     unmergeButton.dataset.findingId = normId(merged.id);
+    unmergeButton.setAttribute('data-i18n', 'review.unmergeFinding');
     unmergeButton.textContent = t('review.unmergeFinding');
     header.appendChild(unmergeButton);
     article.appendChild(header);
@@ -1864,6 +1886,8 @@ function renderMergedCard(merged) {
     const summaryField = document.createElement('div');
     summaryField.className = 'review-field merged-summary-field';
     const summaryLabel = document.createElement('label');
+    summaryLabel.className = 'merged-summary-label';
+    summaryLabel.setAttribute('data-i18n', 'review.findingSummary');
     summaryLabel.textContent = t('review.findingSummary');
     const summaryTextarea = document.createElement('textarea');
     summaryTextarea.className = 'merged-summary';
@@ -1886,15 +1910,27 @@ function renderMergedCard(merged) {
     if ((ua.action_items || []).length) {
         const actions = document.createElement('div');
         actions.className = 'ai-suggestions';
-        actions.textContent =
-            t('review.aiSuggestions') + ' ' + ua.action_items.join(', ');
+        const actionsLabel = document.createElement('span');
+        actionsLabel.className = 'merged-actions-label';
+        actionsLabel.setAttribute('data-i18n', 'review.aiSuggestions');
+        actionsLabel.textContent = t('review.aiSuggestions');
+        const actionsValue = document.createElement('span');
+        actionsValue.textContent = ' ' + ua.action_items.join(', ');
+        actions.appendChild(actionsLabel);
+        actions.appendChild(actionsValue);
         content.appendChild(actions);
     }
     if ((ua.affected_components || []).length) {
         const comps = document.createElement('div');
         comps.className = 'merged-components';
-        comps.textContent =
-            t('review.affectedComponents') + ': ' + ua.affected_components.join(', ');
+        const compsLabel = document.createElement('span');
+        compsLabel.className = 'merged-components-label';
+        compsLabel.setAttribute('data-i18n', 'review.affectedComponents');
+        compsLabel.textContent = t('review.affectedComponents');
+        const compsValue = document.createElement('span');
+        compsValue.textContent = ': ' + ua.affected_components.join(', ');
+        comps.appendChild(compsLabel);
+        comps.appendChild(compsValue);
         content.appendChild(comps);
     }
 
@@ -1902,7 +1938,14 @@ function renderMergedCard(merged) {
     from.className = 'merged-from';
     // Human-facing trail shows every source (surviving id + absorbed ids).
     const sources = [merged.id, ...(merged.merged_from_ids || [])];
-    from.textContent = t('review.mergedFromLabel') + ': ' + sources.join(', ');
+    const fromLabel = document.createElement('span');
+    fromLabel.className = 'merged-from-label';
+    fromLabel.setAttribute('data-i18n', 'review.mergedFromLabel');
+    fromLabel.textContent = t('review.mergedFromLabel');
+    const fromValue = document.createElement('span');
+    fromValue.textContent = ': ' + sources.join(', ');
+    from.appendChild(fromLabel);
+    from.appendChild(fromValue);
     content.appendChild(from);
 
     // The survivor's screenshot, as an inspect/annotate surface — a merged
@@ -1918,14 +1961,19 @@ function renderMergedCard(merged) {
         img.className = 'thumbnail';
         img.src = merged.screenshot;
         img.setAttribute('data-full', merged.screenshot);
+        img.dataset.mergedTimestamp = (
+            merged.timestamp_formatted || formatPreciseTime(merged.timestamp || 0)
+        );
         img.alt = t('review.mergedScreenshotAlt', {
-            ts: merged.timestamp_formatted || formatPreciseTime(merged.timestamp || 0),
+            ts: img.dataset.mergedTimestamp,
         });
+        img.setAttribute('data-i18n-title', 'media.manualFrameZoomTitle');
         img.title = t('media.manualFrameZoomTitle');
         const svg = document.createElement('svg');
         svg.className = 'annotation-svg';
         const hint = document.createElement('div');
         hint.className = 'annotation-hint';
+        hint.setAttribute('data-i18n', 'media.manualFrameAnnotateHint');
         hint.textContent = t('media.manualFrameAnnotateHint');
         container.appendChild(img);
         container.appendChild(svg);
@@ -1952,6 +2000,8 @@ function renderMergedCard(merged) {
     const verdictField = document.createElement('div');
     verdictField.className = 'review-field';
     const verdictLabel = document.createElement('label');
+    verdictLabel.className = 'merged-verdict-label';
+    verdictLabel.setAttribute('data-i18n', 'review.verdict');
     verdictLabel.textContent = t('review.verdict');
     verdictField.appendChild(verdictLabel);
     const radioGroup = document.createElement('div');
@@ -1966,6 +2016,7 @@ function renderMergedCard(merged) {
         radio.setAttribute('value', value);
         if (currentVerdict === value) radio.checked = true;
         const span = document.createElement('span');
+        span.setAttribute('data-i18n', labelKey);
         span.textContent = t(labelKey);
         wrap.appendChild(radio);
         wrap.appendChild(span);
@@ -1977,6 +2028,8 @@ function renderMergedCard(merged) {
     const sevField = document.createElement('div');
     sevField.className = 'review-field';
     const sevLabel = document.createElement('label');
+    sevLabel.className = 'merged-severity-label';
+    sevLabel.setAttribute('data-i18n', 'review.changePriority');
     sevLabel.textContent = t('review.changePriority');
     const sevSelect = document.createElement('select');
     sevSelect.className = 'severity-select';
@@ -1988,6 +2041,7 @@ function renderMergedCard(merged) {
         const opt = document.createElement('option');
         opt.value = value;
         opt.setAttribute('value', value);
+        opt.setAttribute('data-i18n', labelKey);
         opt.textContent = t(labelKey);
         sevSelect.appendChild(opt);
     });
@@ -1999,11 +2053,15 @@ function renderMergedCard(merged) {
     const notesField = document.createElement('div');
     notesField.className = 'review-field notes';
     const notesLabel = document.createElement('label');
+    notesLabel.className = 'merged-notes-label';
+    notesLabel.setAttribute('data-i18n', 'review.notes');
     notesLabel.textContent = t('review.notes');
     const notesArea = document.createElement('textarea');
+    notesArea.className = 'merged-notes-area';
     notesArea.id = 'merged-finding-notes-' + merged.id;
     notesLabel.htmlFor = notesArea.id;
     notesField.appendChild(notesLabel);
+    notesArea.setAttribute('data-i18n', 'review.notesPlaceholder');
     notesArea.setAttribute('placeholder', t('review.notesPlaceholder'));
     notesArea.value = state.notes || '';
     notesField.appendChild(notesArea);
@@ -4165,6 +4223,7 @@ function setLanguage(lang, { persist = true } = {}) {
     });
 
     applyTranslations(document);
+    refreshMergedCardDynamicTranslations(document);
     updateMergeBar();
 
     // Tab labels carry data-i18n spans, so applyTranslations above already
