@@ -406,7 +406,7 @@ def create_review_app(
         return json_path, data
 
     def write_report_json_atomic(json_path: Path, report_data: dict[str, Any]) -> None:
-        """Durably replace ``report.json`` without exposing a torn write."""
+        """Durably replace the selected report JSON without exposing a torn write."""
         import json
 
         tmp_fd, tmp_name = tempfile.mkstemp(
