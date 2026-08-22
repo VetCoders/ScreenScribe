@@ -5,8 +5,9 @@
 - **Fixed: HTML Pro review changes can be safely undone or reset.** Human merge
   groups now expose Unmerge, preserve source review snapshots through chained
   merges, restore the survivor's pre-merge verdict without losing later notes,
-  priorities, or annotations, and rebind visible annotation previews after the
-  split. Reset review atomically returns to generated findings, clears the
+  priorities, or annotations, distinguish actual survivor edits from the merged
+  union after reload, and rebind visible annotation previews after the split.
+  Reset review atomically returns to generated findings, clears the
   reviewer and manual review state, and reports success once the canonical JSON
   commit lands even if stale frame cleanup can only emit a warning. A monotonic
   reset generation is persisted across server restarts and now invalidates stale

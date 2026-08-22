@@ -204,3 +204,121 @@ def test_legacy_unmerge_preserves_survivor_verdict_without_snapshot() -> None:
             """
         )
     )
+
+
+def test_cold_reload_unmerge_does_not_copy_member_union_to_survivor() -> None:
+    """Hydrated union notes/priority must not become survivor-owned on unmerge."""
+    _run(
+        textwrap.dedent(
+            """
+            const originalSurvivor = {
+                verdict: 'none', severity: 'low', notes: 'survivor note', annotations: [],
+            };
+            const originalMember = {
+                verdict: 'accepted', severity: 'high', notes: 'member note', annotations: [],
+            };
+            reportState.findings = {
+                '17': {
+                    verdict: 'accepted', severity: 'high',
+                    notes: 'survivor note\\\\n\\\\nmember note', annotations: [],
+                    merged_from_ids: [18],
+                    merged_member_reviews: {
+                        '17': originalSurvivor,
+                        '18': originalMember,
+                    },
+                    merged_survivor_review: originalSurvivor,
+                    merged_review_baseline: {
+                        verdict: 'accepted', severity: 'high',
+                        notes: 'survivor note\\\\n\\\\nmember note', annotations: [],
+                    },
+                },
+            };
+            const merged = { id: 17, merged_from_ids: [18] };
+            ensureMergeEntry(merged);
+            if (!unmergeFindings('17')) throw new Error('cold merge did not unmerge');
+
+            const survivor = reportState.findings['17'];
+            const member = reportState.findings['18'];
+            if (survivor.verdict !== 'none' || survivor.severity !== 'low'
+                || survivor.notes !== 'survivor note') {
+                throw new Error('member union leaked onto survivor: ' + JSON.stringify(survivor));
+            }
+            if (member.verdict !== 'accepted' || member.severity !== 'high'
+                || member.notes !== 'member note') {
+                throw new Error('absorbed member was not restored: ' + JSON.stringify(member));
+            }
+            """
+        )
+    )
+
+
+def test_cold_reload_unmerge_keeps_real_post_reload_survivor_edits() -> None:
+    """Fields changed after hydration still belong to the survivor on unmerge."""
+    _run(
+        textwrap.dedent(
+            """
+            const originalSurvivor = {
+                verdict: 'none', severity: 'low', notes: 'survivor note', annotations: [],
+            };
+            const originalMember = {
+                verdict: 'accepted', severity: 'high', notes: 'member note', annotations: [],
+            };
+            reportState.findings = {
+                '17': {
+                    verdict: 'accepted', severity: 'high',
+                    notes: 'survivor note\\\\n\\\\nmember note', annotations: [],
+                    merged_from_ids: [18],
+                    merged_member_reviews: {
+                        '17': originalSurvivor,
+                        '18': originalMember,
+                    },
+                    merged_survivor_review: originalSurvivor,
+                    merged_review_baseline: {
+                        verdict: 'accepted', severity: 'high',
+                        notes: 'survivor note\\\\n\\\\nmember note', annotations: [],
+                    },
+                },
+            };
+            const merged = { id: 17, merged_from_ids: [18] };
+            ensureMergeEntry(merged);
+            reportState.findings['17'].notes = 'edited merged survivor';
+            reportState.findings['17'].severity = 'critical';
+            reportState.findings['17'].annotations = [{ type: 'rect', x: 0.4 }];
+            if (!unmergeFindings('17')) throw new Error('cold merge did not unmerge');
+
+            const survivor = reportState.findings['17'];
+            if (survivor.verdict !== 'none' || survivor.severity !== 'critical'
+                || survivor.notes !== 'edited merged survivor'
+                || survivor.annotations[0]?.type !== 'rect') {
+                throw new Error('real survivor edits were lost: ' + JSON.stringify(survivor));
+            }
+            """
+        )
+    )
+
+
+def test_cold_reload_legacy_empty_metadata_keeps_hydrated_survivor() -> None:
+    """Server-projected empty additive fields do not erase a legacy survivor."""
+    _run(
+        textwrap.dedent(
+            """
+            reportState.findings = {
+                '17': {
+                    verdict: 'rejected', severity: 'high', notes: 'legacy union', annotations: [],
+                    merged_from_ids: [18],
+                    merged_member_reviews: {},
+                    merged_survivor_review: {},
+                    merged_review_baseline: {},
+                },
+            };
+            ensureMergeEntry({ id: 17, merged_from_ids: [18] });
+            if (!unmergeFindings('17')) throw new Error('legacy cold merge did not unmerge');
+
+            const survivor = reportState.findings['17'];
+            if (survivor.verdict !== 'rejected' || survivor.severity !== 'high'
+                || survivor.notes !== 'legacy union') {
+                throw new Error('empty metadata erased survivor: ' + JSON.stringify(survivor));
+            }
+            """
+        )
+    )

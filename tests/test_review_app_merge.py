@@ -258,6 +258,13 @@ def test_merge_persists_member_review_snapshots_for_durable_unmerge() -> None:
             throw new Error('absorbed member snapshot missing: ' + JSON.stringify(snapshots));
         if ((snapshots.b.annotations || [])[0]?.type !== 'arrow')
             throw new Error('absorbed member annotations missing from snapshot');
+        const actual = byId['a'].human_review.merged_survivor_review || {};
+        const baseline = byId['a'].human_review.merged_review_baseline || {};
+        if (actual.notes !== 'keep survivor' || actual.severity !== 'high')
+            throw new Error('actual survivor state missing: ' + JSON.stringify(actual));
+        if (baseline.notes !== 'keep survivor\\\\n\\\\nmember note'
+            || baseline.severity !== 'high')
+            throw new Error('merged review baseline missing: ' + JSON.stringify(baseline));
         """
     )
 

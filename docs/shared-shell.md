@@ -123,9 +123,11 @@ chrome, including their labels, controls, provenance, hints, category, and
 screenshot text alternatives.
 
 Human merges are reversible. The draft and saved survivor keep additive
-`member_reviews` / `merged_member_reviews` snapshots of the source findings.
+`member_reviews` / `merged_member_reviews` snapshots of the source findings,
+plus the actual survivor state and the derived merged-union baseline.
 Unmerge keeps notes, priorities, and annotations edited on the survivor while it
-was merged, but restores its pre-merge verdict because merge's automatic
+was merged, but does not copy an absorbed member's unioned notes or priority onto
+the survivor after a cold reload. It restores the pre-merge verdict because merge's automatic
 `accepted` state is mechanics rather than a new reviewer decision. Other members
 recover their pre-merge verdicts, priorities, notes, and annotations. Chaining a
 merged survivor into an earlier finding snapshots that survivor's current review

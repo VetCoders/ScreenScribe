@@ -459,6 +459,11 @@ def create_review_app(
             # Older reports omit this additive field; the client then restores
             # absorbed members as unreviewed while keeping the survivor's edits.
             "merged_member_reviews": dict(human.get("merged_member_reviews") or {}),
+            # Keep the actual survivor separate from the derived merged union so
+            # cold-reload unmerge can restore each member without duplicating an
+            # absorbed member's notes or priority onto the survivor.
+            "merged_survivor_review": dict(human.get("merged_survivor_review") or {}),
+            "merged_review_baseline": dict(human.get("merged_review_baseline") or {}),
         }
 
     def work_item_from_review_finding(finding: dict[str, Any]) -> WorkItem:

@@ -140,6 +140,37 @@ function snapshotFindingReview(state) {
     };
 }
 
+function reviewFieldEquals(left, right) {
+    return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function populatedReviewSnapshot(candidate) {
+    return candidate && typeof candidate === 'object' && Object.keys(candidate).length > 0
+        ? candidate
+        : null;
+}
+
+function resolveMergedSurvivorReview(entry, currentState) {
+    const current = snapshotFindingReview(currentState);
+    if (!entry || !entry.merged_review_baseline) {
+        return current;
+    }
+    const baseline = snapshotFindingReview(entry.merged_review_baseline);
+    const saved = snapshotFindingReview(entry.survivor_review || current);
+    return {
+        verdict: current.verdict,
+        severity: reviewFieldEquals(current.severity, baseline.severity)
+            ? saved.severity
+            : current.severity,
+        notes: reviewFieldEquals(current.notes, baseline.notes)
+            ? saved.notes
+            : current.notes,
+        annotations: reviewFieldEquals(current.annotations, baseline.annotations)
+            ? saved.annotations
+            : current.annotations,
+    };
+}
+
 // One decision vocabulary everywhere: accepted | rejected | none. `none` is the
 // explicit "not reviewed" string, never absence. This also migrates an old
 // localStorage draft that still carried the boolean `confirmed`.
@@ -1604,6 +1635,7 @@ function mergeFindings(ids) {
 
     const merged = mergeFindingGroup(group, null);
     const memberReviews = {};
+    let retainedSurvivorReview = null;
     absorbedMerges.forEach((entry) => {
         Object.entries(entry.member_reviews || {}).forEach(([id, review]) => {
             memberReviews[normId(id)] = snapshotFindingReview(review);
@@ -1614,14 +1646,18 @@ function mergeFindings(ids) {
         // current state instead of silently reverting it to the first merge's
         // stale snapshot on the eventual unmerge.
         const absorbedSurvivorKey = normId(entry.id);
+        const absorbedSurvivorReview = resolveMergedSurvivorReview(
+            entry,
+            reportState.findings[absorbedSurvivorKey]
+        );
         // If it also survives the new group, keep its original pre-merge
         // snapshot so undo can still remove the automatic accepted verdict.
         // Its current notes/severity/annotations stay on the live survivor and
         // are retained separately by unmergeFindings.
         if (absorbedSurvivorKey !== normId(merged.id)) {
-            memberReviews[absorbedSurvivorKey] = snapshotFindingReview(
-                reportState.findings[absorbedSurvivorKey]
-            );
+            memberReviews[absorbedSurvivorKey] = absorbedSurvivorReview;
+        } else {
+            retainedSurvivorReview = absorbedSurvivorReview;
         }
     });
     members.forEach((id) => {
@@ -1631,18 +1667,27 @@ function mergeFindings(ids) {
         }
     });
     reportState.merges = remaining;
-    reportState.merges.push({
+    const mergeEntry = {
         id: merged.id,
         member_ids: members,
         summary_override: null,
         member_reviews: memberReviews,
-    });
+        survivor_review: null,
+        merged_review_baseline: null,
+    };
+    reportState.merges.push(mergeEntry);
 
     // Review state: the surviving finding is treated as accepted (the reviewer
     // deliberately kept it); absorbed members revert to "none" so they neither
     // ship as standalone findings nor leak into the rejected[] summary.
     if (!reportState.findings[merged.id]) {
         reportState.findings[merged.id] = createDefaultFindingState();
+    }
+    if (retainedSurvivorReview) {
+        reportState.findings[merged.id] = {
+            ...reportState.findings[merged.id],
+            ...retainedSurvivorReview,
+        };
     }
     reportState.findings[merged.id].verdict = 'accepted';
     for (const id of members) {
@@ -1652,6 +1697,8 @@ function mergeFindings(ids) {
         if (normId(id) === normId(merged.id)) continue;
         if (reportState.findings[id]) reportState.findings[id].verdict = 'none';
     }
+    mergeEntry.survivor_review = snapshotFindingReview(reportState.findings[merged.id]);
+    mergeEntry.merged_review_baseline = snapshotFindingReview(reportState.findings[merged.id]);
 
     reportState.modified = true;
     scheduleSharedStateSync();
@@ -1767,6 +1814,18 @@ function buildMergedReviewEntry(merged) {
     );
     if (mergeEntry?.member_reviews && Object.keys(mergeEntry.member_reviews).length > 0) {
         human_review.merged_member_reviews = mergeEntry.member_reviews;
+    }
+    if (mergeEntry) {
+        human_review.merged_survivor_review = resolveMergedSurvivorReview(
+            mergeEntry,
+            reportState.findings[normId(merged.id)]
+        );
+        human_review.merged_review_baseline = snapshotFindingReview({
+            verdict: r.verdict,
+            severity: r.severity,
+            notes: r.notes,
+            annotations: r.annotations,
+        });
     }
     const result = { ...rest, human_review };
     if (merged.screenshot_path) {
@@ -2138,11 +2197,27 @@ function ensureMergeEntry(merged) {
     reportState.merges = Array.isArray(reportState.merges) ? reportState.merges : [];
     let entry = reportState.merges.find((x) => normId(x.id) === normId(merged.id));
     if (!entry) {
+        const hydratedReview = reportState.findings[normId(merged.id)] || {};
+        const memberReviews = hydratedReview.merged_member_reviews || {};
+        const persistedSurvivor = populatedReviewSnapshot(
+            hydratedReview.merged_survivor_review
+        );
+        const persistedBaseline = populatedReviewSnapshot(
+            hydratedReview.merged_review_baseline
+        );
         entry = {
             id: normId(merged.id),
             member_ids: [merged.id, ...(merged.merged_from_ids || [])].map(normId),
             summary_override: null,
-            member_reviews: reportState.findings[normId(merged.id)]?.merged_member_reviews || {},
+            member_reviews: memberReviews,
+            survivor_review: snapshotFindingReview(
+                persistedSurvivor
+                || memberReviews[normId(merged.id)]
+                || hydratedReview
+            ),
+            merged_review_baseline: snapshotFindingReview(
+                persistedBaseline || hydratedReview
+            ),
         };
         reportState.merges.push(entry);
     }
@@ -2158,6 +2233,7 @@ function unmergeFindings(survivorId) {
 
     const snapshots = entry.member_reviews || {};
     const currentSurvivor = snapshotFindingReview(reportState.findings[survivorKey]);
+    const actualSurvivor = resolveMergedSurvivorReview(entry, currentSurvivor);
     const memberIds = Array.from(new Set((entry.member_ids || []).map(normId)));
     memberIds.forEach((memberId) => {
         const memberSnapshot = snapshots[memberId];
@@ -2171,8 +2247,8 @@ function unmergeFindings(survivorId) {
         // annotations. Other members recover their exact snapshots.
         reportState.findings[memberId] = memberId === survivorKey
             ? {
-                ...currentSurvivor,
-                verdict: memberSnapshot ? restored.verdict : currentSurvivor.verdict,
+                ...actualSurvivor,
+                verdict: memberSnapshot ? restored.verdict : actualSurvivor.verdict,
             }
             : restored;
     });

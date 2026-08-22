@@ -2170,6 +2170,16 @@ def test_review_state_returns_merged_from_ids(
                             "merged_member_reviews": {
                                 "18": {"verdict": "rejected", "notes": "restore me"}
                             },
+                            "merged_survivor_review": {
+                                "verdict": "none",
+                                "severity": "low",
+                                "notes": "survivor before merge",
+                            },
+                            "merged_review_baseline": {
+                                "verdict": "accepted",
+                                "severity": "high",
+                                "notes": "survivor\n\nrestore me",
+                            },
                         },
                         "6": {"verdict": "accepted", "notes": "standalone"},
                     }
@@ -2189,6 +2199,16 @@ def test_review_state_returns_merged_from_ids(
     assert survivor.get("merged_from_ids") == [18, 26, 27], survivor
     assert survivor.get("merged_member_reviews") == {
         "18": {"verdict": "rejected", "notes": "restore me"}
+    }
+    assert survivor.get("merged_survivor_review") == {
+        "verdict": "none",
+        "severity": "low",
+        "notes": "survivor before merge",
+    }
+    assert survivor.get("merged_review_baseline") == {
+        "verdict": "accepted",
+        "severity": "high",
+        "notes": "survivor\n\nrestore me",
     }
     # A standalone finding carries an empty trail, never a missing key.
     assert findings.get("6", {}).get("merged_from_ids") == []
