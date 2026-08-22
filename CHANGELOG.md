@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.1.19] - 2026-08-23
+
 - **Security: provider endpoints are classified by canonical DNS host boundaries.**
   OpenAI and LibraxisAI detection now parses the URL hostname and accepts only
   the provider's exact domain or a real subdomain, so lookalike hosts cannot be

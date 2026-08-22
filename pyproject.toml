@@ -1,6 +1,6 @@
 [project]
 name = "screenscribe"
-version = "0.1.18"
+version = "0.1.19"
 description = "Turn screen recordings into actionable engineering reports — narrated screencast review (STT → LLM → VLM)"
 readme = "README.md"
 requires-python = ">=3.11"
