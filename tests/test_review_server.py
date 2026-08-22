@@ -2326,6 +2326,87 @@ def _reach_review_session(app: Any) -> Any:
     raise AssertionError("could not reach ReviewSession")
 
 
+def _reach_review_save_lock(app: Any) -> Any:
+    """Walk route closures to find the per-report asyncio serialization lock."""
+    import asyncio
+
+    for route in app.routes:
+        endpoint = getattr(route, "endpoint", None)
+        closure = getattr(endpoint, "__closure__", None)
+        if not closure:
+            continue
+        for cell in closure:
+            val = cell.cell_contents
+            if isinstance(val, asyncio.Lock):
+                return val
+    raise AssertionError("could not reach review save lock")
+
+
+def test_review_state_snapshot_serializes_with_reset_lock(
+    review_workspace: tuple[Path, Path, Path],
+) -> None:
+    """Review data and reset generation must come from one serialized instant."""
+    import asyncio
+    import json
+
+    import httpx
+
+    output_dir, report_file, video_path = review_workspace
+    json_path = output_dir / "screen_report.json"
+    json_path.write_text(
+        json.dumps(
+            {
+                "video": "screen.mov",
+                "findings": [{"id": 1}],
+                "human_review": {
+                    "reviewer": "old reviewer",
+                    "findings": {"1": {"verdict": "accepted", "notes": "old"}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    app = create_review_app(output_dir, report_file.name, video_path, _config())
+    save_lock = _reach_review_save_lock(app)
+    session = _reach_review_session(app)
+    token = app.state.session_token
+
+    async def _run() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://127.0.0.1",
+            headers={"X-ScreenScribe-Token": token},
+        ) as client:
+            async with save_lock:
+                pending = asyncio.create_task(client.get("/api/review-state"))
+                await asyncio.sleep(0)
+                assert not pending.done(), "review-state bypassed reset/save serialization"
+                json_path.write_text(
+                    json.dumps(
+                        {
+                            "video": "screen.mov",
+                            "findings": [{"id": 1}],
+                            "review_reset_generation": 1,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                with session.lock:
+                    session.reset_generation = 1
+            response = await pending
+            assert response.status_code == 200
+            assert response.json() == {
+                "findings": {},
+                "manualFrames": [],
+                "reviewer": "",
+                "modified": False,
+                "resetGeneration": 1,
+            }
+
+    asyncio.run(_run())
+
+
 def test_concurrent_manual_analyses_last_response_id_uses_cas(
     review_workspace: tuple[Path, Path, Path],
     monkeypatch: pytest.MonkeyPatch,

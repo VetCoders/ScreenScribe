@@ -973,18 +973,23 @@ def create_review_app(
         with a renderable frameDataUrl, so the client can drop base64 frames
         from its localStorage draft and still restore the image after a reload.
         """
-        _, report_data = load_report_json()
-        state = build_review_state_from_report(report_data)
-        with session.lock:
-            session.reset_generation = max(
-                session.reset_generation,
-                _report_reset_generation(report_data),
-            )
-            session_markers = list(session.markers.values())
-            reset_generation = session.reset_generation
-        hydrate_state_with_session_frames(state, session_markers)
-        state["resetGeneration"] = reset_generation
-        return JSONResponse(content=state)
+        # A snapshot must pair report overlays and the reset epoch from one
+        # serialized point in time. Otherwise a reset can land between reading
+        # the old report and sampling the new session generation, producing old
+        # findings mislabeled as authoritative for the new epoch.
+        async with save_lock:
+            _, report_data = load_report_json()
+            state = build_review_state_from_report(report_data)
+            with session.lock:
+                session.reset_generation = max(
+                    session.reset_generation,
+                    _report_reset_generation(report_data),
+                )
+                session_markers = list(session.markers.values())
+                reset_generation = session.reset_generation
+            hydrate_state_with_session_frames(state, session_markers)
+            state["resetGeneration"] = reset_generation
+            return JSONResponse(content=state)
 
     @app.post("/api/reset-review")
     async def reset_review_state() -> JSONResponse:

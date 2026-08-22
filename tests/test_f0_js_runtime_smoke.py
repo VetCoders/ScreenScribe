@@ -906,6 +906,43 @@ def test_f4_reset_generation_beats_later_stale_timestamps() -> None:
     )
 
 
+def test_f4_hydrate_rejects_snapshot_from_older_reset_generation() -> None:
+    """A delayed disk response cannot restore review state cleared by reset."""
+    _run_review_app_smoke(
+        """
+        let renders = 0;
+        restoreUIFromState = () => { renders += 1; };
+        restoreMergesToDom = () => {};
+        renderManualFrames = () => {};
+        initAnnotationTools = () => {};
+
+        reportState.findings = {};
+        reportState.manualFrames = [];
+        reportState.reviewer = '';
+        reportState.modified = false;
+        reportState.resetGeneration = 2;
+
+        hydrateReportState({
+            findings: { stale: { verdict: 'accepted', notes: 'pre-reset' } },
+            manualFrames: [{ marker_id: 'stale-frame' }],
+            reviewer: 'stale reviewer',
+            modified: false,
+            resetGeneration: 1,
+        });
+
+        if (Object.keys(reportState.findings).length !== 0
+            || reportState.manualFrames.length !== 0
+            || reportState.reviewer !== ''
+            || reportState.resetGeneration !== 2
+            || renders !== 0) {
+            console.error('older reset generation hydrated stale state: '
+                + JSON.stringify({ state: reportState, renders }));
+            process.exitCode = 1;
+        }
+        """
+    )
+
+
 def test_f4_manual_frame_add_flushes_draft_synchronously() -> None:
     """A freshly added manual frame lands in the localStorage draft immediately.
 

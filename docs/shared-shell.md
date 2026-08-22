@@ -97,6 +97,8 @@ never always-visible footer/side buttons.
   aborts active voice recognition explicitly. Cleanup after a committed reset or
   invalidated Add is best-effort: cleanup failures are warnings and do not turn a
   successful reset or generation-conflict response into a misleading HTTP 500.
+  Review-state snapshots are serialized with Save/reset, and a delayed snapshot
+  from an older generation is discarded rather than relabeled or restored.
 
 The review report's findings always exist, so its downloads are not readiness-
 gated; analyze gates because its artifacts do not exist until the user marks a

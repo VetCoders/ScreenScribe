@@ -13,7 +13,8 @@
   Save as well as delayed manual-frame Add/Analyze/note/priority and voice-note
   work without discarding annotation edits during ordinary same-generation
   synchronization. A stale Add still returns its generation conflict if
-  best-effort image cleanup can only emit a warning.
+  best-effort image cleanup can only emit a warning. Review-state snapshots are
+  serialized with reset and older-epoch responses are ignored by the browser.
 - **Fixed: the shared review/analyze shell stays usable and accessible at narrow
   widths.** Oversized moment previews are bounded, analyze header controls wrap
   on phones, active tabs keep their roving `tabindex` in sync, the sidebar

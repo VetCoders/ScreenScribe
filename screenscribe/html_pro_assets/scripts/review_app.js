@@ -556,6 +556,9 @@ function hydrateReportState(
 
     const currentResetGeneration = normalizeResetGeneration(reportState.resetGeneration);
     const incomingResetGeneration = normalizeResetGeneration(snapshot.resetGeneration);
+    if (incomingResetGeneration < currentResetGeneration) {
+        return;
+    }
     const resetAdvanced = incomingResetGeneration > currentResetGeneration;
     const resetHydration = discardActiveEditor || resetAdvanced;
 
