@@ -45,3 +45,18 @@ reviewable history.
 - [ ] If anything above is uncertain, it was treated as private and excluded.
 - [ ] Version number and release notes are correct and final.
 - [ ] A fresh clone of the release builds and runs from scratch.
+
+## PyPI publication and recovery
+
+- [ ] Publish production artifacts by publishing the GitHub Release. The
+      release event rebuilds the tag, runs `make release-verify`, and pauses at
+      the protected `pypi` environment before Trusted Publishing.
+- [ ] If artifact verification passed but the publisher failed before upload,
+      fix the workflow on `main` and use the manual **Publish to PyPI** recovery
+      input with the existing release tag. The recovery path accepts only a
+      strict semver tag that matches `pyproject.toml`, is reachable from
+      `origin/main`, and already has a published, non-prerelease GitHub Release.
+- [ ] Never move, delete, or reuse a public release tag to retry publication.
+- [ ] After workflow success, verify the version and file digests through the
+      PyPI JSON API, then install the exact version from PyPI in a clean
+      environment and run the CLI smoke checks.
