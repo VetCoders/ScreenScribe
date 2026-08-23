@@ -98,7 +98,10 @@ jobs:
               echo "::error::manual recovery ref must match ${recovery_prefix}N (N >= 1)"
               exit 1
             fi
-            recovery_commit="$(git rev-parse "${GITHUB_REF}^{commit}")"
+            # GITHUB_SHA is the commit selected by the triggering recovery tag;
+            # do not depend on that tag ref remaining present after checkout
+            # switches the worktree to the original release tag.
+            recovery_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
             if [ "${recovery_commit}" != "${WORKFLOW_SHA}" ]; then
               echo "::error::recovery tag commit ${recovery_commit} != workflow source commit ${WORKFLOW_SHA}"
               exit 1
