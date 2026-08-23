@@ -8,9 +8,11 @@ name: Publish to PyPI
 # a pre-registered trusted publisher.
 #
 # Why a plain push to main cannot publish: there is no push trigger. A fork/PR
-# cannot publish either. Manual recovery must be dispatched from main, names an
-# existing published production release, repeats all artifact guards, and still
-# crosses the `pypi` environment reviewer/tag protections.
+# cannot publish either. Manual recovery names an existing published production
+# release and must be dispatched from an immutable `<release-tag>-pypi-recovery-N`
+# tag cut from a reviewed main commit. That keeps the `pypi` environment's
+# reviewer + `v*` tag protections effective while the workflow checks out and
+# rebuilds the original release tag.
 #
 # Third-party actions are pinned to full commit SHAs (supply-chain hardening);
 # the trailing comment records the human-readable version.
@@ -33,7 +35,7 @@ permissions:
 # cancel-in-progress: false — a publish already in flight is NEVER killed
 # mid-upload; the second run queues and fails cleanly on the duplicate instead.
 concurrency:
-  group: publish-pypi-${{ github.event.release.tag_name || inputs.tag }}
+  group: publish-pypi-${{ github.event.release.tag_name || github.event.inputs.tag }}
   cancel-in-progress: false
 
 jobs:
@@ -52,7 +54,7 @@ jobs:
       # job never pushes, so persisting GITHUB_TOKEN is needless surface.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ format('refs/tags/{0}', github.event.release.tag_name || github.event.inputs.tag) }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -64,7 +66,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: |
           tag="${RELEASE_TAG}"
           echo "release tag: ${tag}"
@@ -77,14 +80,31 @@ jobs:
             echo "::error::tag '${tag}' != 'v${version}' (pyproject version)"
             exit 1
           fi
+          tag_commit="$(git rev-parse "refs/tags/${tag}^{commit}")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "${head_commit}" != "${tag_commit}" ]; then
+            echo "::error::checkout HEAD ${head_commit} != peeled tag commit ${tag_commit}"
+            exit 1
+          fi
           git fetch --no-tags origin main
           if ! git merge-base --is-ancestor HEAD origin/main; then
             echo "::error::tagged commit is not reachable from origin/main"
             exit 1
           fi
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
-              echo "::error::manual recovery must be dispatched from main"
+            recovery_prefix="refs/tags/${tag}-pypi-recovery-"
+            recovery_number="${GITHUB_REF#"${recovery_prefix}"}"
+            if [ "${recovery_number}" = "${GITHUB_REF}" ] || ! printf '%s' "${recovery_number}" | grep -Eq '^[1-9][0-9]*$'; then
+              echo "::error::manual recovery ref must match ${recovery_prefix}N (N >= 1)"
+              exit 1
+            fi
+            recovery_commit="$(git rev-parse "${GITHUB_REF}^{commit}")"
+            if [ "${recovery_commit}" != "${WORKFLOW_SHA}" ]; then
+              echo "::error::recovery tag commit ${recovery_commit} != workflow source commit ${WORKFLOW_SHA}"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "${recovery_commit}" origin/main; then
+              echo "::error::recovery workflow commit is not reachable from origin/main"
               exit 1
             fi
             draft="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq '.draft')"
@@ -94,7 +114,7 @@ jobs:
               exit 1
             fi
           fi
-          echo "guards passed: ${tag} == v${version}, ancestor of origin/main"
+          echo "guards passed: ${tag} == v${version}, exact tag checkout, commits reachable from origin/main"
 
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
