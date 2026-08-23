@@ -1,20 +1,30 @@
 name: Publish to PyPI
 
-# Production PyPI release via Trusted Publishing (OIDC). Triggered ONLY by a
-# published GitHub Release. NO API tokens, NO username/password: the publish
-# job mints a short-lived OIDC identity token (id-token: write) that PyPI
-# verifies against a pre-registered trusted publisher.
+# Production PyPI release via Trusted Publishing (OIDC). Normally triggered by
+# a published GitHub Release; workflow_dispatch is a guarded recovery path for
+# retrying an already-published, non-prerelease tag after a publisher-side
+# failure. NO API tokens, NO username/password: the publish job mints a
+# short-lived OIDC identity token (id-token: write) that PyPI verifies against
+# a pre-registered trusted publisher.
 #
-# Why a plain push to main cannot publish: the trigger is `release: published`,
-# not push. A fork/PR cannot publish either — release events run only in the
-# base repo, and the `pypi` environment (repo-side protection: required
-# reviewers + tag rules) gates the publish job independently of who triggered.
+# Why a plain push to main cannot publish: there is no push trigger. A fork/PR
+# cannot publish either. Manual recovery names an existing published production
+# release and must be dispatched from an immutable `<release-tag>-pypi-recovery-N`
+# tag cut from a reviewed main commit. That keeps the `pypi` environment's
+# reviewer + `v*` tag protections effective while the workflow checks out and
+# rebuilds the original release tag.
 #
 # Third-party actions are pinned to full commit SHAs (supply-chain hardening);
 # the trailing comment records the human-readable version.
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing published release tag to rebuild and publish (vMAJOR.MINOR.PATCH)"
+        required: true
+        type: string
 
 # Workflow-level default: read-only. Each job narrows further below.
 permissions:
@@ -25,14 +35,15 @@ permissions:
 # cancel-in-progress: false — a publish already in flight is NEVER killed
 # mid-upload; the second run queues and fails cleanly on the duplicate instead.
 concurrency:
-  group: publish-pypi-${{ github.event.release.tag_name }}
+  group: publish-pypi-${{ github.event.release.tag_name || github.event.inputs.tag }}
   cancel-in-progress: false
 
 jobs:
   build:
     name: Build & verify release
     # A published prerelease must never enter the production artifact path.
-    if: ${{ github.event.release.prerelease == false }}
+    # Manual recovery is checked against the Releases API in the tag guard.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -43,7 +54,7 @@ jobs:
       # job never pushes, so persisting GITHUB_TOKEN is needless surface.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ format('refs/tags/{0}', github.event.release.tag_name || github.event.inputs.tag) }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -54,7 +65,9 @@ jobs:
       - name: Guard release tag
         shell: bash
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: |
           tag="${RELEASE_TAG}"
           echo "release tag: ${tag}"
@@ -67,12 +80,44 @@ jobs:
             echo "::error::tag '${tag}' != 'v${version}' (pyproject version)"
             exit 1
           fi
+          tag_commit="$(git rev-parse "refs/tags/${tag}^{commit}")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "${head_commit}" != "${tag_commit}" ]; then
+            echo "::error::checkout HEAD ${head_commit} != peeled tag commit ${tag_commit}"
+            exit 1
+          fi
           git fetch --no-tags origin main
           if ! git merge-base --is-ancestor HEAD origin/main; then
             echo "::error::tagged commit is not reachable from origin/main"
             exit 1
           fi
-          echo "guards passed: ${tag} == v${version}, ancestor of origin/main"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            recovery_prefix="refs/tags/${tag}-pypi-recovery-"
+            recovery_number="${GITHUB_REF#"${recovery_prefix}"}"
+            if [ "${recovery_number}" = "${GITHUB_REF}" ] || ! printf '%s' "${recovery_number}" | grep -Eq '^[1-9][0-9]*$'; then
+              echo "::error::manual recovery ref must match ${recovery_prefix}N (N >= 1)"
+              exit 1
+            fi
+            # GITHUB_SHA is the commit selected by the triggering recovery tag;
+            # do not depend on that tag ref remaining present after checkout
+            # switches the worktree to the original release tag.
+            recovery_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+            if [ "${recovery_commit}" != "${WORKFLOW_SHA}" ]; then
+              echo "::error::recovery tag commit ${recovery_commit} != workflow source commit ${WORKFLOW_SHA}"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "${recovery_commit}" origin/main; then
+              echo "::error::recovery workflow commit is not reachable from origin/main"
+              exit 1
+            fi
+            draft="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq '.draft')"
+            prerelease="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq '.prerelease')"
+            if [ "${draft}" != "false" ] || [ "${prerelease}" != "false" ]; then
+              echo "::error::manual recovery requires an existing published, non-prerelease GitHub Release"
+              exit 1
+            fi
+          fi
+          echo "guards passed: ${tag} == v${version}, exact tag checkout, commits reachable from origin/main"
 
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
@@ -129,4 +174,4 @@ jobs:
       # attestations generated + uploaded with the distributions); left at
       # default intentionally.
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
