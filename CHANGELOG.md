@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Fixed: STT models that reject `response_format=verbose_json` no longer abort
+  the review.** The file transcription path (`review`, `transcribe`, and every
+  chunk of a long recording) asks for `verbose_json` to get per-segment timing.
+  OpenAI's `gpt-transcribe` / `gpt-4o-transcribe` family answers HTTP 400
+  (`param=response_format`, `code=unsupported_value`), which previously killed
+  the run at chunk 1/32 with "Speech-to-text failed (HTTP 400)". Screenscribe
+  now retries that one request with `json`, marks the resulting timeline as
+  synthetic, and remembers the refusal per endpoint+model for the rest of the
+  process so a chunked run does not repeat the rejected request per chunk.
+  Whisper-family models keep `verbose_json` and their real segment timing; any
+  other 400 still fails loudly.
+
 ## [0.1.19] - 2026-08-23
 
 - **Security: provider endpoints are classified by canonical DNS host boundaries.**

@@ -488,7 +488,11 @@ screenscribe POSTs a `multipart/form-data` request:
 - **File field:** `audio` (for loopback/local URLs). A custom cloud endpoint
   receives the field as `file` instead — see below.
 - **Form fields:** `model` (e.g. `whisper-1`), `language` (e.g. `en`),
-  `response_format` (`verbose_json` for the full `transcribe` path).
+  `response_format` (`verbose_json` for the full `transcribe` path). If your
+  server answers HTTP 400 naming `response_format` as unsupported (OpenAI's
+  `gpt-transcribe` family does), screenscribe retries once with `json` and
+  falls back to a synthetic timeline; that refusal is remembered per
+  endpoint+model for the rest of the run.
 - **No `Authorization` header** for `--local` / loopback targets.
 
 #### Response shape (what your server must return)

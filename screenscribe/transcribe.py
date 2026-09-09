@@ -81,6 +81,40 @@ MIME_TYPES = {
 }
 
 
+# (endpoint URL, model) pairs whose server refused ``response_format=verbose_json``
+# with HTTP 400. Whisper-family models return per-segment timing under
+# ``verbose_json``; OpenAI's ``gpt-transcribe`` / ``gpt-4o-transcribe`` family
+# accepts only ``json`` or ``text`` and rejects the request outright. The first
+# refusal is retried once with ``json`` and remembered here for the rest of the
+# process, so a silence-aware chunked run (30+ chunks) pays the rejected
+# request once, not once per chunk. Process-local by design: a different
+# endpoint or model starts from ``verbose_json`` again.
+_VERBOSE_JSON_REFUSED: set[tuple[str, str]] = set()
+
+
+def _server_rejects_response_format(error: httpx.HTTPStatusError) -> bool:
+    """True when a 400 names ``response_format`` as the unsupported parameter.
+
+    Accepts both the OpenAI envelope (``{"error": {"param": "response_format",
+    ...}}``) and gateways that flatten it to a bare ``message``. Any other 400
+    (bad language, oversized file, ...) is left to the caller untouched.
+    """
+    if error.response.status_code != 400:
+        return False
+    try:
+        body: Any = error.response.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        return "response_format" in (error.response.text or "")
+    detail = body.get("error", body)
+    if not isinstance(detail, dict):
+        return "response_format" in str(detail)
+    if detail.get("param") == "response_format":
+        return True
+    return "response_format" in str(detail.get("message", ""))
+
+
 def _resolve_stt_url(use_local: bool, stt_endpoint: str | None) -> str:
     """Resolve the STT endpoint URL."""
     if use_local:
@@ -198,26 +232,46 @@ def _request_transcription_payload(
     is_local_endpoint = url.startswith("http://127.0.0.1") or url.startswith("http://localhost")
     field_name = "audio" if is_local_endpoint else "file"
     files = {field_name: (filename, audio_data, mime_type)}
-    data = {
-        "model": stt_model,
-        "language": language,
-        "response_format": response_format,
-    }
     headers: dict[str, str] = {}
     if api_key and not use_local and not is_local_endpoint:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    def do_transcribe() -> httpx.Response:
+    def post_with(fmt: str) -> httpx.Response:
+        data = {
+            "model": stt_model,
+            "language": language,
+            "response_format": fmt,
+        }
         with httpx.Client(timeout=600.0) as client:
             response = client.post(url, files=files, data=data, headers=headers)
             response.raise_for_status()
             return response
 
-    response = retry_request(
-        do_transcribe,
-        max_retries=3,
-        operation_name="STT transcription",
-    )
+    effective_format = response_format
+    if effective_format == "verbose_json" and (url, stt_model) in _VERBOSE_JSON_REFUSED:
+        effective_format = "json"
+
+    try:
+        response = retry_request(
+            lambda: post_with(effective_format),
+            max_retries=3,
+            operation_name="STT transcription",
+        )
+    except httpx.HTTPStatusError as exc:
+        if effective_format != "verbose_json" or not _server_rejects_response_format(exc):
+            raise
+        # A 400 is not retriable, so this is the first and only rejected request
+        # for this (endpoint, model). Downgrade once and remember it.
+        _VERBOSE_JSON_REFUSED.add((url, stt_model))
+        console.print(
+            f"[yellow]STT model {stt_model} rejects response_format=verbose_json; "
+            "retrying with json (no per-segment timing, timeline will be synthetic)[/]"
+        )
+        response = retry_request(
+            lambda: post_with("json"),
+            max_retries=3,
+            operation_name="STT transcription",
+        )
     payload = response.json()
     if not isinstance(payload, dict):
         raise RuntimeError("STT API returned unexpected payload shape")
