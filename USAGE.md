@@ -14,6 +14,7 @@ common troubleshooting case. For a quick overview and installation, see the
   - [screenscribe transcribe](#screenscribe-transcribe)
   - [screenscribe preprocess](#screenscribe-preprocess)
   - [screenscribe config](#screenscribe-config)
+  - [screenscribe auth](#screenscribe-auth)
   - [screenscribe version](#screenscribe-version)
 - [Configuration reference](#configuration-reference)
 - [Local and offline STT](#local-and-offline-stt)
@@ -202,6 +203,8 @@ uv run screenscribe transcribe VIDEO [OPTIONS]
 | `--output`, `-o` | stdout | Output file for the transcript. If omitted, the transcript prints to the console. |
 | `--lang`, `-l` | `en` | Language code for transcription. |
 | `--local` | off | Use a local STT server. |
+| `--live` | off | Read 16 kHz mono PCM16LE from stdin and stream it to the provider's websocket STT (xAI `wss://api.x.ai/v1/stt`, LibraxisAI `stt-ws-v1`). Prints `partial:` / `final:` lines; `-o` writes the final lines. `VIDEO` is omitted. |
+| `--sample-rate` | `16000` | Sample rate of the PCM on stdin (live mode). |
 
 **Examples**
 
@@ -209,7 +212,37 @@ uv run screenscribe transcribe VIDEO [OPTIONS]
 uv run screenscribe transcribe demo.mov
 uv run screenscribe transcribe demo.mov -o transcript.txt
 uv run screenscribe transcribe demo.mov --local --lang en
+# live: microphone -> ffmpeg -> websocket STT
+ffmpeg -loglevel error -f avfoundation -i ":0" -ac 1 -ar 16000 -f s16le - \
+  | screenscribe transcribe --live --lang pl
 ```
+
+STT `response_format` is picked per model: whisper-family models request
+`verbose_json` (per-segment timing); `gpt-transcribe*` / `gpt-4o-transcribe*` /
+`gpt-4o-mini-transcribe*` request `json` directly; unknown models start with
+`verbose_json` and fall back to `json` on an HTTP 400 that names
+`response_format`. On `api.x.ai` the request is xAI's own multipart (no `model`)
+and segments are built from the returned word timings.
+
+---
+
+### `screenscribe tts`
+
+Synthesize speech from text (xAI `POST /v1/tts`).
+
+```bash
+screenscribe tts TEXT --out FILE [--voice ID] [--language CODE] [--speed 0.7-1.5]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--out`, `-o` | required | Output file; `.mp3` or `.wav` suffix selects the codec. |
+| `--voice` | config `SCREENSCRIBE_TTS_VOICE`, else `eve` | xAI voice id. |
+| `--language`, `--lang`, `-l` | config language | BCP-47 code (`en`, `pl`, `auto`). |
+| `--speed` | `1.0` | Speech rate, 0.7-1.5. |
+
+The endpoint comes from the xAI preset or `SCREENSCRIBE_TTS_ENDPOINT`; the key
+from `SCREENSCRIBE_TTS_API_KEY`, falling back to the STT key.
 
 ---
 
@@ -291,6 +324,32 @@ uv run screenscribe config --set-key YOUR_API_KEY
 
 `--show` lists the active config source, masked API keys, the STT/LLM/vision
 endpoints and models, and the processing options (language, semantic, vision).
+
+---
+
+### `screenscribe auth`
+
+Sign in with a provider **account** instead of pasting an API key. The flow is
+device-code: the CLI prints a URL and a short code, opens the browser (skip
+with `--no-browser`), and polls until you approve (15 minute budget).
+
+```bash
+uv run screenscribe auth login xai        # RFC 8628 device flow on auth.x.ai
+uv run screenscribe auth login openai     # Codex device flow on auth.openai.com
+uv run screenscribe auth status           # never prints tokens
+uv run screenscribe auth logout xai
+```
+
+Tokens are stored in `~/.config/screenscribe/accounts.json` (mode 0600) and
+refreshed automatically when a refresh token is present.
+
+**Bearer resolution order** for STT/LLM/Vision requests: an explicit API key
+(`SCREENSCRIBE_*_API_KEY`, `OPENAI_API_KEY`, `SCREENSCRIBE_API_KEY`) always
+wins; without one, a signed-in **xAI** account token is used for endpoints on
+`api.x.ai`. An **OpenAI** account sign-in is identity-only: `api.openai.com`
+rejects a ChatGPT account token for REST calls (verified 2026-09-08), so
+Screenscribe prints a warning and still requires an OpenAI API key for
+requests. The shipped public client ids are disclosed in `NOTICE`.
 
 ---
 
@@ -443,6 +502,16 @@ moving to a new provider.
 | `SCREENSCRIBE_LANGUAGE` | `en` | Default transcription language (`pl` for Polish). |
 | `SCREENSCRIBE_VISION` | `true` | Enable visual/screenshot (VLM) analysis (`false` = LLM-only; semantic detection still runs). |
 | `SCREENSCRIBE_LLM_MERGE` | `true` | Semantic LLM-merge pass that dedups cross-category paraphrases after the cheap heuristic dedup (`false`/`0`/`no` = heuristic-only dedup). A missing LLM API key also makes it a no-op. |
+
+### xAI, TTS and live STT
+
+| Variable | Purpose |
+|----------|---------|
+| `SCREENSCRIBE_PROVIDER=xai` | xAI preset (`screenscribe config setup`, option 4): STT `https://api.x.ai/v1/stt`, LLM/vision `https://api.x.ai/v1/responses`, `SCREENSCRIBE_STT_MODEL` empty, `SCREENSCRIBE_LLM_MODEL=grok-4.6`. |
+| `SCREENSCRIBE_TTS_ENDPOINT` | TTS endpoint (default derived: `https://api.x.ai/v1/tts` on the xAI preset). |
+| `SCREENSCRIBE_TTS_API_KEY` | TTS key (falls back to the STT key, then the generic key). |
+| `SCREENSCRIBE_TTS_VOICE` | Default voice id for `screenscribe tts`. |
+| `SCREENSCRIBE_STT_LIVE_ENDPOINT` | Websocket STT gateway for `transcribe --live` (derived: `wss://api.x.ai/v1/stt` or `wss://api.libraxis.cloud/v1/audio/transcribe`). |
 
 ### Optional STT fallback (opt-in)
 

@@ -4,7 +4,7 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
@@ -23,6 +23,22 @@ OPENAI_VISION_ENDPOINT = f"{OPENAI_API_BASE}/v1/responses"
 OPENAI_STT_MODEL = "whisper-1"
 OPENAI_LLM_MODEL = "gpt-5.6-luna"
 OPENAI_VISION_MODEL = "gpt-5.6-luna"
+
+# xAI (api.x.ai). STT/TTS are xAI-native endpoints (see screenscribe.providers.xai);
+# LLM/vision speak the Responses API on the same host. xAI STT takes no model.
+XAI_API_BASE = "https://api.x.ai"
+XAI_STT_ENDPOINT = f"{XAI_API_BASE}/v1/stt"
+XAI_LLM_ENDPOINT = f"{XAI_API_BASE}/v1/responses"
+XAI_VISION_ENDPOINT = f"{XAI_API_BASE}/v1/responses"
+XAI_TTS_ENDPOINT = f"{XAI_API_BASE}/v1/tts"
+XAI_STT_LIVE_ENDPOINT = "wss://api.x.ai/v1/stt"
+XAI_STT_MODEL = ""
+XAI_LLM_MODEL = "grok-4.6"
+XAI_VISION_MODEL = "grok-4.6"
+XAI_TTS_VOICE = "eve"
+
+# LibraxisAI live STT gateway (stt-ws-v1; see screenscribe.stt_stream).
+LIBRAXIS_STT_LIVE_ENDPOINT = "wss://api.libraxis.cloud/v1/audio/transcribe"
 
 # Default models
 DEFAULT_STT_MODEL = "whisper-1"
@@ -85,6 +101,16 @@ class ScreenScribeConfig:
     stt_fallback_endpoint: str = ""
     stt_fallback_api_key: str = ""
     stt_fallback_model: str = ""
+
+    # Text-to-speech (currently xAI only). Empty endpoint = derived from the STT
+    # provider when it offers TTS, else TTS is unavailable. The key falls back to
+    # the STT key, then the generic key.
+    tts_endpoint: str = ""
+    tts_api_key: str = ""
+    tts_voice: str = ""
+
+    # Live (websocket) STT gateway. Empty = derived from the STT endpoint host.
+    stt_live_endpoint: str = ""
 
     # Processing options
     language: str = "en"
@@ -153,6 +179,21 @@ class ScreenScribeConfig:
                 llm_model=OPENAI_LLM_MODEL,
                 vision_model=OPENAI_VISION_MODEL,
             )
+        if normalized == "xai":
+            return cls(
+                provider="xai",
+                api_key=api_key,
+                api_base=XAI_API_BASE,
+                stt_endpoint=XAI_STT_ENDPOINT,
+                llm_endpoint=XAI_LLM_ENDPOINT,
+                vision_endpoint=XAI_VISION_ENDPOINT,
+                stt_model=XAI_STT_MODEL,
+                llm_model=llm_model or XAI_LLM_MODEL,
+                vision_model=vision_model or XAI_VISION_MODEL,
+                tts_endpoint=XAI_TTS_ENDPOINT,
+                tts_voice=XAI_TTS_VOICE,
+                stt_live_endpoint=XAI_STT_LIVE_ENDPOINT,
+            )
         if normalized == "custom":
             base = cls._normalize_api_base(custom_base)
             if not base.startswith(("https://", "http://")):
@@ -186,16 +227,76 @@ class ScreenScribeConfig:
         return self.keywords
 
     def get_stt_api_key(self) -> str:
-        """Get API key for STT endpoint."""
-        return self.stt_api_key or self.api_key
+        """Get API key for STT endpoint (explicit key, else account bearer)."""
+        return self._key_or_account_bearer(self.stt_api_key or self.api_key, self.stt_endpoint)
 
     def get_llm_api_key(self) -> str:
-        """Get API key for LLM endpoint."""
-        return self.llm_api_key or self.api_key
+        """Get API key for LLM endpoint (explicit key, else account bearer)."""
+        return self._key_or_account_bearer(self.llm_api_key or self.api_key, self.llm_endpoint)
 
     def get_vision_api_key(self) -> str:
-        """Get API key for Vision endpoint."""
-        return self.vision_api_key or self.api_key
+        """Get API key for Vision endpoint (explicit key, else account bearer)."""
+        return self._key_or_account_bearer(
+            self.vision_api_key or self.api_key, self.vision_endpoint
+        )
+
+    # Provider whose signed-in account may back requests to a given REST host.
+    # ``openai`` is listed so the identity-only warning fires (the token itself
+    # is never returned for api.openai.com -- see ``account_auth.resolve_bearer``).
+    _ACCOUNT_HOSTS: ClassVar[dict[str, str]] = {"api.x.ai": "xai", "api.openai.com": "openai"}
+    _account_warned: ClassVar[set[str]] = set()
+
+    @classmethod
+    def _key_or_account_bearer(cls, explicit_key: str, endpoint: str) -> str:
+        """Explicit key wins. Without one, fall back to a signed-in account token
+        when ``endpoint`` is on a host that accepts it (``api.x.ai``). For
+        ``api.openai.com`` the account token is identity-only: warn once and
+        return the empty key so callers keep their "no key" behaviour.
+        """
+        if explicit_key:
+            return explicit_key
+        try:
+            host = (urlsplit(endpoint).hostname or "").lower()
+        except ValueError:
+            return ""
+        provider = cls._ACCOUNT_HOSTS.get(host)
+        if provider is None:
+            return ""
+        from .account_auth import AccountAuthError, resolve_bearer
+
+        try:
+            resolution = resolve_bearer(provider, "")
+        except AccountAuthError:
+            return ""
+        if resolution.warning and provider not in cls._account_warned:
+            import warnings
+
+            cls._account_warned.add(provider)
+            warnings.warn(resolution.warning, UserWarning, stacklevel=3)
+        return resolution.bearer if resolution.usable else ""
+
+    def get_tts_api_key(self) -> str:
+        """API key for TTS: explicit TTS key, else the STT key, else the generic key."""
+        return self.tts_api_key or self.get_stt_api_key()
+
+    def get_tts_endpoint(self) -> str:
+        """TTS endpoint: explicit, else xAI's when the STT provider is xAI, else empty."""
+        if self.tts_endpoint:
+            return self.tts_endpoint
+        if self._endpoint_provider(self.stt_endpoint) == "xai":
+            return XAI_TTS_ENDPOINT
+        return ""
+
+    def get_stt_live_endpoint(self) -> str:
+        """Live STT websocket: explicit, else derived from the STT endpoint host."""
+        if self.stt_live_endpoint:
+            return self.stt_live_endpoint
+        provider = self._endpoint_provider(self.stt_endpoint)
+        if provider == "xai":
+            return XAI_STT_LIVE_ENDPOINT
+        if provider == "libraxis":
+            return LIBRAXIS_STT_LIVE_ENDPOINT
+        return ""
 
     def has_stt_fallback(self) -> bool:
         """True when a complete, opt-in STT fallback endpoint is configured."""
@@ -261,7 +362,7 @@ class ScreenScribeConfig:
             endpoint_provider = self._endpoint_provider(endpoint)
 
             if (
-                declared_provider in {"libraxis", "openai"}
+                declared_provider in {"libraxis", "openai", "xai"}
                 and endpoint_provider != declared_provider
             ):
                 errors.append(
@@ -274,9 +375,10 @@ class ScreenScribeConfig:
             if not key or declared_provider == "custom":
                 continue
             key_provider = self._key_provider(key)
-            if endpoint_provider == "openai" and key_provider == "libraxis":
+            if endpoint_provider in {"openai", "xai"} and key_provider == "libraxis":
+                target = "OpenAI" if endpoint_provider == "openai" else "xAI"
                 errors.append(
-                    f"{label} provider mismatch: a LibraxisAI API key would be sent to OpenAI.\n"
+                    f"{label} provider mismatch: a LibraxisAI API key would be sent to {target}.\n"
                     "  No request was sent. Run `screenscribe config setup` and choose LibraxisAI."
                 )
             elif endpoint_provider == "libraxis" and provider in self.openai_env_key_slots:
@@ -297,7 +399,7 @@ class ScreenScribeConfig:
     def recognized_provider(self) -> str:
         """Return the declared or consistently inferred provider identity."""
         declared = self.provider.lower().strip()
-        if declared in {"libraxis", "openai", "custom"}:
+        if declared in {"libraxis", "openai", "xai", "custom"}:
             return declared
         inferred = {
             self._endpoint_provider(endpoint)
@@ -339,6 +441,8 @@ class ScreenScribeConfig:
             return "libraxis"
         if host == "openai.com" or host.endswith(".openai.com"):
             return "openai"
+        if host == "x.ai" or host.endswith(".x.ai"):
+            return "xai"
         return None
 
     @staticmethod
@@ -397,6 +501,8 @@ class ScreenScribeConfig:
                 detail = f"an OpenAI-style API key is configured for the {ep_provider} endpoint"
             elif ep_provider == "openai" and key_provider == "libraxis":
                 detail = "a LibraxisAI API key is configured for the openai.com endpoint"
+            elif ep_provider == "xai" and key_provider == "libraxis":
+                detail = "a LibraxisAI API key is configured for the api.x.ai endpoint"
             elif ep_provider == "openai" and key_provider is None:
                 detail = "a non-OpenAI-style API key is configured for the openai.com endpoint"
             else:
@@ -505,6 +611,11 @@ class ScreenScribeConfig:
             "SCREENSCRIBE_STT_FALLBACK_ENDPOINT": "stt_fallback_endpoint",
             "SCREENSCRIBE_STT_FALLBACK_API_KEY": "stt_fallback_api_key",  # pragma: allowlist secret
             "SCREENSCRIBE_STT_FALLBACK_MODEL": "stt_fallback_model",
+            # Text-to-speech (xAI) and live STT websocket gateway
+            "SCREENSCRIBE_TTS_ENDPOINT": "tts_endpoint",
+            "SCREENSCRIBE_TTS_API_KEY": "tts_api_key",  # pragma: allowlist secret
+            "SCREENSCRIBE_TTS_VOICE": "tts_voice",
+            "SCREENSCRIBE_STT_LIVE_ENDPOINT": "stt_live_endpoint",
             # Models
             "SCREENSCRIBE_STT_MODEL": "stt_model",
             "SCREENSCRIBE_LLM_MODEL": "llm_model",
@@ -555,6 +666,8 @@ class ScreenScribeConfig:
         "llm_endpoint",
         "vision_endpoint",
         "stt_fallback_endpoint",
+        "tts_endpoint",
+        "stt_live_endpoint",
     )
     _BOOL_ATTRS = ("use_vision_analysis", "llm_merge_enabled")
 
@@ -627,6 +740,15 @@ class ScreenScribeConfig:
         # generic "api_key" substring, so it must win before the broader checks).
         if "stt_fallback_api_key" in key_lower:
             self.stt_fallback_api_key = value
+        # TTS + live STT (checked before the broader "api_key"/"stt_endpoint" substrings)
+        elif "tts_api_key" in key_lower:
+            self.tts_api_key = value
+        elif "tts_endpoint" in key_lower:
+            self.tts_endpoint = value.rstrip("/")
+        elif "tts_voice" in key_lower:
+            self.tts_voice = value
+        elif "stt_live_endpoint" in key_lower:
+            self.stt_live_endpoint = value.rstrip("/")
         elif "stt_fallback_endpoint" in key_lower:
             self.stt_fallback_endpoint = value.rstrip("/")
         elif "stt_fallback_model" in key_lower:
@@ -761,6 +883,16 @@ class ScreenScribeConfig:
                 self.stt_fallback_model,
                 "whisper-1",
             ),
+            "",
+            "# Live STT websocket gateway (xAI wss://api.x.ai/v1/stt or LibraxisAI stt-ws-v1)",
+            self._emit_optional(
+                "SCREENSCRIBE_STT_LIVE_ENDPOINT", self.stt_live_endpoint, "wss://api.x.ai/v1/stt"
+            ),
+            "",
+            "# TTS: Text-to-Speech (xAI only for now; key falls back to the STT key)",
+            self._emit_optional("SCREENSCRIBE_TTS_ENDPOINT", self.tts_endpoint, XAI_TTS_ENDPOINT),
+            self._emit_optional("SCREENSCRIBE_TTS_API_KEY", self.tts_api_key, "YOUR_TTS_KEY"),
+            self._emit_optional("SCREENSCRIBE_TTS_VOICE", self.tts_voice, XAI_TTS_VOICE),
             "",
             "# LLM: Language Model (Responses API - supports previous_response_id chaining)",
             f"SCREENSCRIBE_LLM_ENDPOINT={self.llm_endpoint}",

@@ -172,9 +172,12 @@ The self-serve path is the provider setup wizard:
 screenscribe config setup
 ```
 
-Choose **LibraxisAI**, **OpenAI**, or a **Custom OpenAI-compatible provider
-(advanced)**. The custom path asks for a base URL and provider-specific STT,
-LLM, and vision model names, with an example beside every prompt.
+Choose **LibraxisAI**, **OpenAI**, **xAI**, or a **Custom OpenAI-compatible
+provider (advanced)**. The custom path asks for a base URL and provider-specific
+STT, LLM, and vision model names, with an example beside every prompt. The xAI
+preset routes STT to `https://api.x.ai/v1/stt` (word-level timing, no model
+name), LLM/vision to `https://api.x.ai/v1/responses` (`grok-4.6`), and enables
+`screenscribe tts` and `screenscribe transcribe --live`.
 The wizard reads the API key through a hidden prompt and atomically writes one
 coherent set of key, endpoints, and compatible models. A known OpenAI↔LibraxisAI
 mismatch blocks before any request is sent. Custom endpoints remain available
@@ -312,6 +315,15 @@ Transcribe a video's audio to plain text, with no analysis.
 uv run screenscribe transcribe demo.mov                 # print to stdout
 uv run screenscribe transcribe demo.mov -o transcript.txt
 uv run screenscribe transcribe demo.mov --local --lang en
+```
+
+### `screenscribe tts`
+
+Synthesize speech from text through xAI TTS (`POST /v1/tts`). Requires the xAI
+preset or `SCREENSCRIBE_TTS_ENDPOINT` + `SCREENSCRIBE_TTS_API_KEY`.
+
+```bash
+screenscribe tts "Dzień dobry" --out hello.mp3 --language pl --voice eve
 ```
 
 ### `screenscribe preprocess`

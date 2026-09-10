@@ -138,7 +138,7 @@ def test_file_path_falls_back_to_json_when_the_server_rejects_verbose_json(
     auth_kwargs = {"api" + "_key": "test-key"}
 
     result = transcribe_audio(
-        audio_path, language="en", stt_endpoint=ENDPOINT, stt_model="gpt-transcribe", **auth_kwargs
+        audio_path, language="en", stt_endpoint=ENDPOINT, stt_model="vendor-stt-x", **auth_kwargs
     )
 
     # One rejected verbose_json request, then exactly one json retry.
@@ -162,7 +162,7 @@ def test_refusal_is_remembered_per_endpoint_and_model(
             audio_path,
             language="en",
             stt_endpoint=ENDPOINT,
-            stt_model="gpt-transcribe",
+            stt_model="vendor-stt-x",
             **auth_kwargs,
         )
 
@@ -215,7 +215,7 @@ def test_flat_error_body_without_param_still_triggers_fallback(
     auth_kwargs = {"api" + "_key": "test-key"}
 
     result = transcribe_audio(
-        audio_path, language="en", stt_endpoint=ENDPOINT, stt_model="gpt-transcribe", **auth_kwargs
+        audio_path, language="en", stt_endpoint=ENDPOINT, stt_model="vendor-stt-x", **auth_kwargs
     )
 
     assert posted == ["verbose_json", "json"]
